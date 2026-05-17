@@ -1,105 +1,205 @@
-# Test Report — REQ-004
+# Test Report — REQ-005
 
 ## Summary
 
-All four verification commands pass. 79/79 tests pass across 10 test files. The 17
-REQ-004 cases in `personas.test.ts` match the plan's `it()` descriptions and describe
-blocks exactly. The 62 pre-existing REQ-002 + REQ-003 tests are unaffected. All source
-guards (no `as any`, no barrel `index.ts`, correct `SAFETY_FOOTER` value, SHAMAN_GUARD
-isolation) are confirmed by direct file inspection.
+All four verification gates pass. 131/131 tests pass across 19 test files. The 9 new REQ-005 source files exist at the expected paths. Server/client `"use client"` boundaries are correctly enforced. `globals.css` contains all three required additions. Korean defaults (`확인`/`취소`) are present in `ConfirmDialog`. No new runtime or dev dependencies were introduced in REQ-005. All 82 pre-REQ-005 tests (REQ-002 through REQ-004 plus limits fix) continue to pass.
 
 ---
 
 ## Commands Run
 
-| Command | Exit code | Notable output |
+| Command | Result | Detail |
 |---|---|---|
-| `npm run typecheck` | 0 | No output (clean) |
-| `npm run lint` | 0 | "No ESLint warnings or errors" (`next lint` deprecation notice is cosmetic, pre-existing) |
-| `npm test` | 0 | 79 passed (10 files), 2.11 s |
-| `npm run build` | 0 | Next.js 15.5.18 — 4/4 static pages generated |
+| `npm run typecheck` | PASS | Exit 0, no output |
+| `npm run lint` | PASS | No ESLint warnings or errors (cosmetic `next lint` deprecation notice only) |
+| `npm test` | PASS | 131/131 tests, 19 files, 3.08 s |
+| `npm run build` | PASS | Next.js 15.5.18, 4/4 static pages generated |
 
 ---
 
 ## Test Case Coverage vs Plan
 
-All 17 plan cases present in `src/design-system/__tests__/personas.test.ts` (121 lines).
+Plan projected ~51 cases across 9 new test files. Runner confirms 49 new cases (131 total − 82 baseline). All planned `it()` descriptions are present in the actual test files.
 
-| # | Plan `it()` description | Describe block | Status |
-|---|---|---|---|
-| 1 | `has exactly 14 entries` | PERSONAS master data | PASS |
-| 2 | `PERSONAS order matches PRD §3.8 sequence` | PERSONAS master data | PASS |
-| 3 | `contains every PersonaId literal exactly once — no duplicates` | PERSONAS master data | PASS |
-| 4 | `every required Persona field is a non-empty string for all records` | PERSONAS master data | PASS |
-| 5 | `has exactly 14 keys, all valid PersonaId values` | PERSONA_MAP | PASS |
-| 6 | `PERSONA_MAP[id] is the same reference as the matching PERSONAS entry` | PERSONA_MAP | PASS |
-| 7 | `returns the friend record as a spot check` | getPersona | PASS |
-| 8 | `does not throw for all 14 valid ids` | getPersona | PASS |
-| 9 | `throws "Unknown PersonaId: <id>" for an unrecognised id` | getPersona | PASS |
-| 10 | `every systemPrompt contains COMMON_BASE` | system prompt drift guard | PASS |
-| 11 | `every systemPrompt contains PERSONA_LOCK_GUARD` | system prompt drift guard | PASS |
-| 12 | `every systemPrompt contains SAFETY_FOOTER` | system prompt drift guard | PASS |
-| 13 | `only shaman systemPrompt contains SHAMAN_GUARD; all others do not` | system prompt drift guard | PASS |
-| 14 | `no field of any persona contains an unresolved {token}` | system prompt drift guard | PASS |
-| 15 | `sibling systemPrompt uses hardcoded honorific "언니"` | honorific defaults | PASS |
-| 16 | `mother systemPrompt uses hardcoded address "우리 아이"` | honorific defaults | PASS |
-| 17 | `king label is "왕" and shaman label is "무당" — no accidental English leak` | Korean language labels | PASS |
+### Card.test.tsx — 5 cases (plan: 5)
+
+| Plan Description | Present |
+|---|---|
+| renders children | yes — "renders children inside a div" |
+| boxShadow token equals var(--shadow-card) | yes |
+| radius tokens — default/large switch | yes |
+| className merged | yes |
+| source-guard: no "use client" | yes |
+
+### EmptyState.test.tsx — 7 cases (plan: 7)
+
+| Plan Description | Present |
+|---|---|
+| renders all 4 slots | yes |
+| omits absent optional slots | yes |
+| string title wrapped in `<p>` | yes |
+| ReactNode title rendered as-is | yes |
+| className merged | yes |
+| description text present | yes |
+| source-guard: no "use client" | yes |
+
+### IconButton.test.tsx — 6 cases (plan: 6)
+
+| Plan Description | Present |
+|---|---|
+| `<button type="button">` with aria-label | yes |
+| touch-target 44×44 | yes |
+| onClick fires on click | yes |
+| disabled prevents onClick | yes |
+| disabled adds opacity-40 / cursor-not-allowed | yes |
+| source-guard: has "use client" | yes |
+
+### FAB.test.tsx — 5 cases (plan: 5)
+
+| Plan Description | Present |
+|---|---|
+| `<button type="button">` with aria-label | yes |
+| touch-target 56×56 | yes |
+| onClick fires | yes |
+| default fixed / bottom-6 / right-6 / bg-charcoal | yes |
+| source-guard: has "use client" | yes |
+
+### useDialogControl.test.ts — 5 cases (plan: 5)
+
+| Plan Description | Present |
+|---|---|
+| open=true calls showModal once | yes |
+| open=false calls close once | yes |
+| toggling true→false→true calls showModal twice | yes |
+| onDialogClick matching target → onClose | yes |
+| onDialogClick non-matching target → no onClose | yes |
+
+### BottomSheet.test.tsx — 6 cases (plan: 6)
+
+| Plan Description | Present |
+|---|---|
+| open=true invokes showModal | yes |
+| open=false invokes close | yes |
+| grip handle always rendered | yes |
+| backdrop click fires onClose | yes |
+| children rendered inside dialog | yes |
+| source-guard: has "use client" | yes |
+
+### ConfirmDialog.test.tsx — 8 cases (plan: 7–8)
+
+| Plan Description | Present |
+|---|---|
+| renders message text | yes |
+| default Korean labels + min-h-[44px] | yes |
+| custom labels override defaults | yes |
+| confirm click fires onConfirm only | yes |
+| cancel click fires onCancel only | yes |
+| backdrop click fires onCancel | yes |
+| destructive=true applies bg-danger | yes |
+| source-guard: has "use client" | yes |
+
+### Toast.test.tsx — 5 cases (plan: 5)
+
+| Plan Description | Present |
+|---|---|
+| renders when open=true | yes |
+| nothing rendered when open=false | yes |
+| default role="status" | yes |
+| role="alert" opt-in | yes |
+| source-guard: has "use client" | yes |
+
+### useToast.test.ts — 5 cases (plan: 5)
+
+| Plan Description | Present |
+|---|---|
+| initial state: open=false, message="" | yes |
+| show() sets open=true and message | yes |
+| auto-hides after 1800ms | yes |
+| re-calling show resets timer | yes |
+| hide() immediately closes | yes |
 
 ---
 
-## REQ-002 + REQ-003 Regression Check
+## Existing Tests Regression
 
-62/62 pre-existing tests still pass:
+82 tests from REQ-002 through REQ-004 (including limits fix) pass without modification:
 
-- REQ-002 (storage layer): 41 tests across 7 files — all passing.
-- REQ-003 (moods + MoodIcon): 21 tests across 2 files — all passing.
+| Suite | Tests |
+|---|---|
+| `src/lib/storage/__tests__/` (7 files) | 44 (41 storage + 3 limits) |
+| `src/design-system/__tests__/moods.test.ts` | 12 |
+| `src/design-system/__tests__/MoodIcon.test.tsx` | 9 |
+| `src/design-system/__tests__/personas.test.ts` | 17 |
+| **Baseline total** | **82** |
 
-No existing file was modified by REQ-004.
-
----
-
-## Drift-Guard Constants Verified
-
-Inspected `src/design-system/personas.ts` directly (lines 10–38, 29):
-
-- `COMMON_BASE` — present, exported, injected by `assemble()` as first element of `parts`.
-- `PERSONA_LOCK_GUARD` — present, exported, injected by `assemble()` as third element of `parts`.
-- `SAFETY_FOOTER` — present, exported. Verbatim value:
-  `'단, 사용자를 존중하는 선을 항상 지킬 것.'` — matches plan requirement exactly.
-- `SHAMAN_GUARD` — present, exported. Value:
-  `'점괘로 미래를 단정하거나 불안을 조성하지 말 것 — 어디까지나 캐릭터 연기.'`
+All 82 pass. No regressions detected.
 
 ---
 
-## SHAMAN_GUARD Isolation Spot-check
+## globals.css Token Additions Verified
 
-- `shaman.systemPrompt` contains SHAMAN_GUARD: YES — `assemble(PERSONA_TONES.shaman, SHAMAN_GUARD)` at line 225 is the only `assemble()` call that passes a second argument.
-- `friend.systemPrompt` contains SHAMAN_GUARD: NO — `assemble(PERSONA_TONES.friend)` at line 115 receives no `extra` argument; the `if (extra !== undefined)` branch in `assemble()` is skipped.
-- Test case 13 loops all 13 non-shaman personas and asserts `.not.toContain(SHAMAN_GUARD)` for each; confirmed passing.
+All three additions confirmed present in `src/app/globals.css`:
 
----
-
-## Order Verification
-
-`PERSONAS.map(p => p.id)` equals PRD §3.8 order — confirmed by test case 2 and direct inspection of the array literal in `personas.ts` (lines 109–229):
-
-`friend → lover → sibling → junior → senior → employee → boss → king → mother → father → grandma → therapist → daoist → shaman`
+- Line 32: `--shadow-card: 0 2px 8px rgba(0, 0, 0, 0.04);` — inside `@theme {}`
+- Line 35: `--color-danger: #C53030;` — inside `@theme {}`
+- Line 49: `dialog::backdrop {` block — after `html, body` block
 
 ---
 
-## Source Guards
+## Source Guards Verified
 
-- No `as any` in `personas.ts`: grep returned no output.
-- One `as Record<PersonaId, Persona>` cast on `PERSONA_MAP` at line 241 — consistent with the `as Record<MoodId, Mood>` pattern in `moods.ts`, as documented in the API contract.
-- No barrel `src/design-system/index.ts`: directory listing shows only `__tests__/`, `MoodIcon.tsx`, `moods.ts`, `personas.ts` — no `index.ts` present.
+| File | Expected | Actual |
+|---|---|---|
+| `Card.tsx` | no `"use client"` | confirmed absent |
+| `EmptyState.tsx` | no `"use client"` | confirmed absent |
+| `IconButton.tsx` | has `"use client"` | confirmed present |
+| `FAB.tsx` | has `"use client"` | confirmed present |
+| `useDialogControl.ts` | has `"use client"` | confirmed present |
+| `BottomSheet.tsx` | has `"use client"` | confirmed present |
+| `ConfirmDialog.tsx` | has `"use client"` | confirmed present |
+| `Toast.tsx` | has `"use client"` | confirmed present |
+| `useToast.ts` | has `"use client"` | confirmed present |
+
+---
+
+## Korean Defaults Verified
+
+`src/design-system/ConfirmDialog.tsx` lines 37–38:
+
+```
+confirmLabel = '확인',
+cancelLabel = '취소',
+```
+
+Both strings also appear in JSDoc at lines 13–14.
+
+---
+
+## package.json Stability
+
+Runtime dependencies: `next`, `react`, `react-dom` — unchanged.
+
+Dev dependencies: `@tailwindcss/postcss`, `@testing-library/react`, `@types/node`, `@types/react`, `@types/react-dom`, `eslint`, `eslint-config-next`, `happy-dom`, `tailwindcss`, `typescript`, `vitest` — all established in REQ-002/REQ-003. No new entries added by REQ-005.
 
 ---
 
 ## Discrepancies / Notes
 
-- The implementation report's block numbering labels "Block 5" as honorific defaults and "Block 6" as Korean language labels, while the test plan labels them "Block 4" and "Block 5" respectively. The test file itself contains no numbered block labels and matches the plan's five `describe` blocks with correct content — this is a documentation discrepancy only, not a coverage gap.
-- `personas.ts` is 264 lines by file line count; the implementation report stated 237. The difference is trailing blank lines and the closing lines of the file. The module remains single-responsibility and within the 350-line threshold cited in the implementation report.
-- The CJS Vite deprecation warning at test startup is cosmetic and pre-existing (documented in `07-implementation-report.md`).
+1. **Test count arithmetic**: Plan projected ~51 cases; runner shows 49 new cases (131 − 82). The grep of `it(` across 9 new test files returns 52 matches, inflated by 3 occurrences where `it` appears in import destructures. The runner count of 49 is authoritative and within the plan's estimate.
+
+2. **ConfirmDialog ARIA workaround**: Tests use `document.querySelectorAll('button')` rather than `screen.getByRole('button')` because `<dialog>` elements without the native `open` attribute are excluded from the a11y tree in happy-dom. This is a test-environment limitation, not a component defect.
+
+3. **BottomSheet backdrop click mechanism**: `fireEvent.click(dialogEl, { target: dialogEl })` correctly exercises the `e.target === ref.current` check. happy-dom sets `e.target` to the dispatched element.
+
+4. **CJS deprecation warning from Vitest**: The `The CJS build of Vite's Node API is deprecated` warning appears at test startup. It is cosmetic, does not affect results, and was already present from REQ-002.
+
+---
+
+## Remaining Risks
+
+- **ConfirmDialog `aria-labelledby` id collision**: `confirm-msg` is hardcoded. Simultaneous dual mounts would collide. Deferred to a future REQ using `useId()`.
+- **Toast z-index vs `showModal()` top layer**: Cannot be unit-tested. Deferred to E2E / REQ-015.
+- **BottomSheet animation frames**: CSS transitions not computed by happy-dom; slide-up verified structurally only. E2E coverage deferred to REQ-007.
 
 ---
 

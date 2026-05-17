@@ -28,6 +28,12 @@
   --radius-card: 16px;
   --radius-card-lg: 20px;
 
+  /* Shadows — PRD §1.6.6 */
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.04);
+
+  /* Semantic colors — PRD §5.4 */
+  --color-danger: #C53030;
+
   /* Type stack — PRD §1.6.3 */
   --font-sans: "Pretendard", "Spoqa Han Sans Neo", system-ui, -apple-system,
     sans-serif;
@@ -38,4 +44,8 @@ body {
   background-color: var(--color-cream);
   color: var(--color-charcoal);
   font-family: var(--font-sans);
+}
+
+dialog::backdrop {
+  background-color: rgba(0, 0, 0, 0.4);
 }

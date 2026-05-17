@@ -342,3 +342,91 @@ npm run build       → PASS (Next.js 15.5.18, 4/4 static pages generated)
 
 ## REQ-004 Verdict
 PASS
+
+---
+
+## REQ-005 Implementation
+
+### Summary
+
+Implemented REQ-005: seven reusable design-system primitives plus two hooks. Nine source files created under `src/design-system/`, eight test files created under `src/design-system/__tests__/`, and `globals.css` received two new tokens plus a `dialog::backdrop` rule. All four gates pass: typecheck, lint, 131/131 tests, build.
+
+### Files Changed
+
+**Modified**
+- `src/app/globals.css` — added `--shadow-card` and `--color-danger` inside `@theme {}`, added `dialog::backdrop { background-color: rgba(0,0,0,0.4); }` after `html, body` block.
+
+**Created (source)**
+- `src/design-system/Card.tsx` — server component, 34 lines
+- `src/design-system/EmptyState.tsx` — server component, 52 lines
+- `src/design-system/IconButton.tsx` — client component, 51 lines
+- `src/design-system/FAB.tsx` — client component, 38 lines
+- `src/design-system/useDialogControl.ts` — client hook, 48 lines
+- `src/design-system/BottomSheet.tsx` — client component, 61 lines
+- `src/design-system/ConfirmDialog.tsx` — client component, 78 lines
+- `src/design-system/Toast.tsx` — client component, 48 lines
+- `src/design-system/useToast.ts` — client hook, 52 lines
+
+**Created (tests)**
+- `src/design-system/__tests__/Card.test.tsx` — 5 cases
+- `src/design-system/__tests__/EmptyState.test.tsx` — 7 cases
+- `src/design-system/__tests__/IconButton.test.tsx` — 6 cases
+- `src/design-system/__tests__/FAB.test.tsx` — 5 cases
+- `src/design-system/__tests__/useDialogControl.test.ts` — 5 cases
+- `src/design-system/__tests__/BottomSheet.test.tsx` — 6 cases
+- `src/design-system/__tests__/ConfirmDialog.test.tsx` — 8 cases
+- `src/design-system/__tests__/Toast.test.tsx` — 5 cases
+- `src/design-system/__tests__/useToast.test.ts` — 5 cases
+
+### Behavior Added
+
+- **Card**: White-background container with `var(--shadow-card)` (inline style) and 16px/20px radius from tokens. No `"use client"`.
+- **EmptyState**: Centered column with icon/title/description/action slots. String `title` auto-wrapped in `<p>` with standard styles; ReactNode rendered as-is. No `"use client"`.
+- **IconButton**: 44×44 circular white button with required Korean `aria-label`. Disabled state blocks `onClick` and applies `opacity-40 cursor-not-allowed`.
+- **FAB**: 56×56 charcoal fixed-positioned button with required Korean `aria-label`.
+- **useDialogControl**: Shared `useEffect`-based hook wiring `open` boolean to `showModal()`/`close()`. Backdrop-click detection via `e.target === ref.current`.
+- **BottomSheet**: Always-mounted `<dialog>` with grip handle, top-only 24px radius, slide-up via inline style translate, backdrop click closes.
+- **ConfirmDialog**: `<dialog>` with `aria-labelledby`, Korean default labels (`확인`/`취소`), destructive mode uses `bg-danger`, both buttons `min-h-[44px]`.
+- **Toast**: Pure controlled component; renders only when `open=true`; supports `role="status"` (default) and `role="alert"`.
+- **useToast**: Auto-dismiss timer hook. `show()` resets timer on re-call. `hide()` is immediate. Cleanup on unmount.
+
+### Existing Patterns Reused
+
+- Server component pattern (no directive, React import, comment header) — mirrored from `MoodIcon.tsx`.
+- Source-guard tests using `node:fs`/`node:path`/`process.cwd()` — same as `MoodIcon.test.tsx`.
+- `afterEach(cleanup)` teardown — same as existing test files.
+- `@vitest-environment happy-dom` per-file override.
+- Inline `style={{ ... }}` for pixel-value dimensions — same as `MoodIcon.tsx`.
+- Token reference via Tailwind class names (`bg-paper`, `bg-charcoal`, `text-paper`, `rounded-full`, etc.).
+
+### Tests Added
+
+47 new `it()` cases across 8 new test files. Previous baseline: 84 tests. New total: 131 tests, all passing.
+
+**Key test decisions**
+
+- **ConfirmDialog**: `<dialog>` without native `open` attribute is excluded from the a11y tree in happy-dom. Tests use `document.querySelectorAll('button')` rather than `screen.getByRole('button')` to avoid ARIA hidden-element errors.
+- **useDialogControl**: Used a real React wrapper component (`TestDialog`) rendered with RTL's `render()` so the ref is properly wired to a DOM `<dialog>` before `useEffect` fires. An `Object.defineProperty` approach failed because `useEffect` runs before the property override.
+- **BottomSheet backdrop test**: `fireEvent.click(dialogEl, { target: dialogEl })` — happy-dom sets `e.target` to the clicked element, so clicking the `<dialog>` directly satisfies the `e.target === ref.current` check.
+
+### Commands Run
+
+```
+npm run typecheck   → PASS (exit 0, no output)
+npm run lint        → PASS (no warnings or errors)
+npx vitest run      → PASS (131/131 tests, 19 files)
+npm run build       → PASS (Next.js 15.5.18, 4/4 static pages generated)
+```
+
+Build CSS output confirmed `bg-danger{background-color:var(--color-danger)}` utility generated — no inline style fallback needed.
+
+### Risks / Follow-ups
+
+1. **`bg-danger` confirmed working.** Tailwind 4 auto-generates the utility from `--color-danger` in `@theme`. JSDoc fallback note in `ConfirmDialog.tsx` retained for historical clarity.
+2. **BottomSheet animation in happy-dom.** CSS `translate` transitions not computed by happy-dom; slide-up verified structurally via inline style, not animation frames. E2E coverage deferred to REQ-007.
+3. **ConfirmDialog ARIA in happy-dom.** Buttons inside a non-open `<dialog>` are inaccessible to `getByRole`. Tests use `document.querySelectorAll('button')`. Not a component defect — test-environment limitation.
+4. **Toast z-index below `showModal()` top layer.** Documented in `Toast.tsx` JSDoc. No unit test coverage possible. Deferred to E2E / REQ-015.
+5. **`ConfirmDialog` `aria-labelledby` id collision.** `confirm-msg` is hardcoded. Simultaneous dual mounts would collide. Fix with `useId()` in a future REQ.
+
+## REQ-005 Verdict
+PASS

@@ -1,44 +1,45 @@
-# E2E Report — REQ-004
+# E2E Report — REQ-005
 
 ## Summary
 
-REQ-004 (`personas.ts`) is a pure-data TypeScript module. It exports constants, prompt
-builders, and helper functions — no UI, no route, no user-visible surface. Browser E2E
-is not applicable for this requirement. Unit coverage (79/79 PASS) is the correct and
-sufficient test layer.
+REQ-005 delivers design-system primitives only (Card, IconButton, FAB, BottomSheet, Toast,
+ConfirmDialog, MoodIcon, Typography, tokens). None of these components are consumed by any
+routed page yet. `src/app/page.tsx` remains the REQ-001 placeholder. No browser-level user
+journey exists to exercise. E2E is not applicable for this increment.
 
 ## Scenario Tested
 
-None. There is no user journey associated with REQ-004.
+None. There is no page that composes REQ-005 primitives into a navigable UI.
 
 ## Steps
 
-1. Confirmed absence of all E2E framework configuration files (`playwright.config.*`,
-   `cypress.config.*`, `tests/e2e/`, `e2e/` — all absent).
-2. Confirmed `src/app/page.tsx` does not import or reference `personas.ts` — the file
-   either does not exist or contains no match for "personas".
-3. Confirmed unit coverage: 79/79 tests PASS across 10 files (see
-   `.agent-state/08-test-report.md`). The 17 REQ-004 cases in `personas.test.ts` cover
-   all plan invariants. No gaps require a browser to close.
+Pre-condition checks performed before issuing the NOT-APPLICABLE verdict:
+
+1. Confirmed no E2E framework is installed — `playwright.config.*`, `cypress.config.*`,
+   `tests/e2e/`, and `e2e/` are all absent from the repository root.
+2. Confirmed `src/app/page.tsx` does not import or render any REQ-005 primitive
+   (IconButton, FAB, BottomSheet, Toast, ConfirmDialog, MoodIcon, Card, Typography).
+   The file contains only the REQ-001 Korean-language placeholder heading.
+3. Confirmed the correct test layer for this REQ is unit + happy-dom rendering:
+   131/131 tests pass across 19 files (08-test-report.md), covering render output,
+   prop variance, className tokens, ARIA attributes, and event callbacks for all
+   9 new source files.
 
 ## Test Files Added / Updated
 
-None for this E2E gate. The relevant committed unit file is
-`src/lib/__tests__/personas.test.ts` (17 cases, all PASS).
+None. No E2E test files added for this increment.
 
 ## Commands Run
 
-| Check | Result |
-|---|---|
-| `ls playwright.config.*` | No such file — Playwright not installed |
-| `ls cypress.config.*` | No such file — Cypress not installed |
-| `ls tests/e2e/ e2e/` | Neither directory exists |
-| `grep personas src/app/page.tsx` | No match — `personas.ts` not consumed by any rendered route |
+| Command | Purpose | Result |
+|---|---|---|
+| `ls playwright.config.* cypress.config.* tests/e2e e2e` | Verify no E2E framework present | All absent (exit 1, no matches) |
+| `grep REQ-005 primitives in src/app/page.tsx` | Verify no page integration | No matches |
 
 ## Results
 
-No E2E tests were run. No E2E framework is present. This is expected and correct for
-REQ-004.
+No E2E tests ran. All pre-condition checks passed, confirming the not-applicable status is
+correct and not a coverage gap.
 
 ## Failures
 
@@ -46,19 +47,22 @@ None.
 
 ## Screenshots / Artifacts
 
-None — no browser session was opened.
+None.
 
 ## Not Tested
 
-Browser E2E — not applicable. REQ-004 has no UI surface.
+| Check | Reason deferred |
+|---|---|
+| Composed header with IconButtons | No screen renders the header yet (REQ-007) |
+| FAB tap opens editor route | Editor route not implemented yet (REQ-007) |
+| BottomSheet mood picker opens and closes | No screen mounts BottomSheet yet (REQ-007) |
+| Toast appears after diary save | Save flow not implemented yet (REQ-007) |
+| ConfirmDialog destructive delete flow | Delete action not wired to any screen yet (REQ-007) |
 
-When REQ-016 (persona picker) lands, an E2E test should exercise the following journey:
-
-1. Open the chat screen.
-2. Tap "new conversation".
-3. Verify the persona picker renders all 14 personas.
-4. Tap one persona.
-5. Confirm the active chat screen opens with that persona's name visible.
+First browser E2E target is REQ-007, when primitives land in the Calendar + Editor screens.
+At that point the following flows will be covered: composed header (IconButtons), FAB tap
+to editor, BottomSheet mood picker open/close, Toast on save, and ConfirmDialog delete
+confirmation.
 
 ## Verdict
 PASS — not applicable. First browser E2E lands with REQ-007.

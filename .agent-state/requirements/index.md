@@ -23,7 +23,7 @@ PRD §8.3의 P2 항목(임베딩 RAG / PWA / 클라우드 동기화 / 알림 / s
 | REQ-002 | 데이터 모델 및 localStorage 저장 레이어 | DONE | REQ-001 | High |
 | REQ-003 | 무드 마스터 데이터 + MoodIcon 컴포넌트 | DONE | REQ-001 | Low |
 | REQ-004 | 페르소나 마스터 데이터 (14종) + system prompt | DONE | REQ-001 | Medium |
-| REQ-005 | 디자인 시스템 프리미티브 | TODO | REQ-001 | Medium |
+| REQ-005 | 디자인 시스템 프리미티브 | DONE | REQ-001 | Medium |
 | REQ-006 | history-stack 기반 네비게이션 셸 | TODO | REQ-001 | Medium |
 | REQ-007 | 메인 캘린더 화면 | TODO | REQ-002, REQ-003, REQ-005, REQ-006 | Medium |
 | REQ-008 | 무드 선택 바텀시트 모달 | TODO | REQ-002, REQ-003, REQ-005 | Low |

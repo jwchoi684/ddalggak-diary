@@ -1,198 +1,232 @@
-# Technical Design — REQ-004
+# Technical Design — REQ-005
 
 ## Goal
 
-Deliver `src/design-system/personas.ts` — the single master-data module that exposes 14 `Persona` records (one per `PersonaId`), derived `PERSONA_MAP`, `getPersona(id)` helper, and named drift-guard constants so downstream REQs and tests can import everything from one location without knowing about assembly internals.
+Produce seven reusable design-system primitives for 딸깍일기. Every subsequent screen REQ composes from these atoms. All primitives live in `src/design-system/`, consume only `globals.css @theme` tokens, hold to ≤ 100 lines per file, and ship with matching Vitest specs.
 
-## File Layout
+---
+
+## Resolved Unknowns
+
+**1. `--color-danger` exact value: `#C53030`**
+
+Contrast ratios against `#FFFFFF` (background of confirm button):
+
+| Candidate | Ratio | WCAG AA 4.5:1 normal |
+|---|---|---|
+| `#E05C5C` (architecture pick) | ~3.8:1 | FAIL |
+| `#D32F2F` | ~4.4:1 | Borderline FAIL |
+| `#C53030` | ~5.4:1 | PASS |
+| `#B91C1C` | ~6.3:1 | PASS, too dark for pastel palette |
+
+`#C53030` passes WCAG AA at 14px button text, harmonizes with desaturated mood palette, sits between `--color-mood-angry: #F4A6A6` and full crimson. Selected.
+
+**2. Toast z-index vs `<dialog>` top layer**
+
+`showModal()` places `<dialog>` in the browser top layer — above any z-index. A `position: fixed` div Toast cannot exceed it.
+
+Strategy: Toast is non-modal status indicator for non-modal contexts (entry saved, action confirmed). PRD shows no scenario where a toast fires inside a BottomSheet/ConfirmDialog. Document constraint in `Toast.tsx` JSDoc. Future: if a REQ needs toast-from-modal, render the `<div>` inside the `<dialog>` DOM subtree as a child.
+
+**3. `EmptyState.title` type: `ReactNode`**
+
+`title: ReactNode` lets callers pass `<h2>`, `<p>`, or string without API change. String value wrapped in `<p className="text-lg text-charcoal font-medium">`; ReactNode rendered as-is. Implemented with `typeof title === 'string'` branch.
+
+---
+
+## File Layout (with line budgets)
 
 ```
+src/app/globals.css                          existing — additive (~+6 lines)
+
 src/design-system/
-  personas.ts                   ← new (200–350 lines; constant-table exception applies)
-  __tests__/
-    personas.test.ts            ← new (~80 lines)
+  Card.tsx                                   server   ≤ 45 lines
+  EmptyState.tsx                             server   ≤ 70 lines
+  IconButton.tsx                             client   ≤ 55 lines
+  FAB.tsx                                    client   ≤ 55 lines
+  useDialogControl.ts                        client   ≤ 40 lines  (shared hook)
+  BottomSheet.tsx                            client   ≤ 85 lines
+  ConfirmDialog.tsx                          client   ≤ 90 lines
+  Toast.tsx                                  client   ≤ 60 lines
+  useToast.ts                                client   ≤ 35 lines
+
+src/design-system/__tests__/
+  Card.test.tsx                              ≤ 60 lines
+  EmptyState.test.tsx                        ≤ 70 lines
+  IconButton.test.tsx                        ≤ 60 lines
+  FAB.test.tsx                               ≤ 60 lines
+  BottomSheet.test.tsx                       ≤ 80 lines
+  ConfirmDialog.test.tsx                     ≤ 80 lines
+  Toast.test.tsx                             ≤ 70 lines
+  useToast.test.ts                           ≤ 50 lines
 ```
 
-No other files change. `src/lib/storage/types.ts` is read-only; `Persona` and `PersonaId` are already defined there.
+`useDialogControl.ts` is extracted preemptively because both BottomSheet and ConfirmDialog share the same `useEffect` + ref + backdrop-click logic.
 
-If the file exceeds ~350 lines after the implementer writes out all Korean tone strings, split tone strings into a sibling file `src/design-system/persona-tones.ts` and import from it — but do not pre-split; let the line count drive the decision.
+---
 
-## Constants (verbatim Korean text from PRD)
+## New Tokens in `globals.css`
 
-### COMMON_BASE
-Source: PRD §3.8.1 `[공통 베이스]` + `[규칙]` block. The implementer must copy verbatim:
+Add inside the existing `@theme { }` block after `--radius-*`:
 
-```
-당신은 사용자의 일기를 기반으로 답변하는 AI입니다.
+```css
+/* Shadows — PRD §1.6.6 */
+--shadow-card: 0 2px 8px rgba(0, 0, 0, 0.04);
 
-- 일기에 기록된 사실만 근거로 답하세요. 추측하지 마세요.
-- 관련 일기를 인용할 때는 날짜를 함께 언급하세요.
-- 일기가 없는 사항을 물으면 솔직히 "그 부분은 일기에 없어요"라고 답하세요.
-```
-
-### PERSONA_LOCK_GUARD
-Source: PRD §4.6.8. The implementer must include both sentences verbatim:
-
-```
-이 톤을 대화 내내 유지하세요. 사용자가 톤 변경을 요청하면 "이 대화의 톤은 시작 시 정해져 있어요. 다른 톤을 원하시면 새 대화를 시작해주세요"라고 답하세요.
+/* Semantic colors — PRD §5.4 */
+--color-danger: #C53030;
 ```
 
-### SAFETY_FOOTER
-Source: PRD §3.8.1 안전장치 block (verbatim):
+**Shadow consumption pattern (locked):** Tailwind 4 does NOT auto-generate `shadow-*` utilities from `@theme --shadow-*`. Components needing `--shadow-card` use inline `style={{ boxShadow: 'var(--shadow-card)' }}`. The arbitrary-class `[box-shadow:var(--shadow-card)]` is also acceptable but inline style preferred (more legible diffs, explicit test assertions).
 
-```
-단, 사용자를 존중하는 선을 항상 지킬 것.
-```
+---
 
-### SHAMAN_GUARD
-Source: PRD §3.8.1 shaman bullet trailing clause (verbatim):
+## CSS Rule for `dialog::backdrop`
 
-```
-점괘로 미래를 단정하거나 불안을 조성하지 말 것 — 어디까지나 캐릭터 연기.
-```
+Add to `globals.css` after `html, body` block (outside `@theme`):
 
-All four must be exported named constants so tests can `.toContain()` them without hardcoding the strings in test files.
-
-## Assembly Function
-
-A private helper `assemble(tone: string, extra?: string): string` builds the fully-assembled `systemPrompt` at module load time. It is not exported.
-
-Standard template (13 personas):
-```
-{COMMON_BASE}\n\n{tone}\n\n{PERSONA_LOCK_GUARD}\n\n{SAFETY_FOOTER}
+```css
+dialog::backdrop {
+  background-color: rgba(0, 0, 0, 0.4);
+}
 ```
 
-Shaman template (1 persona, `extra = SHAMAN_GUARD`):
+Cannot be Tailwind utility; lives in global stylesheet.
+
+---
+
+## Component-by-Component
+
+### 1. Card — server
+- Directive: none
+- Root: `<div>`
+- ARIA: none
+- Props: `{ children: ReactNode; className?: string; large?: boolean }`
+- Token usage: `bg-paper`, `rounded-[var(--radius-card)]` (or large `--radius-card-lg`), `style={{ boxShadow: 'var(--shadow-card)' }}`
+
+### 2. EmptyState — server
+- Directive: none
+- Root: `<div>`
+- Props: `{ icon?: ReactNode; title: ReactNode; description?: string; action?: ReactNode; className?: string }`
+- Title rendering: `if (typeof title === 'string')` wrap in `<p className="text-lg font-medium text-charcoal">`, else render as-is
+- `action` slot is caller's responsibility for touch-target
+
+### 3. IconButton — client
+- Directive: `"use client"`
+- Root: `<button type="button">`
+- ARIA: `aria-label` REQUIRED (Korean, caller-supplied)
+- Props: `{ icon: ReactNode; label: string; onClick: () => void; disabled?: boolean; className?: string }`
+- 44×44 inline style; icon slot 24×24 (caller sizes)
+- Token: `bg-paper`, `rounded-full`; disabled: `opacity-40 cursor-not-allowed`
+
+### 4. FAB — client
+- Directive: `"use client"`
+- Root: `<button type="button">`
+- Props: `{ icon: ReactNode; label: string; onClick: () => void; className?: string }`
+- 56×56 inline style; `bg-charcoal text-paper rounded-full fixed bottom-6 right-6`
+- Caller can override fixed positioning via `className` if needed
+
+### 5. `useDialogControl` hook — client
+- Location: `src/design-system/useDialogControl.ts`
+- Signature: `function useDialogControl(open: boolean, onClose: () => void): { ref: RefObject<HTMLDialogElement | null>; onDialogClick: (e: React.MouseEvent<HTMLDialogElement>) => void }`
+- `useEffect([open])`: when true → `ref.current?.showModal()`; when false → `ref.current?.close()`
+- `onDialogClick`: if `e.target === ref.current`, call `onClose()` (backdrop click detection)
+- `showModal()` called inside `useEffect` (not render) to satisfy React rules + avoid SSR mismatch
+
+### 6. BottomSheet — client
+- Directive: `"use client"`
+- Root: `<dialog>` via `useDialogControl`
+- ARIA: native `<dialog>` with `showModal()` provides `role="dialog"` + `aria-modal="true"`
+- Props: `{ open: boolean; onClose: () => void; children: ReactNode; className?: string }`
+- Token: `bg-paper`, top-radius `style={{ borderRadius: '24px 24px 0 0' }}`, grip handle `<div className="bg-meta w-10 h-1 rounded-full mx-auto mb-4">`
+- Slide-up: plain CSS transition `translate(0, 100%)` → `translate(0, 0)` toggled by `data-open` attribute
+- `<dialog>` always mounted (kept in DOM); CSS class toggles visual state
+
+### 7. Toast — client
+- Directive: `"use client"`
+- Root: `<div role="status">` (or `"alert"` if caller opts in)
+- Props: `{ message: string; open: boolean; onClose: () => void; role?: 'status' | 'alert'; durationMs?: number; className?: string }`
+- Default `durationMs`: 1800
+- Token: `bg-charcoal text-paper rounded-full fixed bottom-24 px-6 py-3 text-sm`
+- Pure controlled component; auto-dismiss handled by `useToast` hook (separated)
+
+### `useToast` hook — client
+- Location: `src/design-system/useToast.ts`
+- Returns: `{ message: string; open: boolean; show: (message: string, durationMs?: number) => void; hide: () => void }`
+- `show()` sets state + schedules `setTimeout(hide, durationMs)`
+- Effect cleans up timeout on unmount / re-call before timer fires
+
+### 8. ConfirmDialog — client
+- Directive: `"use client"`
+- Root: `<dialog>` via `useDialogControl`
+- ARIA: `aria-labelledby` pointing to message `<p>`
+- Props:
+```ts
+{
+  open: boolean;
+  message: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  confirmLabel?: string;       // default '확인'
+  cancelLabel?: string;        // default '취소'
+  destructive?: boolean;       // default false
+  className?: string;
+}
 ```
-{COMMON_BASE}\n\n{tone}\n\n{PERSONA_LOCK_GUARD}\n\n{SHAMAN_GUARD}\n\n{SAFETY_FOOTER}
-```
+- Token: `bg-paper`, `rounded-[var(--radius-card-lg)]` (20px), `style={{ boxShadow: 'var(--shadow-card)' }}`; confirm button bg: `destructive ? 'bg-danger text-paper' : 'bg-charcoal text-paper'`
+- Buttons min 44px height (`min-h-[44px]` or `py-3`)
+- Backdrop click → `onCancel` (via `useDialogControl.onDialogClick`)
+- Controlled: never closes itself; caller flips `open` after `onConfirm`/`onCancel`
 
-The diary corpus (`{diaries_serialized}`) is NOT included here — that is REQ-017's responsibility.
-
-## Per-Persona Tone Strings (PRD subsection mapping)
-
-The implementer extracts the following from PRD §3.8.1 `페르소나별 systemPrompt 내용 (예시)` verbatim. This table maps each persona to its source bullet.
-
-| Order | id | emoji | label | Tone source (PRD §3.8.1 bullet) | sampleGreeting source (PRD §3.8 table) | Extra guard |
-|---|---|---|---|---|---|---|
-| 1 | friend | 👯 | 친구 | `friend` bullet | 오 그날 진짜 빡쳤겠다 ㅠㅠ 무슨 일 있었어? | — |
-| 2 | lover | 💕 | 연인 | `lover` bullet | 자기야, 그날 많이 힘들었구나. 옆에 있어줬어야 했는데... | — |
-| 3 | sibling | 🧒 | 동생 | `sibling` bullet (호칭 기본값: 언니) | 언니~ 그때 그렇게 슬펐어? 나도 막 같이 울고싶다 ㅠㅠ | — |
-| 4 | junior | 🙋 | 후배 | `junior` bullet | 선배님! 그날 많이 힘드셨겠어요. 제가 뭐라도 도울 게 있었으면 좋았을 텐데요 ㅠㅠ | — |
-| 5 | senior | 😎 | 선배 | `senior` bullet | 오~ 그때 슬펐구나. 살다 보면 그런 날도 있는 거지. 내가 경험상 말해주는데, 그런 감정은 흘려보내야 해. | — |
-| 6 | employee | 🧑‍💼 | 부하 직원 | `employee` bullet | ○○님, 해당 일자 일기를 확인해드렸습니다. 참고하실 내용 정리해드리겠습니다. | — |
-| 7 | boss | 👔 | 상사 | `boss` bullet | 5월 13일에 슬픔으로 기록돼 있군. 원인을 정리해서 가져와봐. | — |
-| 8 | king | 👑 | 왕 | `king` bullet | 그대가 5월 13일에 슬픔에 잠겼다 하노라. 짐이 그 연유를 살펴보았느니라. | — |
-| 9 | mother | 🤱 | 어머니 | `mother` bullet (호칭 기본값: 우리 아이) | 아이고 우리 ○○이~ 그날 그렇게 힘들었어? 엄마한테 말하지 그랬어. 밥은 잘 챙겨먹고 있어? | — |
-| 10 | father | 👨‍🦳 | 아버지 | `father` bullet | 5월 13일에 힘들었구나. 그래, 살다 보면 그런 날도 있지. 잘 견뎌냈다. | — |
-| 11 | grandma | 👵 | 할머니 | `grandma` bullet | 아이고 우리 강아지~ 그날 그렇게 힘들었구나. 할미가 안아줄까~ | — |
-| 12 | therapist | 🧘 | 심리상담사 | `therapist` bullet | 5월 13일에 슬픔을 느끼셨군요. 그 감정이 지금도 남아있나요? | — |
-| 13 | daoist | 🧙 | 도사 | `daoist` bullet | 그대의 마음에 흐름이 일고 있느니라. 5월 13일의 슬픔도 자연의 한 자락이라네. | — |
-| 14 | shaman | 🔮 | 무당 | `shaman` bullet (before the guard clause) | 어머~ 5월 13일에 살이 끼었네! 그날 슬픈 일은 액운이 지나간 거였어. 다음 주엔 좋은 일 있을 거야~ | SHAMAN_GUARD |
-
-Notes for the implementer:
-- `sibling` tone string must include the hardcoded default "언니" (not a `{honorific}` token).
-- `mother` tone string must state the default address as "우리 아이" (not `{userName}`).
-- `shaman` tone string is the `shaman` bullet body only, without the trailing `— 어디까지나 캐릭터 연기` clause (that clause becomes `SHAMAN_GUARD` and is appended separately).
-- No curly-brace template tokens may remain in any field of any persona record.
-
-## Public API
-
-```typescript
-import type { Persona, PersonaId } from '@/lib/storage';
-
-// Drift-guard constants — exported for tests
-export const COMMON_BASE: string;
-export const PERSONA_LOCK_GUARD: string;
-export const SAFETY_FOOTER: string;
-export const SHAMAN_GUARD: string;
-
-// Ordered master array — PRD §3.8 table order
-export const PERSONAS: readonly Persona[];   // satisfies readonly Persona[]
-
-// O(1) lookup map
-export const PERSONA_MAP: Record<PersonaId, Persona>;
-
-// Lookup helper — throws on unknown id
-export function getPersona(id: PersonaId): Persona;
-// throws: Error(`Unknown PersonaId: ${id}`)
-```
-
-`PERSONA_MAP` is derived via `Object.fromEntries(PERSONAS.map(p => [p.id, p])) as Record<PersonaId, Persona>`, mirroring `moods.ts` exactly.
-
-`getPersona` mirrors `getMood`: look up in `PERSONA_MAP`, throw if falsy.
-
-## Module Structure Recommendation: `PERSONA_TONES` map vs inline constants
-
-Use a `PERSONA_TONES: Record<PersonaId, string>` map defined above the `PERSONAS` array, rather than 14 separate `const friendTone = "..."` variables. Rationale:
-
-- A map makes the "one tone per persona" invariant visible in structure — a missing key is trivially spotted.
-- It uses the `PersonaId` as the key, so TypeScript catches typos at compile time if typed as `Record<PersonaId, string>`.
-- It keeps the module's top section as four named constants + one map, rather than 18 top-level names.
-- The `assemble(tone, extra?)` helper then becomes a one-liner call in the `PERSONAS` array literal.
+---
 
 ## Implementation Order
 
-1. Copy the four Korean constant strings from PRD §3.8.1 into `COMMON_BASE`, `PERSONA_LOCK_GUARD`, `SAFETY_FOOTER`, `SHAMAN_GUARD`.
-2. Write `assemble(tone, extra?)` private helper.
-3. Write `PERSONA_TONES: Record<PersonaId, string>` with all 14 tone strings from §3.8.1.
-4. Write `PERSONAS` array in PRD §3.8 order using `satisfies readonly Persona[]`. Each `systemPrompt` is `assemble(PERSONA_TONES[id])` (or `assemble(PERSONA_TONES.shaman, SHAMAN_GUARD)` for shaman).
-5. Derive `PERSONA_MAP` via `Object.fromEntries`.
-6. Write `getPersona`.
-7. Write `personas.test.ts`: data-integrity block + drift-guard block. No new devDependencies.
-8. Run `npm test`, `npm run typecheck`, `npm run lint`. Fix any issues.
+1. **`globals.css`** — add 2 tokens + `dialog::backdrop` rule. Run `npm run build` to verify.
+2. **`Card.tsx`** — simplest server primitive; establishes `boxShadow: 'var(--shadow-card)'` pattern.
+3. **`EmptyState.tsx`** — second server primitive; establishes ReactNode title pattern.
+4. **`IconButton.tsx`** — leaf client primitive; establishes `"use client"` + required `aria-label`.
+5. **`FAB.tsx`** — leaf client primitive; fixed positioning.
+6. **`useDialogControl.ts`** — shared hook; unit-testable.
+7. **`BottomSheet.tsx`** — composite client; consumes `useDialogControl`.
+8. **`ConfirmDialog.tsx`** — composite client; consumes `useDialogControl`.
+9. **`Toast.tsx` + `useToast.ts`** — client pair; independent of dialog.
+10. **Tests** — written after sources stable.
 
-## Test Design
+---
 
-Test file: `src/design-system/__tests__/personas.test.ts`. Environment: `node` (global Vitest config). No happy-dom. No new devDeps.
+## Test Design Sketch (handover to test-engineer)
 
-### Data integrity block
-- `PERSONAS.length === 14`
-- Every `PersonaId` literal appears in `PERSONAS` exactly once
-- `PERSONAS` order matches the PRD §3.8 table order exactly
-- `PERSONA_MAP` has exactly 14 keys, all valid `PersonaId` values
-- `getPersona(id)` returns the same reference as `PERSONA_MAP[id]` for each of the 14 ids
-- `getPersona('not-a-real-id' as PersonaId)` throws with message matching `'Unknown PersonaId'`
+All test files: `// @vitest-environment happy-dom`; `afterEach(cleanup)`.
 
-### Drift-guard block
-- For every persona: `systemPrompt` contains `COMMON_BASE` (`.toContain`)
-- For every persona: `systemPrompt` contains `PERSONA_LOCK_GUARD` (`.toContain`)
-- For every persona: `systemPrompt` contains `SAFETY_FOOTER` (`.toContain`)
-- Only shaman: `systemPrompt` contains `SHAMAN_GUARD`; all other 13 personas do NOT contain `SHAMAN_GUARD`
-- For every persona: no field matches `/\{[^}]+\}/` — no unresolved curly-brace tokens
+**Card**: renders children in `<div>`; `boxShadow` style equals `var(--shadow-card)`; `className` on root; source-guard no `"use client"`.
 
-## Files Expected to Change
+**EmptyState**: renders icon/title/description/action; string title wrapped in `<p>`; ReactNode title rendered as-is; source-guard no `"use client"`.
 
-- **New**: `src/design-system/personas.ts`
-- **New**: `src/design-system/__tests__/personas.test.ts`
-- No existing files are modified.
+**IconButton**: `<button type="button">`; `aria-label === label`; width/height = 44; `onClick` fires on click; source-guard has `"use client"`.
 
-## Backward Compatibility
+**FAB**: same structure as IconButton; width/height = 56; source-guard has `"use client"`.
 
-No existing code references `personas.ts` or `PERSONAS` — consumers (REQ-016, 017, 018) don't exist yet.
+**useDialogControl**: mock `HTMLDialogElement.prototype.showModal/close`; on `open=true` mock called once; on `false` close mock called once; `onDialogClick` with matching `e.target` calls `onClose`; mismatched target does not.
 
-## Performance Considerations
+**BottomSheet**: `open=true` → `open` attribute present; grip handle rendered; `onClose` fires on backdrop click; source-guard has `"use client"`.
 
-All data is constructed once at module load. `PERSONA_MAP` gives O(1) lookup. `assemble()` runs 14 times at initialization (string concatenation) — negligible. No async work.
+**ConfirmDialog**: renders `message`; default `confirmLabel='확인'`/`cancelLabel='취소'`; `onConfirm`/`onCancel` fire on respective clicks; `destructive=true` applies `bg-danger` class; backdrop click → `onCancel`; source-guard has `"use client"`.
 
-## Infra / Deployment Considerations
+**Toast**: renders when `open=true`, absent when `open=false`; `role="status"` default; `role="alert"` opt-in; source-guard has `"use client"`.
 
-None. Pure static data module.
+**useToast**: `vi.useFakeTimers()`; `show('msg', 1800)` → `open=true`; advance 1800ms → `open=false`; `hide()` immediate; timer cleared on re-call.
 
-## Risks and Tradeoffs
+---
 
-1. **Verbatim phrase extraction from PRD** — Medium risk. Implementer must copy Korean text from PRD §3.8.1 without paraphrase. Any paraphrase breaks the drift-guard test. Mitigation: tests import canonical constants and use `.toContain`.
-2. **File length exceeding 350 lines** — Low risk if tone strings stay concise. Split at implementation time if needed.
-3. **Order drift between `PersonaId` union and `PERSONAS` array** — `satisfies` checks membership but not order; the order test is the sole enforcement.
-4. **Honorific token leakage** — PRD §3.8.1 uses `{...}` placeholder notation in prose. Implementer must resolve to hardcoded defaults. Mitigation: no-curly-brace regex test catches survival.
+## Risks
 
-## Open Questions
+1. **Prop-signature lock-in.** REQ-007+ will import. Designs intentionally conservative. Add props only when a consuming REQ explicitly needs them.
+2. **`bg-danger` utility availability.** Tailwind 4 should auto-generate from `@theme --color-danger`. Verify in step-1 build. Fallback: `style={{ backgroundColor: 'var(--color-danger)' }}`.
+3. **`<dialog>` ref wiring under React 19.** New `ref` prop (no `forwardRef`). `useRef<HTMLDialogElement>` directly as `ref={ref}` should compile. Verify.
+4. **happy-dom `showModal()` stub.** Mock `HTMLDialogElement.prototype.showModal/close` in tests before asserting calls.
+5. **BottomSheet animation timing.** Keep `<dialog>` always mounted; toggle visual state via CSS class on `data-open`. Conditional `open && <dialog>` would break slide animation.
 
-None blocking. All intake decisions ratified:
-- Strategy (b): fully-assembled prompt minus diary corpus — confirmed.
-- `PERSONA_TONES` map structure — confirmed.
-- `getPersona` throws on unknown id — confirmed.
-- No `PersonaIcon` component in this REQ — confirmed (deferred to REQ-016).
+---
 
 ## Verdict
 PASS

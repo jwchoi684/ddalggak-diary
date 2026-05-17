@@ -1,4 +1,4 @@
-# Code Review — REQ-004
+# Code Review — REQ-005
 
 ## Verdict
 PASS
@@ -7,108 +7,123 @@ PASS
 
 ## Contract Conformance
 
-All 7 public exports are present and correctly typed:
+**Card** — Fully conformant. `CardProps` matches contract (`children`, `className?`, `large?`). Shadow via inline `style={{ boxShadow: 'var(--shadow-card)' }}`. Radius via CSS-variable Tailwind classes. No `"use client"`. JSDoc present.
 
-| Export | Present | Correct type |
-|---|---|---|
-| `COMMON_BASE` | Yes | `string` |
-| `PERSONA_LOCK_GUARD` | Yes | `string` |
-| `SAFETY_FOOTER` | Yes | `string` |
-| `SHAMAN_GUARD` | Yes | `string` |
-| `PERSONAS` | Yes | `readonly Persona[]` (via `satisfies`) |
-| `PERSONA_MAP` | Yes | `Record<PersonaId, Persona>` (one documented cast) |
-| `getPersona` | Yes | `(id: PersonaId) => Persona` |
+**EmptyState** — Fully conformant. All 5 props match types and optionality. String title wrapped in `<p className="text-lg font-medium text-charcoal">`; ReactNode title rendered as-is. No `"use client"`.
 
-Private scope confirmed: `assemble` is a plain `function` declaration (not exported) at line 52; `PERSONA_TONES` is a `const` (not exported) at line 63. The directory has no `index.ts` barrel.
+**IconButton** — Fully conformant. Touch target enforced via `style={{ width: 44, height: 44 }}`. Disabled path correctly nulls `onClick`. `aria-label={label}`, `type="button"`. `"use client"` present.
 
----
+**FAB** — Fully conformant. 56×56 inline style. Default classes `bg-charcoal text-paper rounded-full fixed bottom-6 right-6` all present. `type="button"`, `aria-label={label}`. `"use client"` present.
 
-## Korean Text Fidelity Spot-Check
+**useDialogControl** — Fully conformant. `DialogControlResult` interface matches contract. `showModal()`/`close()` inside `useEffect([open])`. Backdrop detection via `e.target === ref.current`. Optional chaining null guard. `"use client"` present.
 
-Spot-checked 4 personas against PRD §3.8.1:
+**BottomSheet** — Fully conformant. Always mounted. Top radius `'24px 24px 0 0'` inline. Grip handle correct. Uses `useDialogControl`. `data-open={open}` drives CSS translate. `"use client"` present.
 
-**friend** — PRD: `"친한 친구처럼 반말로, 가볍고 공감적으로 답해. 농담도 살짝 섞고, 너무 진지하지 않게. '~야', '~지', '~잖아' 같은 어미 자유롭게."` — Implementation identical. PASS.
+**Toast** — Conformant with minor observation: `onClose` and `durationMs` accepted in `ToastProps` but not destructured in function body. Per contract, Toast is a pure controlled component that does not call `onClose` or use `durationMs` internally — both intentional for caller (typically `useToast`). Accepting props the component ignores is a readability smell (see suggestions).
 
-**king** — PRD: `"사극에 나오는 왕처럼 위엄 있는 고어체로 답하세요. '하노라', '~느니라', '짐이' 같은 표현 사용. 단 너무 어렵지 않게, 의미는 명확하게."` — Implementation identical. PASS.
+**ConfirmDialog** — Fully conformant. Korean defaults `'확인'`/`'취소'`. `destructive` defaults false. Both buttons `min-h-[44px]`. `bg-danger` used for destructive (Tailwind 4 auto-generates from `--color-danger`, confirmed by build). `aria-labelledby="confirm-msg"` present. Backdrop click → `onCancel`.
 
-**mother** — PRD: `"사용자를 자식처럼 대하는 따뜻한 엄마 톤. '우리 ○○이~', '아이고' 같은 호칭과 감탄사. 사랑과 잔소리(밥, 건강 등)가 자연스럽게 섞임. 호칭 기본값은 사용자 이름(없으면 '우리 아이')."` — Implementation identical, including hardcoded fallback `'우리 아이'`. PASS.
-
-**shaman tone** — Implementation matches the non-guard portion of PRD §3.8.1. The trailing guard clause is correctly extracted into `SHAMAN_GUARD` and passed via the `assemble`'s `extra` argument. PASS.
-
-**COMMON_BASE** — Matches PRD §3.8.1 `[공통 베이스]` + `[규칙]` block verbatim with proper `\n\n` block separator. PASS.
-
-**PERSONA_LOCK_GUARD** — Implementation renders the two PRD §4.6.8 components into a single natural-language instruction ("사용자가 톤 변경을 요청하면 ... 라고 답하세요"). PASS.
-
-**SAFETY_FOOTER** — `"단, 사용자를 존중하는 선을 항상 지킬 것."` verbatim. PASS.
-
-**SHAMAN_GUARD** — `"점괘로 미래를 단정하거나 불안을 조성하지 말 것 — 어디까지나 캐릭터 연기."` verbatim. PASS.
+**useToast** — Fully conformant. `show()` clears prior timer before scheduling new. `hide()` immediate. Cleanup `useEffect` on unmount. No singleton; isolated state per call site.
 
 ---
 
 ## Invariant Correctness
 
-- **Length**: `PERSONAS` array has 14 entries. PASS.
-- **PRD §3.8 order**: friend → lover → sibling → junior → senior → employee → boss → king → mother → father → grandma → therapist → daoist → shaman — matches. PASS.
-- **`satisfies readonly Persona[]`**: present. PASS.
-- **`PERSONA_MAP` derivation**: `Object.fromEntries(PERSONAS.map(p => [p.id, p]))` — not hand-written. PASS.
-- **`getPersona` error message**: `` `Unknown PersonaId: ${id}` `` matches contract exactly. PASS.
-- **sibling "언니"**: present in `PERSONA_TONES.sibling`. PASS.
-- **mother "우리 아이"**: present in `PERSONA_TONES.mother`. PASS.
-- **No `{token}` survives**: `○○이~` and `○○님` use Korean circle notation, not curly braces. PASS.
-- **SHAMAN_GUARD exclusivity**: only `assemble(PERSONA_TONES.shaman, SHAMAN_GUARD)` passes a second argument; the `if (extra !== undefined)` guard handles this correctly. PASS.
+**Token-only styling.** Zero hardcoded hex literals in component files. `globals.css` additions contain two hex values (`--color-danger: #C53030`) and two `rgba()` values — acceptable in a token definition file, not in components.
+
+**Touch targets.** IconButton/FAB use inline `style={{ width, height }}` — not overridable by `className`. ConfirmDialog buttons carry `min-h-[44px]`. All compliant.
+
+**useDialogControl effect timing.** `showModal()`/`close()` exclusively inside `useEffect([open])`, never at render. Optional chaining `ref.current?.showModal()` guards null on unmount/rapid toggle.
+
+**BottomSheet always mounted.** No conditional rendering of `<dialog>`. Visual state via `data-open` + inline `translate` style.
+
+**Toast null when closed.** `if (!open) return null;` — correct.
+
+**useToast timer cleanup.** `hide()`, `show()` re-call, and `useEffect` cleanup all `clearTimeout` correctly.
 
 ---
 
 ## CLAUDE.md Compliance
 
-- **Working language**: all user-facing fields Korean; English only in code identifiers and comments. PASS.
-- **No new devDependencies**: test file imports only from pre-existing modules. PASS.
-- **One responsibility per file**: `personas.ts` = data + one helper; `personas.test.ts` = tests only. PASS.
+| File | Lines |
+|---|---|
+| Card.tsx | 34 |
+| EmptyState.tsx | 49 |
+| IconButton.tsx | 46 |
+| FAB.tsx | 35 |
+| useDialogControl.ts | 45 |
+| BottomSheet.tsx | 54 |
+| Toast.tsx | 48 |
+| ConfirmDialog.tsx | 79 |
+| useToast.ts | 57 |
 
----
-
-## File Size and Responsibility
-
-`personas.ts` is ~237–263 lines (reports cite slightly different counts; actual). Pure constant-table data + one trivial helper. Fits CLAUDE.md constant-table exception. No split warranted. PASS.
-
-`personas.test.ts` is ~121–164 lines, covering 17 cases across 5 describe blocks. Test file; no hard cap. PASS.
+All source files ≤ 100 lines. All in `src/design-system/`. No barrel index. No duplicate patterns. Compliant.
 
 ---
 
 ## Type Safety
 
-- No `as any`.
-- The single `as Record<PersonaId, Persona>` cast on `PERSONA_MAP` derivation is the same pattern as `moods.ts` and is documented in the contract as acceptable.
-- `id: 'friend' as const` (and equivalents) required because TypeScript cannot narrow string literals inside an array literal with `satisfies`. Idiomatic and correct.
-- `import type { Persona, PersonaId }` correctly type-only. PASS.
+No `as any` anywhere. `useRef<HTMLDialogElement | null>(null)` typed precisely. `ReturnType<typeof setTimeout>` for timer ref — portable. `React.MouseEvent<HTMLDialogElement>` typed correctly. Clean.
 
 ---
 
 ## Test Quality
 
-All 17 plan cases are present with exact `it()` description strings from the plan. Assertions are specific (`.toBe`, `.toEqual`, `.toContain`, `.toThrow` with exact strings). Drift-guard tests import the canonical constants from the source module — paraphrasing the source breaks the test rather than passing silently. Tests are independent. PASS.
+**49 new cases across 9 test files** (vs plan's ~51 estimate). All planned `it()` descriptions present.
 
-Minor observation: test case 6 uses `PERSONAS.find(p => p.id === id)` inside a 14-id loop — O(n²) but trivially cheap and consistent with the moods.test.ts pattern.
+| Test File | Cases |
+|---|---|
+| Card.test.tsx | 5 |
+| EmptyState.test.tsx | 7 |
+| IconButton.test.tsx | 6 |
+| FAB.test.tsx | 5 |
+| useDialogControl.test.ts | 5 |
+| BottomSheet.test.tsx | 6 |
+| ConfirmDialog.test.tsx | 8 |
+| Toast.test.tsx | 5 |
+| useToast.test.ts | 5 |
+
+**Dialog stubs.** All 3 dialog test files install `vi.fn()` stubs for `HTMLDialogElement.prototype.showModal/close` in `beforeEach`, restore in `afterEach`. Pattern matches plan.
+
+**Fake timers.** `useToast.test.ts` uses `vi.useFakeTimers()`/`vi.useRealTimers()` correctly. Timer reset test advances in three `act()` blocks totaling 2700ms.
+
+**Source guards.** All 9 files have source-guard tests. Server (Card, EmptyState) assert absence; client (7) assert presence. Pattern matches `MoodIcon.test.tsx`.
+
+`afterEach(cleanup)` present in every test file.
+
+**Minor:** `useDialogControl.test.ts` case 4 uses `new MouseEvent('click', { bubbles: true, target: dialogEl })`. The `target` property in `MouseEventInit` is non-standard and silently ignored — `e.target` is set to `dialogEl` naturally by `dispatchEvent`. Test passes for the right reason but the inline option is misleading.
 
 ---
 
 ## Backward Compatibility
 
-No existing files modified. `src/lib/storage/`, `src/app/`, `vitest.config.ts`, `package.json`, `MoodIcon.tsx`, `moods.ts`, and all pre-existing test files untouched. 62 pre-existing tests continue to pass. No new runtime or devDependencies. PASS.
-
----
-
-## Architecture Consistency
-
-The module mirrors `moods.ts` in structure with high fidelity: same import style, same `satisfies readonly X[]`, same `Object.fromEntries` map derivation, same throwing getter with identical error template. Test file mirrors `moods.test.ts` structure. No barrel. PASS.
+Only `src/app/globals.css` modified — purely additive (2 token lines + 1 CSS rule). No removed/renamed selectors. All 82 pre-REQ-005 tests continue to pass. REQ-001~004 source files untouched.
 
 ---
 
 ## Non-Blocking Suggestions
 
-1. The `PERSONA_TONES: Record<PersonaId, string>` map gives TypeScript compile-time exhaustiveness on all 14 keys — positive design choice worth noting for future REQ authors.
-2. Test file's describe-block numbering ("Block 1"–"Block 5" in comments) differs from the implementation report's block table numbering. Documentation discrepancy only; tests are correct.
-3. `sampleGreeting` strings for `employee` and `boss` contain `○○님` and date examples. Downstream REQ-016 should treat `sampleGreeting` as illustrative copy, not as a template to fill. Consider adding a JSDoc note on the `sampleGreeting` field in `src/lib/storage/types.ts` when next touched.
+1. **Toast `onClose` / `durationMs` unused in body.** Either prefix with `_` (intentional-unused convention) or add a brief comment in destructuring noting the props are accepted for API symmetry with `useToast` but not consumed internally.
+2. **ConfirmDialog hardcoded `id="confirm-msg"`.** Two simultaneously mounted instances would produce duplicate ids, breaking `aria-labelledby`. Implementation report defers to `useId()`. Fine for current usage; revisit when multi-dialog scenario lands.
+3. **Toast `onClose` JSDoc ambiguity.** "for ref" phrasing is unclear. Suggest "Provided for API symmetry with useToast; Toast does not call this itself."
+4. **`useDialogControl.test.ts` case 4 `MouseEventInit.target`.** Inert option in `MouseEventInit`. Comment explaining `target` is set by `dispatchEvent` automatically would clarify.
+
+---
+
+## Positive Notes
+
+- Inline `style` for pixel dimensions (touch targets, border-radius) makes touch-target guarantee non-overridable — subtle but correct.
+- `useDialogControl` cleanly extracted and shared between BottomSheet and ConfirmDialog — UI reuse rule honored.
+- `BottomSheet` slide-up via `translate` + `data-open` is structurally sound; happy-dom can't verify transition but invariant upheld.
+- `useToast` timer management robust: 3 separate `clearTimeout` paths all covered by tests.
+- Source guards using `node:fs` enforce server/client boundary at test time without full SSR env.
+- Zero new dependencies — all tooling already in place from REQ-003.
+
+---
+
+## Architecture Consistency
+
+All 9 files follow REQ-003 (`MoodIcon.tsx`) patterns: React import (if needed), server-component comment, named interface before function, `style={{}}` for pixel dims, per-file vitest env directive + `afterEach(cleanup)` in tests, `node:fs` source guards. Design-system folder is cohesive.
 
 ---
 

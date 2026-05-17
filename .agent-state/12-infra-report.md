@@ -1,30 +1,34 @@
-# Infra Review Report — REQ-004
+# Infra Review Report — REQ-005
 
 ## Summary
 
-REQ-004 introduces a static data module (`src/design-system/personas.ts`) and a companion test file. Zero infrastructure surface. No deployment, CI/CD, environment, networking, or runtime concerns.
+REQ-005 implements seven UI primitive components and two React hooks. The change is entirely frontend code and CSS token additions. No infra surface is touched.
 
 ## Scope
 
-Two new files, both pure TypeScript source with no I/O, no network calls, and no side effects beyond in-memory constant initialization. No existing file was modified.
+- 9 new source files under `src/design-system/`
+- 8 new test files under `src/design-system/__tests__/`
+- `src/app/globals.css`: two new CSS custom properties added inside the existing `@theme {}` block, plus one new `dialog::backdrop` rule
+
+No configuration files, deployment manifests, environment files, or server-side code were modified.
 
 ## Environment / Config Changes
 
-`package.json` dependencies unchanged from REQ-003. Current set: `next@15.5.18`, `react@19.0.0`, `react-dom@19.0.0`, `vitest@^2.0.0`, `happy-dom@^20.9.0`, `@testing-library/react@^16.3.2`, `@tailwindcss/postcss@^4.0.0`, `tailwindcss@^4.0.0`, TypeScript, ESLint.
-
-No env vars added or removed. `.env.local.example` remains with `OPENAI_API_KEY` (commented out) and two commented Supabase fields.
+None. `package.json` diff is empty — no new dependencies added. `.env.local.example` unchanged. `OPENAI_API_KEY` remains the only declared variable; not consumed by any REQ-005 code.
 
 ## Deployment Impact
 
-None. The two new files are tree-shaken at build time (`npm run build` produced 4/4 static pages, exit 0). No new network-reachable surface in production bundle.
+None. Build produces fully static pages (4/4, PASS confirmed). No new routes, API handlers, middleware, or server-side data-fetching.
+
+The `dialog::backdrop` CSS rule is a global additive change. Affects `<dialog>` elements rendered anywhere in the app. Currently only `BottomSheet`/`ConfirmDialog` emit `<dialog>`. Blast radius contained. No existing backdrop styling overridden.
 
 ## Rollback Plan
 
-Not applicable. Reverting = delete two source files. No migration, no external coordination, no feature flag.
+Standard revert commit. Only adds new files and appends to `globals.css`. No destructive side effects on pre-existing behavior. No data migrations.
 
 ## Observability Notes
 
-No logging, metrics, or tracing changes. Only observable runtime behavior is an `Error` throw from `getPersona()` on unknown id; callers (REQ-016/017) should catch and observe at the AI chat layer.
+No logging, metrics, or tracing paths introduced. `Toast` `role="status"`/`role="alert"` is client-side accessibility only.
 
 ## Blocking Issues
 
@@ -32,10 +36,9 @@ None.
 
 ## Non-Blocking Suggestions
 
-1. **REQ-017 infra gate**: when REQ-017 lands, verify `OPENAI_API_KEY` is never exposed via `NEXT_PUBLIC_` prefix and that all LLM calls route through a server-side proxy (Next.js Route Handler or Vercel Function). First genuine infra surface in this project.
-2. **postcss advisory**: the moderate `postcss < 8.5.10` advisory (GHSA-qx2v-qp2m-jg93) remains outstanding. Address in a dedicated dependency-hygiene cycle before REQ-017 to clean the audit baseline.
-3. **Vitest CJS deprecation warning**: cosmetic but will appear in any future CI log. Adding `"type": "module"` to `package.json` or upgrading to Vitest 3.x would eliminate it before CI is wired up.
+1. **`dialog::backdrop` is global.** Any future `<dialog>` outside design system inherits this rule silently. Worth documenting in `globals.css` with a comment linking to owner components (`BottomSheet`, `ConfirmDialog`) to prevent future specificity conflicts.
+2. **`--color-danger` hardcoded hex.** `#C53030` added directly in `globals.css` without inline PRD reference. Adding `/* PRD §5.4 */` comment would make token auditable without consulting reports.
 
 ## Verdict
 
-PASS — not applicable. REQ-004 touches no infra surface.
+PASS — not applicable. REQ-005 has zero infra surface. First real infra surface arrives at REQ-017 (OpenAI server-side proxy via `OPENAI_API_KEY`).

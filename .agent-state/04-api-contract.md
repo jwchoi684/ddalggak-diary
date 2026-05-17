@@ -1,181 +1,258 @@
-# API Contract — REQ-004
+# API Contract — REQ-005
 
 ## Scope
 
-Internal TypeScript module contract for `src/design-system/personas.ts`. This is a pure-data, pure-function module: no HTTP endpoints, no React components, no async I/O. The contract covers the public export surface, type signatures, invariants callers must rely on, and the error contract for `getPersona`. All drift-guard constants are exported so test files can `.toContain()` them without hardcoding Korean strings.
+Internal TypeScript module contract for 9 new files under `src/design-system/`. All boundaries are intra-frontend function signatures, prop interfaces, and hook return shapes. No HTTP endpoints, no backend, no storage keys change.
 
 ---
 
-## Public Exports (from `@/design-system/personas`)
+## Public Exports per File
 
-| Export | Kind | Type | Purpose |
-|---|---|---|---|
-| `COMMON_BASE` | `const` | `string` | PRD §3.8.1 common base rules injected into every systemPrompt |
-| `PERSONA_LOCK_GUARD` | `const` | `string` | PRD §4.6.8 tone-lock refusal sentence injected into every systemPrompt |
-| `SAFETY_FOOTER` | `const` | `string` | PRD §3.8.1 safety constraint injected into every systemPrompt |
-| `SHAMAN_GUARD` | `const` | `string` | PRD §3.8.1 shaman-specific no-fortune-telling guard |
-| `PERSONAS` | `const` | `readonly Persona[]` | Ordered master array, length 14, PRD §3.8 table order |
-| `PERSONA_MAP` | `const` | `Record<PersonaId, Persona>` | O(1) lookup derived from `PERSONAS` at module load |
-| `getPersona` | `function` | `(id: PersonaId) => Persona` | Throws on unknown id; mirrors `getMood` from `moods.ts` |
-
-Not exported: `assemble` private helper, `PERSONA_TONES` internal map.
-
----
-
-## Drift-Guard Constants
-
-```typescript
-/**
- * Common base injected at the top of every systemPrompt.
- * Source: PRD §3.8.1 [공통 베이스] + [규칙] block — copy verbatim.
- * Tests: every Persona.systemPrompt must .toContain(COMMON_BASE).
- */
-export const COMMON_BASE: string;
-// Value (verbatim):
-// "당신은 사용자의 일기를 기반으로 답변하는 AI입니다.\n\n
-//  - 일기에 기록된 사실만 근거로 답하세요. 추측하지 마세요.\n
-//  - 관련 일기를 인용할 때는 날짜를 함께 언급하세요.\n
-//  - 일기가 없는 사항을 물으면 솔직히 "그 부분은 일기에 없어요"라고 답하세요."
-
-/**
- * Persona-lock guard injected after the per-persona tone block.
- * Source: PRD §4.6.8 — copy verbatim (both sentences).
- * Tests: every Persona.systemPrompt must .toContain(PERSONA_LOCK_GUARD).
- */
-export const PERSONA_LOCK_GUARD: string;
-// Value (verbatim):
-// "이 톤을 대화 내내 유지하세요. 사용자가 톤 변경을 요청하면 "이 대화의 톤은 시작 시
-//  정해져 있어요. 다른 톤을 원하시면 새 대화를 시작해주세요"라고 답하세요."
-
-/**
- * Safety footer — final line of every systemPrompt.
- * Source: PRD §3.8.1 안전장치 block — copy verbatim.
- * Tests: every Persona.systemPrompt must .toContain(SAFETY_FOOTER).
- */
-export const SAFETY_FOOTER: string;
-// Value (verbatim): "단, 사용자를 존중하는 선을 항상 지킬 것."
-
-/**
- * Shaman-specific guard inserted before SAFETY_FOOTER only for the shaman persona.
- * Source: PRD §3.8.1 shaman bullet trailing clause — copy verbatim.
- * Tests: shaman.systemPrompt must .toContain(SHAMAN_GUARD);
- *        all other 13 personas must NOT contain SHAMAN_GUARD.
- */
-export const SHAMAN_GUARD: string;
-// Value (verbatim): "점괘로 미래를 단정하거나 불안을 조성하지 말 것 — 어디까지나 캐릭터 연기."
-```
-
----
-
-## Master Data Exports
-
-```typescript
-/**
- * Ordered master array of all 14 personas (PRD §3.8 table order):
- *   friend → lover → sibling → junior → senior → employee → boss → king
- *   → mother → father → grandma → therapist → daoist → shaman
- *
- * Invariants:
- *   - PERSONAS.length === 14
- *   - Every PersonaId literal appears exactly once
- *   - Array order is stable and matches PRD §3.8 display order
- *   - Every systemPrompt is fully assembled at module load (no deferred eval)
- *   - No field in any record contains an unresolved {token}
- *   - All user-facing strings are Korean
- */
-export const PERSONAS: readonly Persona[];   // satisfies readonly Persona[]
-
-/**
- * Record<PersonaId, Persona> derived from PERSONAS via Object.fromEntries.
- * O(1) lookup. Returns undefined for any key not in PersonaId union.
- *
- * Implementation: Object.fromEntries(PERSONAS.map(p => [p.id, p])) as Record<PersonaId, Persona>
- */
-export const PERSONA_MAP: Record<PersonaId, Persona>;
-```
-
----
-
-## Helper Function
-
-```typescript
-/**
- * Returns the Persona record for the given PersonaId.
- *
- * @param id - A PersonaId literal. TypeScript enforces this at call sites.
- * @returns    The matching Persona record (same reference as PERSONA_MAP[id]).
- * @throws {Error} `Unknown PersonaId: ${id}` — only reachable if the caller
- *                  bypasses TypeScript.
- *
- * @example
- *   const p = getPersona('shaman');
- *   // p.systemPrompt contains SHAMAN_GUARD
- */
-export function getPersona(id: PersonaId): Persona;
-```
-
-Assembly template (private `assemble` helper):
-
-```typescript
-// Standard 13: `${COMMON_BASE}\n\n${tone}\n\n${PERSONA_LOCK_GUARD}\n\n${SAFETY_FOOTER}`
-// Shaman:      `${COMMON_BASE}\n\n${tone}\n\n${PERSONA_LOCK_GUARD}\n\n${SHAMAN_GUARD}\n\n${SAFETY_FOOTER}`
-```
-
----
-
-## Error Contract Summary Table
-
-| Situation | Behavior | Error message |
+| File | Export | Kind |
 |---|---|---|
-| `getPersona` called with valid `PersonaId` | Returns `Persona` record | — |
-| `getPersona` called with unknown id (TS bypass) | Throws `Error` synchronously | `"Unknown PersonaId: ${id}"` |
-| `PERSONA_MAP[unknownKey]` | Returns `undefined` (caller must guard) | — |
-| Module load (import) | Always synchronous; never throws | — |
-| Any drift-guard constant | Read-only `string`; never throws | — |
+| `Card.tsx` | `Card` | `function` (Server Component) |
+| `EmptyState.tsx` | `EmptyState` | `function` (Server Component) |
+| `IconButton.tsx` | `IconButton` | `function` (Client Component) |
+| `FAB.tsx` | `FAB` | `function` (Client Component) |
+| `BottomSheet.tsx` | `BottomSheet` | `function` (Client Component) |
+| `Toast.tsx` | `Toast` | `function` (Client Component) |
+| `ConfirmDialog.tsx` | `ConfirmDialog` | `function` (Client Component) |
+| `useDialogControl.ts` | `useDialogControl` | `function` (Client Hook) |
+| `useToast.ts` | `useToast` | `function` (Client Hook) |
+
+All exports named. No default exports. No barrel `index.ts`.
 
 ---
 
-## Caller Invariants
+## Per-Component Detail
 
-- `PERSONAS.length` is guaranteed to be `14` at runtime.
-- The 14 ids in `PERSONAS` are exactly the 14 members of the `PersonaId` union — one each, no duplicates.
-- `PERSONAS` iteration order is stable and matches the PRD §3.8 table (friend first, shaman last). Do not re-sort for display.
-- `getPersona(id)` returns `PERSONA_MAP[id]` by reference — callers may use `===` identity.
-- Every `systemPrompt` contains `COMMON_BASE`, `PERSONA_LOCK_GUARD`, and `SAFETY_FOOTER` as literal substrings.
-- `shaman.systemPrompt` additionally contains `SHAMAN_GUARD` as a literal substring; no other persona's `systemPrompt` does.
-- No field of any `Persona` record matches `/\{[^}]+\}/` — there are no unresolved template tokens.
-- `sibling.systemPrompt` uses the hardcoded honorific "언니" (not a `{honorific}` token).
-- `mother.systemPrompt` uses the hardcoded address "우리 아이" (not a `{userName}` token).
-- `systemPrompt` does not contain `{diaries_serialized}` or any corpus placeholder — diary-corpus injection is REQ-017's responsibility.
-- All construction is synchronous at module load.
+### Card — Server Component
+
+```ts
+interface CardProps {
+  children: ReactNode;
+  className?: string;
+  large?: boolean;  // true → --radius-card-lg (20px); default 16px
+}
+function Card(props: CardProps): JSX.Element
+```
+
+**Behavior.** `<div>` with `bg-paper`, border-radius from `--radius-card` (or large), `style={{ boxShadow: 'var(--shadow-card)' }}`. No interactive elements; no listeners.
+
+**Invariants.** No `"use client"`. Shadow MUST be `var(--shadow-card)` via inline `style`. `className` appended after internal classes.
+
+---
+
+### EmptyState — Server Component
+
+```ts
+interface EmptyStateProps {
+  icon?: ReactNode;
+  title: ReactNode;            // string → wrapped in <p>; ReactNode → as-is
+  description?: string;
+  action?: ReactNode;          // touch target = caller's responsibility
+  className?: string;
+}
+function EmptyState(props: EmptyStateProps): JSX.Element
+```
+
+**Behavior.** Centered column: icon → title → description → action. `typeof title === 'string'` branch wraps in `<p className="text-lg font-medium text-charcoal">`; else renders ReactNode directly.
+
+**Invariants.** No `"use client"`. `action` slot's touch-target burden is on caller.
+
+---
+
+### IconButton — Client Component
+
+```ts
+interface IconButtonProps {
+  icon: ReactNode;
+  label: string;              // Korean aria-label; required
+  onClick: () => void;
+  disabled?: boolean;
+  className?: string;
+}
+function IconButton(props: IconButtonProps): JSX.Element
+```
+
+**Behavior.** `<button type="button" aria-label={label}>` at exactly 44×44 via `style={{ width: 44, height: 44 }}`. Surface `bg-paper rounded-full`. Disabled: `opacity-40 cursor-not-allowed`; `onClick` not fired when disabled.
+
+**Invariants.** `label` non-empty Korean. Touch target 44×44 always. `"use client"` present.
+
+---
+
+### FAB — Client Component
+
+```ts
+interface FABProps {
+  icon: ReactNode;
+  label: string;              // Korean aria-label; required
+  onClick: () => void;
+  className?: string;
+}
+function FAB(props: FABProps): JSX.Element
+```
+
+**Behavior.** `<button type="button" aria-label={label}>` at exactly 56×56 via inline style. Default: `bg-charcoal text-paper rounded-full fixed bottom-6 right-6`. Caller may override `fixed` via `className`.
+
+**Invariants.** Touch target 56×56. `"use client"` present.
+
+---
+
+### useDialogControl — Client Hook
+
+```ts
+interface DialogControlResult {
+  ref: RefObject<HTMLDialogElement | null>;
+  onDialogClick: (e: React.MouseEvent<HTMLDialogElement>) => void;
+}
+function useDialogControl(open: boolean, onClose: () => void): DialogControlResult
+```
+
+**Behavior.**
+- `useEffect([open])`: `open=true` → `ref.current?.showModal()`; `false` → `ref.current?.close()`.
+- `showModal()`/`close()` called inside `useEffect`, never at render.
+- `onDialogClick(e)`: if `e.target === ref.current`, calls `onClose()`. Interior clicks don't bubble to `<dialog>` as target — only backdrop clicks trigger close.
+
+**Invariants.** Must be used in `"use client"` file. Caller passes `ref` to `<dialog ref={ref}>`. Caller responsible for flipping `open=false` in their `onClose` handler.
+
+---
+
+### BottomSheet — Client Component
+
+```ts
+interface BottomSheetProps {
+  open: boolean;
+  onClose: () => void;
+  children: ReactNode;
+  className?: string;
+}
+function BottomSheet(props: BottomSheetProps): JSX.Element
+```
+
+**Behavior.** `<dialog>` via `useDialogControl`. **Always mounted in DOM** (never conditionally rendered); slide-up via CSS `translate(0, 100%) → translate(0, 0)` toggled by `data-open` attribute. Top radius `style={{ borderRadius: '24px 24px 0 0' }}`. Grip handle: `<div className="bg-meta w-10 h-1 rounded-full mx-auto mb-4">`. `showModal()` provides native focus trap + Escape key close.
+
+**Invariants.** Native `<dialog>` provides `role="dialog"` + `aria-modal="true"`. Escape key fires native `close` → caller's `onClose` via `useDialogControl`. Never conditionally unmount — breaks slide-out animation.
+
+---
+
+### Toast — Client Component
+
+```ts
+interface ToastProps {
+  message: string;
+  open: boolean;
+  onClose: () => void;
+  role?: 'status' | 'alert';   // default 'status'
+  durationMs?: number;          // informational; default 1800
+  className?: string;
+}
+function Toast(props: ToastProps): JSX.Element
+```
+
+**Behavior.** Renders `<div role={role}>` only when `open === true`. Fixed pill: `bg-charcoal text-paper rounded-full fixed bottom-24 px-6 py-3 text-sm`. **Pure controlled component**; auto-dismiss is caller's responsibility (typically `useToast`).
+
+**Invariants.** `durationMs` informational only; timer logic in `useToast`. Toast does NOT appear above `showModal()` top layer — render inside `<dialog>` DOM subtree if needed inside modal.
+
+---
+
+### ConfirmDialog — Client Component
+
+```ts
+interface ConfirmDialogProps {
+  open: boolean;
+  message: string;
+  onConfirm: () => void;        // caller must flip open=false
+  onCancel: () => void;          // caller must flip open=false
+  confirmLabel?: string;         // default '확인'
+  cancelLabel?: string;          // default '취소'
+  destructive?: boolean;         // default false → bg-charcoal; true → bg-danger
+  className?: string;
+}
+function ConfirmDialog(props: ConfirmDialogProps): JSX.Element
+```
+
+**Behavior.** `<dialog>` via `useDialogControl`. Layout: `bg-paper rounded-[var(--radius-card-lg)]` with `style={{ boxShadow: 'var(--shadow-card)' }}`. `aria-labelledby` → message `<p>`. Confirm: `destructive ? 'bg-danger text-paper' : 'bg-charcoal text-paper'`, `min-h-[44px]`. Cancel: outlined/muted, `min-h-[44px]`. Backdrop click → `onCancel`. Component never closes itself — caller owns `open` state.
+
+**Invariants.** Both buttons ≥ 44px height. `destructive` defaults false; opt-in. Default labels Korean `'확인'`/`'취소'`.
+
+---
+
+### useToast — Client Hook
+
+```ts
+interface ToastState {
+  message: string;
+  open: boolean;
+  show: (message: string, durationMs?: number) => void;
+  hide: () => void;
+}
+function useToast(): ToastState
+```
+
+**Behavior.** `useState` for `{ message, open }`. `show()` sets `open=true` + `message`, clears any existing timeout, schedules `setTimeout(hide, durationMs ?? 1800)`. `hide()` sets `open=false`. Cleanup on unmount clears pending timer. No global singleton; isolated state per call site.
+
+**Invariants.** Spread `useToast()` return onto `<Toast message={message} open={open} onClose={hide} />`. `durationMs` to `show()` overrides default per invocation.
+
+---
+
+## Caller Invariants (Cross-Cutting)
+
+1. **Token-only styling.** Colors, radii, shadows from `globals.css @theme`. No hex literals in component files.
+2. **Touch targets.** Enforced via inline `style` or Tailwind constraint — not overridable by `className`.
+3. **`className` is layout-only.** Margin, flex, z-index. Interior surface remains under primitive control.
+4. **No barrel.** Per-file imports.
+5. **Server/Client boundary.** `Card` and `EmptyState` safe in Server Components. Others require client boundary at or above the import site.
+
+---
+
+## Error / Edge Contract Summary
+
+| Primitive | Edge | Contract |
+|---|---|---|
+| `IconButton` | `disabled=true` | `onClick` not fired; visual `opacity-40`. |
+| `ConfirmDialog` | backdrop click | Routes to `onCancel`. |
+| `BottomSheet` | Escape key | Native `<dialog>` `close` event → `onClose`. |
+| `Toast` | `show()` mid-timer | Prior timer cleared; new starts from 0. |
+| `Toast` inside `<dialog>` | z-index below top layer | Render inside dialog DOM subtree. |
+| `EmptyState` | `title` ReactNode | As-is; string wraps in styled `<p>`. |
+| `useDialogControl` | rapid `open` toggle | `showModal`/`close` guarded by ref null-check. |
+
+---
+
+## Backward Compatibility
+
+New files with no prior consumers. Prop shapes additive by design — future REQs may add optional props only. `src/app/globals.css` is the only existing file changed (additive: 2 tokens + 1 CSS rule block).
 
 ---
 
 ## Import Path Discipline
 
-| What to import | From |
-|---|---|
-| `Persona`, `PersonaId` types | `'@/lib/storage'` (re-exported from `src/lib/storage/index.ts`) |
-| `PERSONAS`, `PERSONA_MAP`, `getPersona`, drift-guard constants | `'@/design-system/personas'` (direct per-file import) |
+```ts
+import { Card }          from '@/design-system/Card'
+import { EmptyState }    from '@/design-system/EmptyState'
+import { IconButton }    from '@/design-system/IconButton'
+import { FAB }           from '@/design-system/FAB'
+import { BottomSheet }   from '@/design-system/BottomSheet'
+import { Toast }         from '@/design-system/Toast'
+import { ConfirmDialog } from '@/design-system/ConfirmDialog'
+import { useDialogControl } from '@/design-system/useDialogControl'
+import { useToast }      from '@/design-system/useToast'
+```
 
-Rules:
-- There is no barrel at `src/design-system/index.ts`. Import directly from `@/design-system/personas`.
-- Do not re-export `Persona` or `PersonaId` from `personas.ts`. Types are owned by `@/lib/storage`.
-- REQ-017 imports `getPersona` or `PERSONA_MAP` and reads `persona.systemPrompt` directly; it does not re-assemble from the drift-guard constants.
+No barrel `index.ts`.
 
 ---
 
 ## Out of Scope
 
-| Item | Owner REQ |
-|---|---|
-| `PersonaIcon` component / persona picker tile UI | REQ-016 |
-| `buildSystemPrompt(persona, diaryCorpus)` — corpus injection + OpenAI call wrapper | REQ-017 |
-| Past-conversation read-only enforcement | REQ-018 |
-| User-customizable honorifics (e.g. user sets "오빠" for sibling) | v2, PRD §13.2 |
-| Per-persona LLM model routing | v2, PRD §4.6.7 |
-| Hand-painted illustration assets (persona portrait swap) | Future REQ |
-| `Settings.defaultPersona` field | Declaration-merge by whatever REQ exposes the setting |
+- `Header` composite (REQ-007).
+- Mood-tinted card variants (REQ-014).
+- Calendar day cell, mood emoji tile (REQ-007).
+- Chat bubbles, cited-diary chips, persona avatar pill (REQ-015/017).
+- Dark mode (P1).
+- Screen-level transition system (REQ-006).
+- Storybook / demo page.
 
 ---
 

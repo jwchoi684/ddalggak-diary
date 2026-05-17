@@ -2,83 +2,144 @@
 
 ## Summary
 
-REQ-004 adds the 14-persona master data module to a Next.js 15 / React 19 / TypeScript 5 / Tailwind 4 / Vitest 2 project that is already scaffolded (Option C from REQ-001). REQ-003 (`moods.ts`) delivered an identical structural pattern and is the explicit template. All required TypeScript types (`Persona`, `PersonaId`) are already published in `src/lib/storage/types.ts` and re-exported from `src/lib/storage/index.ts`. No new dependencies, no new routes, no React component. The deliverable is a single data + helper file at `src/design-system/personas.ts` plus a parallel test file at `src/design-system/__tests__/personas.test.ts`.
+Repository is Option C (Next.js 15 App Router + React 19 + Tailwind 4 + TypeScript) of 딸깍일기. REQ-001 through REQ-004 are complete: scaffold, design tokens, storage layer, moods, personas, `MoodIcon`. REQ-005 adds seven design-system primitives on top. No backend; frontend-only; purely additive — seven new `.tsx` files + seven test files in `src/design-system/`.
+
+---
 
 ## Frontend Findings
 
-There is no React component in this REQ. The only frontend artifact is the pure-data module. The existing `MoodIcon.tsx` component confirms the design-system folder is used for both data modules and presentational components, but persona icons are explicitly deferred to REQ-016.
+**Framework.** Next.js 15 App Router. Root layout is a Server Component wrapping `max-w-[420px]` body; primitives inherit container width — none should set its own.
 
-Downstream consumers that will import from `src/design-system/personas.ts`:
-- REQ-016 (persona picker UI) — iterates `PERSONAS` for the grid.
-- REQ-017 (active chat session + LLM call) — reads `persona.systemPrompt` and appends the diary corpus.
-- REQ-018 (past conversation, read-only) — reads `persona.label`/`emoji` for display.
+**Existing design-system file.** `MoodIcon.tsx` is the canonical Server Component template: no `"use client"`, inline `style` for pixel-exact dimensions, `className` pass-through, Korean `aria-label`, silent fallback on unknown id.
 
-None of those consumers exist yet, so there is no integration surface to protect during this REQ.
+**Server/client component split — confirmed.**
+
+| Primitive | Directive | Rationale |
+|---|---|---|
+| `Card` | none (Server) | Pure visual wrapper; no handlers, no state. |
+| `EmptyState` | none (Server) | Presentation leaf; `action` slot is `ReactNode` from caller. |
+| `IconButton` | `"use client"` | Accepts `onClick`; event handler requires client. |
+| `FAB` | `"use client"` | Accepts `onClick`; fixed-position interactive button. |
+| `BottomSheet` | `"use client"` | Controlled `open`/`onClose`; `useEffect` to call `dialogRef.showModal()`/`close()`. |
+| `Toast` | `"use client"` | Auto-dismiss timer via `useEffect` + `setTimeout`; transition state. |
+| `ConfirmDialog` | `"use client"` | Controlled visibility; button handlers; same `<dialog>` approach as BottomSheet. |
+
+**Token coverage — two gaps confirmed in `src/app/globals.css @theme`.**
+1. **`--shadow-card`**: PRD §1.6.6 says `y=2 blur=8 opacity=0.04`. CSS value: `0 2px 8px rgba(0, 0, 0, 0.04)`.
+2. **`--color-danger`**: for destructive `ConfirmDialog`. PRD does not specify a red hex. Recommended `#E05C5C` — pastel-coral harmonizing with `--color-mood-angry: #F4A6A6`. WCAG AA contrast against `#FFFFFF` paper must be verified at button-font size in technical-design.
+
+**Token consumption strategy — Tailwind 4 utility classes preferred for color/radius/font; inline `style` for pixel values from props; CSS variable reference for shadow.** Tailwind 4 does not auto-generate `shadow-*` utilities from `@theme --shadow-*` like it does for `--color-*`. Use `style={{ boxShadow: 'var(--shadow-card)' }}` or arbitrary `[box-shadow:var(--shadow-card)]`. Confirm pattern in technical-design.
+
+**`<dialog>` element — confirmed for BottomSheet + ConfirmDialog.** React 19 has improved native `<dialog>` support. Caveats:
+- `useEffect` required to call `dialogRef.current?.showModal()` when `open` flips true.
+- `::backdrop` styling lives in a CSS selector block in `globals.css` — cannot be applied via Tailwind utility classes.
+- Backdrop-click-to-close requires a manual `click` handler on the `<dialog>` comparing `event.target === dialogRef.current`. The `<dialog>` does not close on backdrop click by default.
+- All standard patterns; not blockers.
+
+**Toast mounting strategy.** Caller places `<Toast message open onClose />` in its own JSX tree. `position: fixed` is viewport-relative, so the toast pill anchors to the screen regardless of where in the tree it sits. No portal, no `<Toaster />` in `layout.tsx`, no context provider needed for MVP single-toast case. `useToast()` wraps `useState` (message, open) + `useEffect` (auto-dismiss timer). Keeps `layout.tsx` free of client components.
+
+**Accessibility expectations.**
+
+| Primitive | Element | ARIA |
+|---|---|---|
+| `IconButton` | `<button>` | `aria-label` required (caller-supplied Korean); `type="button"`. |
+| `Card` | `<div>` | None needed; purely structural. |
+| `FAB` | `<button>` | `aria-label` required; `type="button"`; `position: fixed`. |
+| `BottomSheet` | `<dialog>` | Native `role="dialog"` + `aria-modal="true"` from `showModal()`. |
+| `Toast` | `<div>` | `role="status"` (non-urgent, default); `role="alert"` (caller opts in via prop). |
+| `ConfirmDialog` | `<dialog>` | Same as BottomSheet; confirm/cancel are `<button>`. |
+| `EmptyState` | `<div>` | No interactive ARIA. |
+
+---
 
 ## Backend Findings
 
-Not applicable. REQ-004 is pure client-side constant data. No API routes, no server actions, no LLM call in this REQ.
+Not applicable. REQ-005 is entirely frontend.
+
+---
 
 ## Data Model Findings
 
-`Persona` and `PersonaId` are already fully defined in `src/lib/storage/types.ts`. The six required fields are: `id: PersonaId`, `emoji: string`, `label: string`, `shortDesc: string`, `systemPrompt: string`, `sampleGreeting: string`. No schema changes are needed.
+Not applicable. No storage keys, no schema, no `localStorage` access.
 
-`PersonaId` union has 14 members: `friend | lover | sibling | employee | boss | king | grandma | therapist | daoist | shaman | junior | senior | mother | father`. The PRD §3.8 table order for `PERSONAS` is: friend → lover → sibling → junior → senior → employee → boss → king → mother → father → grandma → therapist → daoist → shaman. The `satisfies readonly Persona[]` annotation enforces union membership at compile time regardless of order; the array order is enforced by the test file.
+---
 
 ## Test Structure Findings
 
-Test environment: `node` (global config in `vitest.config.ts`). The `localStorage` shim in `src/lib/storage/__tests__/setup.ts` is registered as a `setupFile` and runs for all tests, but `personas.test.ts` will not exercise localStorage — the setup is harmless overhead.
+**Existing convention.** `src/design-system/__tests__/` for design-system tests. `MoodIcon.test.tsx` establishes:
+- File-level `// @vitest-environment happy-dom` directive.
+- Global vitest config defaults to `environment: 'node'`; per-file override.
+- `@testing-library/react` `render` + `screen` + `cleanup` in `afterEach`.
+- Source-guard tests via `fs.readFileSync` to assert `"use client"` presence/absence.
 
-The test template to mirror is `src/design-system/__tests__/moods.test.ts`. Key patterns to replicate:
-- Import `PERSONAS`, `PERSONA_MAP`, `getPersona` from `@/design-system/personas`.
-- Import `type PersonaId` from `@/lib/storage`.
-- `satisfies` ensures compile-time coverage; runtime tests add length (14), id-set uniqueness, exhaustive id membership.
-- REQ-004 adds safety-string drift guards not present in `moods.test.ts`: assert every `systemPrompt` contains the `SAFETY_FOOTER` phrase, the `PERSONA_LOCK_GUARD` phrase, and (for shaman only) the no-fortune-telling guard. Use named exported constants + `.toContain()`.
-- Additional invariant test: no field in any persona contains an unresolved `{...}` template token (regex `/\{[^}]+\}/`). Enforces "no `{userName}`, no `{diaries_serialized}`".
-- The CSS drift-guard block from `moods.test.ts` has no equivalent here (no CSS tokens for personas).
-- The "no raw emoji outside personas.ts" acceptance grep is not required by REQ-004 (persona emojis are used ad-hoc in UI text, unlike mood emojis which back calendar cells).
+**Timer testing.** `Toast` auto-dismiss requires `vi.useFakeTimers()` / `vi.runAllTimers()` / `vi.useRealTimers()`. Built into Vitest 2; no new dep.
 
-Test command: `npm test` (`vitest run`).
+**`<dialog>` in happy-dom.** Partial support: `showModal()` and `close()` are present. `::backdrop` pseudo-element not rendered. Tests assert observable state (`open` attribute, callback invocation), not visual backdrop.
+
+---
 
 ## Tooling and Commands
 
-| Purpose | Command |
+| Command | Script |
 |---|---|
-| Run all tests | `npm test` |
-| Watch mode | `npm run test:watch` |
-| Type-check | `npm run typecheck` |
-| Lint | `npm run lint` |
+| Dev server | `npm run dev` |
 | Build | `npm run build` |
+| Typecheck | `npm run typecheck` |
+| Lint | `npm run lint` |
+| Test | `npm test` |
+| Watch | `npm run test:watch` |
 
-No new devDependencies required. All test infrastructure (Vitest, node environment, localStorage shim setup, `@/` path alias) is already operational from REQ-002/003.
+Package manager: npm. Tailwind 4 via `@tailwindcss/postcss`. No Storybook, no Playwright, no separate E2E tooling. No new devDeps expected.
+
+---
 
 ## Existing Patterns to Reuse
 
-1. **Module structure from `moods.ts`**: `PERSONAS satisfies readonly Persona[]` → `PERSONA_MAP` via `Object.fromEntries` → `getPersona(id)` throwing `"Unknown PersonaId: ${id}"`. Copy this pattern verbatim, substituting names.
-2. **Import shape**: `import type { Persona, PersonaId } from '@/lib/storage'` — identical to `moods.ts` line 1.
-3. **`satisfies` keyword** for compile-time union exhaustiveness without widening the inferred type.
-4. **Test structure from `moods.test.ts`**: describe blocks for data array, map, and helper. Exhaustive id list for iteration. `.toEqual(EXPECTED_IDS)` for order assertion.
-5. **`COMMON_BASE` / `PERSONA_LOCK_GUARD` / `SAFETY_FOOTER` / `SHAMAN_GUARD` constants + small `assemble(tone, extra?)` helper** inside `personas.ts` — assembled at module load, exported for drift-guard test import. This is REQ-004's new pattern (no `moods.ts` analogue) and sets the precedent for REQ-017's wrapper.
+1. **`MoodIcon.tsx` structure** — direct template for `Card` and `EmptyState` (server primitives).
+2. **Per-file `// @vitest-environment happy-dom` directive** in every `.test.tsx`.
+3. **Source-guard `fs.readFileSync` pattern** — apply to `Card`/`EmptyState` to assert no `"use client"`; apply inversely to client primitives.
+4. **`className` prop pass-through** on every primitive root element.
+5. **No barrel** — per-file imports continue.
+6. **Korean defaults for user-visible strings** — `ConfirmDialog` `확인`/`취소`.
+
+---
 
 ## Files Likely to Change
 
-- **New file**: `src/design-system/personas.ts`
-- **New file**: `src/design-system/__tests__/personas.test.ts`
+**New source (7):**
+- `src/design-system/{IconButton, Card, FAB, BottomSheet, Toast, ConfirmDialog, EmptyState}.tsx`
 
-No existing files require modification. `src/lib/storage/types.ts` and `src/lib/storage/index.ts` are read-only for this REQ.
+**New tests (7):**
+- `src/design-system/__tests__/{IconButton, Card, FAB, BottomSheet, Toast, ConfirmDialog, EmptyState}.test.tsx`
+
+**Existing file additive change (1):**
+- `src/app/globals.css` — add `--shadow-card` and `--color-danger` to `@theme` block. No other token changes.
+
+No other existing files change. `layout.tsx`, `page.tsx`, `MoodIcon.tsx`, `moods.ts`, `personas.ts`, and `src/lib/storage/` untouched.
+
+---
 
 ## Risks
 
-1. **`systemPrompt` content quality** — Medium risk per intake, specifically because the Korean cultural personas (왕·도사·무당) have unusual tone requirements. The shaman guard (no fortune-telling / no anxiety-inducing content) must appear verbatim in a testable phrase. Mitigation: export `SHAMAN_GUARD` as a named constant and test with `.toContain(SHAMAN_GUARD)`.
+1. **`--shadow-card` consumption pattern.** Tailwind 4 does NOT auto-generate `shadow-card` utility from `@theme --shadow-*` the way it generates `bg-*` from `--color-*`. Components must use `style={{ boxShadow: 'var(--shadow-card)' }}` or `[box-shadow:var(--shadow-card)]` arbitrary class. If a developer assumes a `shadow-card` utility exists, tests pass but styles silently don't apply. Technical-design must lock the pattern.
 
-2. **File length** — 14 personas with assembled `systemPrompt` strings will likely produce a 200–350 line file. CLAUDE.md explicitly exempts constant tables from the 100-line rule. If the file crosses ~350 lines, the per-persona tone strings should be extracted to `src/design-system/persona-tones.ts` at implementation time once actual line count is visible. Do not pre-split.
+2. **`<dialog>` backdrop dismiss gap.** Native `<dialog>` does not fire `close` on backdrop click. Manual `click` handler comparing `event.target === dialogRef.current` is needed. Test plan should include "click outside closes" case.
 
-3. **`PersonaId` union order vs `PERSONAS` array order** — the union is unordered; PRD §3.8 defines a canonical display order. `satisfies` only checks membership, not sequence. The order test in `personas.test.ts` is the sole enforcement mechanism.
+3. **happy-dom `<dialog>` partial support.** Tests must only assert observable state and callback invocation, not `::backdrop` visual presence.
+
+4. **100-line file-size rule under pressure for `BottomSheet`/`ConfirmDialog`.** Non-trivial implementation surface (dialog ref, open/close effects, backdrop click, keyboard). If either exceeds 100 lines, extract a shared `useDialogControl` hook.
+
+5. **Prop-signature lock-in.** REQ-005 prop signatures will be consumed by REQ-007+. Too narrow an API causes workaround code later. Design phase must be conservative about what it does not expose (e.g., `Toast` severity levels, `BottomSheet` title slot).
+
+---
 
 ## Unknowns
 
-1. The exact Korean text for each persona's tone paragraph, `shortDesc`, and `sampleGreeting` must be sourced from PRD §3.8 / §3.8.1. The implementation agent must read `docs/requirements.md` §3.8 and §3.8.1 verbatim before authoring any Korean string content.
-2. The exact canonical Korean phrase for the persona-lock guard (§4.6.8) and the safety footer (§3.8) — these must be extracted verbatim from the PRD, not paraphrased, so the drift-guard test is meaningful.
+1. **Exact `--color-danger` hex.** Recommended `#E05C5C` but WCAG AA (4.5:1 against `#FFFFFF` at button-font size) needs measurement. If failing, lighten background rather than darken beyond brand palette range.
+2. **`Toast` z-index vs `<dialog>` top layer.** `showModal()` puts dialog in the top layer; a `position: fixed` div toast sits below. If user fires a toast while BottomSheet is open, toast may be hidden. Resolution: toast may need to be inside the dialog or use `<dialog>`/popover API itself. Flag for design phase.
+3. **`EmptyState` title type.** `string` vs `ReactNode`. `string` forces a fixed heading level; `ReactNode` lets caller choose `<h2>` vs `<p>`. Design phase decides.
+
+---
 
 ## Verdict
 PASS
