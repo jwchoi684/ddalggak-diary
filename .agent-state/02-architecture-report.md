@@ -1,143 +1,128 @@
-# Architecture Report
+# Architecture Report — REQ-006
 
 ## Summary
 
-Repository is Option C (Next.js 15 App Router + React 19 + Tailwind 4 + TypeScript) of 딸깍일기. REQ-001 through REQ-004 are complete: scaffold, design tokens, storage layer, moods, personas, `MoodIcon`. REQ-005 adds seven design-system primitives on top. No backend; frontend-only; purely additive — seven new `.tsx` files + seven test files in `src/design-system/`.
+REQ-006 implements the routing shell for 딸깍일기: five App Router page files plus `not-found.tsx` and a type-safe `Routes` helper. Repository is Next.js 15.5.18 / React 19. No routing library beyond `next/navigation` is present or needed. The existing `src/app/page.tsx` placeholder is the direct model for all new placeholders. `src/lib/storage/` establishes the module-per-responsibility pattern that `src/lib/navigation/routes.ts` must follow. No blocking gaps.
 
 ---
 
 ## Frontend Findings
 
-**Framework.** Next.js 15 App Router. Root layout is a Server Component wrapping `max-w-[420px]` body; primitives inherit container width — none should set its own.
+**Existing App Router structure:**
+- `src/app/layout.tsx` — root layout, Server Component. Wraps every route in `<div className="mx-auto min-h-dvh max-w-[420px] bg-cream">`. Single shared layout; no per-route layouts needed.
+- `src/app/page.tsx` — placeholder: `<main className="px-6 py-8 text-charcoal">` with `<h1>` and `<p className="mt-2 text-meta">`. Canonical tone for all new placeholders.
 
-**Existing design-system file.** `MoodIcon.tsx` is the canonical Server Component template: no `"use client"`, inline `style` for pixel-exact dimensions, `className` pass-through, Korean `aria-label`, silent fallback on unknown id.
+**Routes to create:**
+```
+src/app/
+  page.tsx                  ← exists; REQ-006 may keep as-is
+  not-found.tsx             ← new; Korean 404
+  diary/
+    [date]/
+      page.tsx              ← new; dynamic, async Server Component
+  list/
+    page.tsx                ← new; placeholder
+  chat/
+    page.tsx                ← new; placeholder
+  stats/
+    page.tsx                ← new; placeholder
+```
 
-**Server/client component split — confirmed.**
+**`/diary/[date]` dynamic segment:** Next.js 15 types `params` as `Promise<{ date: string }>` — must be `await`-ed in async Server Components. Page should: be `async`, await `params`, regex-check `^\d{4}-\d{2}-\d{2}$`, call `notFound()` on mismatch. Calendar-date semantic validation (Feb 31 etc.) deferred to REQ-009.
 
-| Primitive | Directive | Rationale |
-|---|---|---|
-| `Card` | none (Server) | Pure visual wrapper; no handlers, no state. |
-| `EmptyState` | none (Server) | Presentation leaf; `action` slot is `ReactNode` from caller. |
-| `IconButton` | `"use client"` | Accepts `onClick`; event handler requires client. |
-| `FAB` | `"use client"` | Accepts `onClick`; fixed-position interactive button. |
-| `BottomSheet` | `"use client"` | Controlled `open`/`onClose`; `useEffect` to call `dialogRef.showModal()`/`close()`. |
-| `Toast` | `"use client"` | Auto-dismiss timer via `useEffect` + `setTimeout`; transition state. |
-| `ConfirmDialog` | `"use client"` | Controlled visibility; button handlers; same `<dialog>` approach as BottomSheet. |
+**Scroll restoration:** Next.js App Router uses browser native scroll restoration by default. No `experimental.scrollRestoration` flag in `next.config.ts` needed. Shell must NOT introduce `overflow: hidden` on body/container or `window.scrollTo` — would silently break native restoration for later REQs.
 
-**Token coverage — two gaps confirmed in `src/app/globals.css @theme`.**
-1. **`--shadow-card`**: PRD §1.6.6 says `y=2 blur=8 opacity=0.04`. CSS value: `0 2px 8px rgba(0, 0, 0, 0.04)`.
-2. **`--color-danger`**: for destructive `ConfirmDialog`. PRD does not specify a red hex. Recommended `#E05C5C` — pastel-coral harmonizing with `--color-mood-angry: #F4A6A6`. WCAG AA contrast against `#FFFFFF` paper must be verified at button-font size in technical-design.
+**Modals not in history:** `BottomSheet`/`ConfirmDialog`/`PhotoViewer` driven by `useDialogControl` local state (REQ-005). No intercepting routes (`(.)`) or parallel slots (`@modal`).
 
-**Token consumption strategy — Tailwind 4 utility classes preferred for color/radius/font; inline `style` for pixel values from props; CSS variable reference for shadow.** Tailwind 4 does not auto-generate `shadow-*` utilities from `@theme --shadow-*` like it does for `--color-*`. Use `style={{ boxShadow: 'var(--shadow-card)' }}` or arbitrary `[box-shadow:var(--shadow-card)]`. Confirm pattern in technical-design.
+**`next/link` / `router.push`:** Not needed in REQ-006 shell. Future REQs import `Routes.*`.
 
-**`<dialog>` element — confirmed for BottomSheet + ConfirmDialog.** React 19 has improved native `<dialog>` support. Caveats:
-- `useEffect` required to call `dialogRef.current?.showModal()` when `open` flips true.
-- `::backdrop` styling lives in a CSS selector block in `globals.css` — cannot be applied via Tailwind utility classes.
-- Backdrop-click-to-close requires a manual `click` handler on the `<dialog>` comparing `event.target === dialogRef.current`. The `<dialog>` does not close on backdrop click by default.
-- All standard patterns; not blockers.
-
-**Toast mounting strategy.** Caller places `<Toast message open onClose />` in its own JSX tree. `position: fixed` is viewport-relative, so the toast pill anchors to the screen regardless of where in the tree it sits. No portal, no `<Toaster />` in `layout.tsx`, no context provider needed for MVP single-toast case. `useToast()` wraps `useState` (message, open) + `useEffect` (auto-dismiss timer). Keeps `layout.tsx` free of client components.
-
-**Accessibility expectations.**
-
-| Primitive | Element | ARIA |
-|---|---|---|
-| `IconButton` | `<button>` | `aria-label` required (caller-supplied Korean); `type="button"`. |
-| `Card` | `<div>` | None needed; purely structural. |
-| `FAB` | `<button>` | `aria-label` required; `type="button"`; `position: fixed`. |
-| `BottomSheet` | `<dialog>` | Native `role="dialog"` + `aria-modal="true"` from `showModal()`. |
-| `Toast` | `<div>` | `role="status"` (non-urgent, default); `role="alert"` (caller opts in via prop). |
-| `ConfirmDialog` | `<dialog>` | Same as BottomSheet; confirm/cancel are `<button>`. |
-| `EmptyState` | `<div>` | No interactive ARIA. |
+**URL search-params discipline:** `/list?month=YYYY-MM&sort=asc|desc` agreed for REQ-013. REQ-006 confirms route exists; no `useSearchParams()` calls in shell.
 
 ---
 
 ## Backend Findings
 
-Not applicable. REQ-005 is entirely frontend.
+Not applicable. localStorage-only MVP. `next.config.ts` intentionally empty; remain so for REQ-006.
 
 ---
 
 ## Data Model Findings
 
-Not applicable. No storage keys, no schema, no `localStorage` access.
+`DiaryEntry.date` is `string` `YYYY-MM-DD` matching `[date]` segment. Shell regex `^\d{4}-\d{2}-\d{2}$` consistent with storage type.
 
 ---
 
 ## Test Structure Findings
 
-**Existing convention.** `src/design-system/__tests__/` for design-system tests. `MoodIcon.test.tsx` establishes:
-- File-level `// @vitest-environment happy-dom` directive.
-- Global vitest config defaults to `environment: 'node'`; per-file override.
-- `@testing-library/react` `render` + `screen` + `cleanup` in `afterEach`.
-- Source-guard tests via `fs.readFileSync` to assert `"use client"` presence/absence.
+**Vitest config**: default env `node`, global `setupFiles: src/lib/storage/__tests__/setup.ts`, alias `@` → `src/`.
 
-**Timer testing.** `Toast` auto-dismiss requires `vi.useFakeTimers()` / `vi.runAllTimers()` / `vi.useRealTimers()`. Built into Vitest 2; no new dep.
+**React tests**: per-file `// @vitest-environment happy-dom`. Established pattern.
 
-**`<dialog>` in happy-dom.** Partial support: `showModal()` and `close()` are present. `::backdrop` pseudo-element not rendered. Tests assert observable state (`open` attribute, callback invocation), not visual backdrop.
+**Mocking `next/navigation`**: no existing mock helper. Any test for a Client Component or async Server Component that calls `useRouter`/`useParams`/`useSearchParams`/`usePathname`/`notFound` needs `vi.mock('next/navigation', ...)` in the test file. **REQ-006 should introduce a shared mock helper** to avoid per-file boilerplate when screens land.
+
+**`notFound()`**: throws a special Next.js error. Tests that exercise the `[date]` guard must mock to avoid uncaught throw.
+
+**Test locations**: design-system tests in `src/design-system/__tests__/`; storage in `src/lib/storage/__tests__/`. Navigation tests follow same pattern: `src/lib/navigation/__tests__/routes.test.ts`. Page-component tests may live in `src/app/__tests__/` (new convention) OR co-located in `__tests__/` adjacent to each page.tsx. Design phase decides.
 
 ---
 
 ## Tooling and Commands
 
-| Command | Script |
+| Command | Purpose |
 |---|---|
-| Dev server | `npm run dev` |
-| Build | `npm run build` |
-| Typecheck | `npm run typecheck` |
-| Lint | `npm run lint` |
-| Test | `npm test` |
-| Watch | `npm run test:watch` |
+| `npm run dev` | Next dev server |
+| `npm run build` | Production build |
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm run lint` | `next lint` |
+| `npm test` | `vitest run` |
+| `npm run test:watch` | watch |
 
-Package manager: npm. Tailwind 4 via `@tailwindcss/postcss`. No Storybook, no Playwright, no separate E2E tooling. No new devDeps expected.
+Next 15.5.18, React 19.0.0. No React Router / TanStack Router.
 
 ---
 
 ## Existing Patterns to Reuse
 
-1. **`MoodIcon.tsx` structure** — direct template for `Card` and `EmptyState` (server primitives).
-2. **Per-file `// @vitest-environment happy-dom` directive** in every `.test.tsx`.
-3. **Source-guard `fs.readFileSync` pattern** — apply to `Card`/`EmptyState` to assert no `"use client"`; apply inversely to client primitives.
-4. **`className` prop pass-through** on every primitive root element.
-5. **No barrel** — per-file imports continue.
-6. **Korean defaults for user-visible strings** — `ConfirmDialog` `확인`/`취소`.
+1. **Placeholder shape** — copy `src/app/page.tsx`: `<main className="px-6 py-8 text-charcoal"><h1>...</h1><p className="mt-2 text-meta">REQ-XXX에서 채워집니다.</p></main>`.
+2. **Module structure** — `src/lib/navigation/` mirrors `src/lib/storage/`: `routes.ts` (responsibility file), `index.ts` (barrel), `__tests__/`.
+3. **`// @vitest-environment happy-dom`** on any test rendering React.
+4. **`"use client"` guard** — only on components using browser-only APIs. `routes.ts` is pure data + functions, no directive needed.
+5. **`notFound()` from `next/navigation`** — call directly inside the async `[date]` page.
 
 ---
 
 ## Files Likely to Change
 
-**New source (7):**
-- `src/design-system/{IconButton, Card, FAB, BottomSheet, Toast, ConfirmDialog, EmptyState}.tsx`
-
-**New tests (7):**
-- `src/design-system/__tests__/{IconButton, Card, FAB, BottomSheet, Toast, ConfirmDialog, EmptyState}.test.tsx`
-
-**Existing file additive change (1):**
-- `src/app/globals.css` — add `--shadow-card` and `--color-danger` to `@theme` block. No other token changes.
-
-No other existing files change. `layout.tsx`, `page.tsx`, `MoodIcon.tsx`, `moods.ts`, `personas.ts`, and `src/lib/storage/` untouched.
+| File | Change |
+|---|---|
+| `src/app/page.tsx` | Likely no content change (REQ-001 placeholder already matches required tone). |
+| `src/app/not-found.tsx` | Create — Korean 404. |
+| `src/app/diary/[date]/page.tsx` | Create — async, await params, regex guard, `notFound()` on mismatch. |
+| `src/app/list/page.tsx` | Create — placeholder. |
+| `src/app/chat/page.tsx` | Create — placeholder. |
+| `src/app/stats/page.tsx` | Create — placeholder. |
+| `src/lib/navigation/routes.ts` | Create — `Routes` object, ≤ 30 lines. |
+| `src/lib/navigation/index.ts` | Create — barrel (if design decides). |
+| `src/lib/navigation/__tests__/routes.test.ts` | Create — unit tests for path generators. |
+| `vitest.config.ts` | Possibly update if shared `next/navigation` mock helper added. |
+| `next.config.ts` | No change. |
 
 ---
 
 ## Risks
 
-1. **`--shadow-card` consumption pattern.** Tailwind 4 does NOT auto-generate `shadow-card` utility from `@theme --shadow-*` the way it generates `bg-*` from `--color-*`. Components must use `style={{ boxShadow: 'var(--shadow-card)' }}` or `[box-shadow:var(--shadow-card)]` arbitrary class. If a developer assumes a `shadow-card` utility exists, tests pass but styles silently don't apply. Technical-design must lock the pattern.
-
-2. **`<dialog>` backdrop dismiss gap.** Native `<dialog>` does not fire `close` on backdrop click. Manual `click` handler comparing `event.target === dialogRef.current` is needed. Test plan should include "click outside closes" case.
-
-3. **happy-dom `<dialog>` partial support.** Tests must only assert observable state and callback invocation, not `::backdrop` visual presence.
-
-4. **100-line file-size rule under pressure for `BottomSheet`/`ConfirmDialog`.** Non-trivial implementation surface (dialog ref, open/close effects, backdrop click, keyboard). If either exceeds 100 lines, extract a shared `useDialogControl` hook.
-
-5. **Prop-signature lock-in.** REQ-005 prop signatures will be consumed by REQ-007+. Too narrow an API causes workaround code later. Design phase must be conservative about what it does not expose (e.g., `Toast` severity levels, `BottomSheet` title slot).
+1. **Next.js 15 async `params`.** Sync read (`params.date`) returns `undefined` without TS error in some configs. Must `await params` before destructuring. Known v14→v15 breaking change.
+2. **`notFound()` in tests.** Throws internally. Without `vi.mock('next/navigation')`, test crashes with uncaught throw rather than clean assertion failure.
+3. **`happy-dom` vs `node` env split.** Easy to forget the per-file directive for page tests.
+4. **Tailwind token availability.** New page files under `src/` auto-picked by Tailwind content scan. No config change needed.
 
 ---
 
 ## Unknowns
 
-1. **Exact `--color-danger` hex.** Recommended `#E05C5C` but WCAG AA (4.5:1 against `#FFFFFF` at button-font size) needs measurement. If failing, lighten background rather than darken beyond brand palette range.
-2. **`Toast` z-index vs `<dialog>` top layer.** `showModal()` puts dialog in the top layer; a `position: fixed` div toast sits below. If user fires a toast while BottomSheet is open, toast may be hidden. Resolution: toast may need to be inside the dialog or use `<dialog>`/popover API itself. Flag for design phase.
-3. **`EmptyState` title type.** `string` vs `ReactNode`. `string` forces a fixed heading level; `ReactNode` lets caller choose `<h2>` vs `<p>`. Design phase decides.
+1. Shared `vi.mock('next/navigation')` helper in REQ-006 or defer to REQ-007? Recommend introduce now to reduce future boilerplate.
+2. Whether `src/lib/navigation/index.ts` barrel is needed immediately. Convention from storage suggests yes; design phase decides.
+3. Page-component test file location: `src/app/__tests__/` (centralized) vs co-located. Design phase picks.
 
 ---
 

@@ -1,239 +1,215 @@
-# Test Plan — REQ-005
+# Test Plan — REQ-006
 
 ## Summary
 
-Eight test files covering 9 design-system primitives (Card, EmptyState, IconButton, FAB, useDialogControl, BottomSheet, ConfirmDialog, Toast, useToast). Total ~51 `it()` cases. Every Caller Invariant from the API contract is mapped to at least one test. Source-guard tests verify the `"use client"` boundary is correct for each file — present for client components, absent for server components.
+REQ-006 introduces the Next.js App Router routing shell: five page files, a Korean `not-found.tsx`, a type-safe `Routes` helper module, and a shared `vi.mock('next/navigation')` test helper. This plan covers all logic worth testing at the unit level across 4 test files (~20 `it()` cases total). Every Caller Invariant from the API contract is mapped to at least one test. E2E navigation behavior (history-stack back-routes, scroll restoration, modal history isolation) is deferred to Phase 13.
+
+No new test dependencies are required. The project already has Vitest 2, `@testing-library/react`, and `happy-dom`.
 
 ---
 
 ## Runtime & Config
 
-- **Vitest global env:** `node` (project default per `vitest.config.ts`).
-- **Per-file env override:** `// @vitest-environment happy-dom` at the top of every test file.
-- **DOM library:** `@testing-library/react` (`render`, `screen`, `fireEvent`, `cleanup`) plus `renderHook` for hook tests.
-- **Teardown:** `afterEach(cleanup)` declared in each file (same pattern as MoodIcon.test.tsx).
-- **Dialog stubs:** `HTMLDialogElement.prototype.showModal` and `HTMLDialogElement.prototype.close` assigned as `vi.fn()` in `beforeEach` in every file that mounts a `<dialog>` (useDialogControl, BottomSheet, ConfirmDialog). Restore originals in `afterEach`.
-- **Timer faking:** `vi.useFakeTimers()` in `beforeEach` / `vi.useRealTimers()` in `afterEach` in `useToast.test.ts` only.
-- **Source-guard reads:** `node:fs` / `node:path` + `process.cwd()` — same pattern as `MoodIcon.test.tsx`.
-- **Import alias:** `@/design-system/<Name>` per-file, no barrel.
+- **Default environment**: `node` (set in `vitest.config.ts`).
+- **happy-dom opt-in**: files that render JSX must carry `// @vitest-environment happy-dom` on line 1, following the same convention as `Card.test.tsx`, `BottomSheet.test.tsx`, etc.
+- **Path alias**: `@/` resolves to `src/` via `vitest.config.ts` — use in all imports.
+- **Global `setupFiles`**: `src/lib/storage/__tests__/setup.ts` is auto-loaded; no new entry needed.
+- **`setupNextNavigation.ts` is opt-in per file**: imported and `vi.mock`-ed explicitly at the top of each consuming test, matching the existing storage-shim model. It is NOT added to `setupFiles`.
 
 ---
 
 ## Unit Tests
 
-### Card.test.tsx (5 cases, happy-dom)
+### `src/lib/navigation/__tests__/routes.test.ts` (10 cases, node env)
 
-1. **renders children** — render `<Card><span data-testid="child" /></Card>`; `screen.getByTestId('child')` exists.
-2. **boxShadow token** — query root element `style.boxShadow`; assert equals `'var(--shadow-card)'`.
-3. **radius tokens** — default: root element `className` references `--radius-card`; `large={true}` switches to `--radius-card-lg`. Verified by inspecting `className` string for the relevant CSS variable name.
-4. **className merged** — pass `className="extra-class"`; root element has `extra-class` in its `classList`.
-5. **source-guard: no `"use client"`** — `fs.readFileSync('src/design-system/Card.tsx', 'utf8')` does NOT contain `'"use client"'`.
+No environment directive needed (default is `node`). No JSX, no DOM, no mocks.
 
----
+```
+describe('Routes — static path constants')
+  it('Routes.calendar equals "/"')
+  it('Routes.list equals "/list"')
+  it('Routes.chat equals "/chat"')
+  it('Routes.stats equals "/stats"')
 
-### EmptyState.test.tsx (7 cases, happy-dom)
+describe('Routes.diary')
+  it('Routes.diary("2026-05-17") returns "/diary/2026-05-17"')
+  it('Routes.diary(date) always starts with "/diary/" and ends with the date argument unchanged')
 
-1. **renders all 4 slots** — pass `icon`, `title`, `description`, and `action`; assert all four are present in the rendered output.
-2. **omits absent optional slots** — render with only `title`; assert icon container, description text, and action wrapper are absent (`queryBy*` returns null).
-3. **string title wrapped in `<p>`** — pass `title="빈 목록"` (string); assert the text is inside a `<p>` element.
-4. **ReactNode title rendered as-is** — pass `title={<h2>제목</h2>}`; assert an `<h2>` is in the DOM with no intermediate `<p>` wrapper.
-5. **className merged** — pass `className="my-layout"`; root `<div>` has `my-layout` in its `classList`.
-6. **description text present** — pass `description="설명입니다"`; `screen.getByText('설명입니다')` found.
-7. **source-guard: no `"use client"`** — `fs.readFileSync('src/design-system/EmptyState.tsx', 'utf8')` does NOT contain `'"use client"'`.
+describe('Routes.listWithFilter')
+  it('empty params object {} returns exactly "/list" with no trailing "?"')
+  it('{ month: "2026-04" } returns "/list?month=2026-04"')
+  it('{ sort: "asc" } returns "/list?sort=asc"')
+  it('{ month: "2026-04", sort: "desc" } returns "/list?month=2026-04&sort=desc" (month precedes sort)')
+```
 
----
+### `src/app/__tests__/diary-date-page.test.tsx` (4 cases, happy-dom)
 
-### IconButton.test.tsx (6 cases, happy-dom)
+Directive: `// @vitest-environment happy-dom` on line 1.
 
-1. **renders `<button type="button">` with correct aria-label** — `screen.getByRole('button', { name: '닫기' })` resolves; attribute `type` is `'button'`.
-2. **touch-target dimensions** — `element.style.width === '44px'` and `element.style.height === '44px'`.
-3. **onClick fires on click** — `fireEvent.click(button)`; `onClick` spy called exactly once.
-4. **disabled prevents onClick** — `disabled={true}`: `fireEvent.click(button)`; `onClick` spy NOT called.
-5. **disabled adds opacity and cursor classes** — disabled button has `opacity-40` and `cursor-not-allowed` in `className`.
-6. **source-guard: has `"use client"`** — `fs.readFileSync('src/design-system/IconButton.tsx', 'utf8')` CONTAINS `'"use client"'`.
+The async Server Component is invoked as a plain async function. The returned JSX is rendered with `@testing-library/react`. `notFound` is replaced by the shared helper so throws are catchable. `params` is passed as `Promise.resolve({ date })` to satisfy the Next.js 15 `Promise<{ date: string }>` type.
 
----
+Mock setup at top of file:
+```ts
+import {
+  mockNotFound, mockUseRouter, mockUseSearchParams,
+  mockUseParams, mockUsePathname, resetNavigationMocks,
+} from '@/lib/navigation/__tests__/setupNextNavigation';
 
-### FAB.test.tsx (5 cases, happy-dom)
+vi.mock('next/navigation', () => ({
+  useRouter:       () => mockUseRouter(),
+  useSearchParams: () => mockUseSearchParams(),
+  useParams:       () => mockUseParams(),
+  usePathname:     () => mockUsePathname(),
+  notFound:        mockNotFound,
+}));
+beforeEach(() => resetNavigationMocks());
+```
 
-1. **renders `<button type="button">` with aria-label** — `screen.getByRole('button', { name: '새 일기 작성' })` resolves; `type === 'button'`.
-2. **touch-target dimensions** — `element.style.width === '56px'` and `element.style.height === '56px'`.
-3. **onClick fires on click** — `fireEvent.click(button)`; spy called exactly once.
-4. **default fixed positioning and charcoal background** — button `className` contains `fixed`, `bottom-6`, `right-6`, and `bg-charcoal`.
-5. **source-guard: has `"use client"`** — `fs.readFileSync('src/design-system/FAB.tsx', 'utf8')` CONTAINS `'"use client"'`.
+```
+describe('DiaryPage — date format guard')
+  it('valid date "2026-05-17": renders heading containing the date; mockNotFound not called')
+  it('invalid format "not-a-date": awaiting the page throws Error("NEXT_NOT_FOUND"); mockNotFound called once')
+  it('slash-separated "2026/05/17": fails regex, awaiting throws Error("NEXT_NOT_FOUND"); mockNotFound called once')
+  it('out-of-range month "2026-13-01": passes /^\d{4}-\d{2}-\d{2}$/, renders without calling notFound (semantic check deferred to REQ-009)')
+```
 
----
+Rendering strategy (cases 1 and 4):
+```ts
+const jsx = await DiaryPage({ params: Promise.resolve({ date }) });
+render(jsx);
+expect(screen.getByRole('heading')).toHaveTextContent(date);
+expect(mockNotFound).not.toHaveBeenCalled();
+```
 
-### useDialogControl.test.ts (5 cases, happy-dom)
+Catching strategy (cases 2 and 3):
+```ts
+await expect(
+  DiaryPage({ params: Promise.resolve({ date }) })
+).rejects.toThrow('NEXT_NOT_FOUND');
+expect(mockNotFound).toHaveBeenCalledTimes(1);
+```
 
-Setup: in `beforeEach`, assign `HTMLDialogElement.prototype.showModal = vi.fn()` and `HTMLDialogElement.prototype.close = vi.fn()`. Restore originals in `afterEach`. Use a minimal wrapper component that calls `useDialogControl(open, onClose)` and attaches the returned `ref` to a rendered `<dialog>`.
+### `src/app/__tests__/not-found.test.tsx` (3 cases, happy-dom)
 
-1. **open=true calls showModal once** — render wrapper with `open={true}`; after effects flush, `showModal` spy has been called once.
-2. **open=false calls close once** — mount with `open={true}` then `rerender` with `open={false}`; `close` spy called once.
-3. **toggling true→false→true calls showModal twice** — `rerender` to false then back to true; `showModal` call count is 2.
-4. **onDialogClick with matching target calls onClose** — call the returned `onDialogClick` with a synthetic event where `e.target === ref.current` (the dialog element itself); `onClose` spy called once.
-5. **onDialogClick with non-matching target does NOT call onClose** — call `onDialogClick` with `e.target` set to a child `<div>` (different from `ref.current`); `onClose` spy NOT called.
+Directive: `// @vitest-environment happy-dom` on line 1.
 
----
+No `next/navigation` mock needed — `NotFound` is a plain Server Component with no hooks or navigation imports.
 
-### BottomSheet.test.tsx (6 cases, happy-dom)
+```
+describe('NotFound page')
+  it('renders the Korean message "찾을 수 없는 페이지입니다."')
+  it('renders an anchor with href="/" and text content "캘린더로 돌아가세요"')
+  it('source-guard: src/app/not-found.tsx contains no "use client" directive')
+```
 
-Setup: same `HTMLDialogElement.prototype` stubs as useDialogControl tests.
+Source-guard pattern follows existing `Card.test.tsx`:
+```ts
+const src = fs.readFileSync(
+  path.resolve(process.cwd(), 'src/app/not-found.tsx'),
+  'utf8',
+);
+expect(src).not.toContain('"use client"');
+```
 
-1. **open=true invokes showModal** — mount `<BottomSheet open={true} onClose={vi.fn()}>…</BottomSheet>`; after effects, `showModal` stub called once.
-2. **open=false invokes close** — mount with `open={false}`; `close` stub called once.
-3. **grip handle rendered** — DOM contains an element matching the grip handle classes `w-10 h-1 rounded-full`; element is present regardless of open state (always mounted).
-4. **backdrop click fires onClose** — obtain dialog element reference; `fireEvent.click(dialogEl)` constructing the event so `target` equals the dialog element itself; `onClose` spy called.
-5. **children rendered inside dialog** — pass `<span data-testid="bs-child" />`; `screen.getByTestId('bs-child')` present.
-6. **source-guard: has `"use client"`** — `fs.readFileSync('src/design-system/BottomSheet.tsx', 'utf8')` CONTAINS `'"use client"'`.
+Anchor assertion:
+```ts
+const anchor = screen.getByRole('link', { name: '캘린더로 돌아가세요' });
+expect(anchor.getAttribute('href')).toBe('/');
+```
 
----
+### `src/lib/navigation/__tests__/setupNextNavigation.test.ts` (3 cases, happy-dom)
 
-### ConfirmDialog.test.tsx (8 cases, happy-dom)
+Self-tests for the shared mock helper. Directive: `// @vitest-environment happy-dom` on line 1.
 
-Setup: same dialog stubs.
+```
+describe('setupNextNavigation helper')
+  it('mockRouter.push is a callable vi.fn (mock.calls is an array)')
+  it('mockNotFound() throws Error with message "NEXT_NOT_FOUND"')
+  it('resetNavigationMocks() clears mockRouter.push call history AND re-applies the throw behavior on mockNotFound after a manual mockReset()')
+```
 
-1. **renders message text** — `screen.getByText('정말 삭제할까요?')` found after render.
-2. **default Korean labels and button height** — buttons with accessible name `'확인'` and `'취소'` both exist; each has `min-h-[44px]` or equivalent in `className`.
-3. **custom labels override defaults** — pass `confirmLabel="삭제"` and `cancelLabel="돌아가기"`; buttons `'삭제'` and `'돌아가기'` found; `'확인'` and `'취소'` absent.
-4. **confirm click fires onConfirm only** — `fireEvent.click(confirmButton)`; `onConfirm` spy called once; `onCancel` NOT called.
-5. **cancel click fires onCancel only** — `fireEvent.click(cancelButton)`; `onCancel` spy called once; `onConfirm` NOT called.
-6. **backdrop click fires onCancel** — `fireEvent.click(dialogEl)` with target set to dialog element; `onCancel` spy called.
-7. **destructive=true applies danger styling** — confirm button has `bg-danger` in `className` (or inline `backgroundColor` equals `var(--color-danger)`); `bg-charcoal` is absent from confirm button.
-8. **source-guard: has `"use client"`** — `fs.readFileSync('src/design-system/ConfirmDialog.tsx', 'utf8')` CONTAINS `'"use client"'`.
-
----
-
-### Toast.test.tsx (5 cases, happy-dom)
-
-1. **renders element when open=true** — `screen.getByRole('status')` found after render with `open={true} message="저장됨"`.
-2. **nothing rendered when open=false** — `screen.queryByRole('status')` returns null with `open={false}`.
-3. **default role is "status"** — rendered element's `role` attribute equals `'status'` (no explicit `role` prop passed).
-4. **role="alert" opt-in** — pass `role="alert"`; `screen.getByRole('alert')` resolves; `screen.queryByRole('status')` is null.
-5. **source-guard: has `"use client"`** — `fs.readFileSync('src/design-system/Toast.tsx', 'utf8')` CONTAINS `'"use client"'`.
-
----
-
-### useToast.test.ts (5 cases, happy-dom)
-
-Setup: `vi.useFakeTimers()` in `beforeEach`; `vi.useRealTimers()` in `afterEach`. Use `renderHook` from `@testing-library/react`.
-
-1. **initial state** — `result.current.open === false` and `result.current.message === ''`.
-2. **show sets open and message** — `act(() => result.current.show('저장됨'))`; assert `open === true` and `message === '저장됨'`.
-3. **auto-hides after default duration** — after `show()`, `act(() => vi.advanceTimersByTime(1800))`; assert `open === false`.
-4. **re-calling show before timer expires resets timer** — call `show('첫 번째')`, advance 900ms (still open), call `show('두 번째')`, advance 900ms more (still open — prior timer was cleared), advance final 900ms (total 1800ms from second call); assert `open === false`.
-5. **hide() immediately closes** — call `show('테스트')`, then `act(() => result.current.hide())`; `open === false`; advance full 1800ms — no error thrown (cleared timer fires nothing).
+Implementation notes:
+- Case 1: call `mockRouter.push('/test')`; assert `Array.isArray(mockRouter.push.mock.calls)` and length is 1.
+- Case 2: `expect(() => mockNotFound()).toThrow('NEXT_NOT_FOUND')`.
+- Case 3: manually call `mockRouter.push('x')` to accumulate a call; call `mockNotFound.mockReset()` to clear its throw; then call `resetNavigationMocks()`; assert `mockRouter.push.mock.calls` is empty AND `expect(() => mockNotFound()).toThrow('NEXT_NOT_FOUND')`.
 
 ---
 
 ## Integration Tests
 
-Not applicable for this REQ. All primitives are self-contained React components and hooks with no network calls, no `localStorage` access, and no cross-module side effects. Component composition (e.g., BottomSheet consuming useDialogControl) is covered within the component's own unit test file.
+Not applicable. The `Routes` helper has no I/O. Page components are Server Components with no cross-module side effects beyond calling `notFound()`. No storage or network calls are introduced in this REQ.
 
 ---
 
 ## E2E Tests
 
-Not applicable. No screen-level user journey is delivered in REQ-005. First E2E coverage deferred to REQ-007 (calendar screen). Escape-key native dialog close behavior (which happy-dom does not simulate) is also deferred to that phase.
+Not applicable at this phase. Back-navigation routes (list→editor→back = list, AI chat citation→editor→back = AI chat), scroll restoration, and modal history isolation are deferred to Phase 13 (E2E). REQ-006 itself marks these as non-goals.
 
 ---
 
 ## Regression Tests
 
-- Existing `MoodIcon.test.tsx`, `moods.test.ts`, and `personas.test.ts` suites must continue to pass after REQ-005 files are added. Running `npx vitest run` exercises all suites together.
-- `src/app/globals.css` receives two additive token lines and one CSS rule block. No existing selector is removed or renamed. `npm run build` is the regression check for this file.
+All existing test suites (`moods.test.ts`, `personas.test.ts`, `diaries.test.ts`, `conversations.test.ts`, `settings.test.ts`, all design-system tests) must continue to pass unchanged after REQ-006 files are added. Running `npm test` (which executes `vitest run`) exercises all suites together. `src/app/page.tsx` is explicitly unchanged per the technical design; its existing behavior is not retested here.
 
 ---
 
 ## Security-Relevant Tests
 
-No security-sensitive logic in these primitives (no auth, no storage, no network). The source-guard tests (cases verifying `"use client"` presence/absence) prevent accidental server-side execution of client-only hooks (`useState`, `useEffect`, `useRef`) which would cause runtime errors in Next.js server components — a correctness boundary rather than a security one.
+No security-sensitive logic in this REQ (no auth, no user data persisted, no API surface). The source-guard test on `not-found.tsx` (`"use client"` absent) prevents accidental inclusion of client-only hooks in a Server Component — a correctness boundary enforced by the test.
 
 ---
 
 ## Fixtures / Mocks Needed
 
-- **`HTMLDialogElement.prototype.showModal`** — `vi.fn()` stub; required in useDialogControl.test.ts, BottomSheet.test.tsx, ConfirmDialog.test.tsx. happy-dom does not implement `showModal`.
-- **`HTMLDialogElement.prototype.close`** — same.
-- **`vi.useFakeTimers()`** — useToast.test.ts only.
-- **No MSW, no network mocks, no localStorage setup** — primitives have no I/O.
-- **`node:fs` / `node:path`** — source-guard reads; available in happy-dom env (Node.js runtime).
+- `src/lib/navigation/__tests__/setupNextNavigation.ts` — the shared mock helper (created by the implementation agent, consumed by two test files). This is a production-side utility, not a fixture.
+- No additional fixtures. `routes.test.ts` needs no DOM or mocks. `not-found.test.tsx` needs no mocks.
+- `node:fs` / `node:path` — used in `not-found.test.tsx` source-guard read; available in happy-dom env (Node.js runtime), same pattern as `Card.test.tsx`.
+
+---
+
+## Coverage Matrix
+
+Maps each Caller Invariant from `04-api-contract.md` (§ "Caller Invariants", 1–10) to the covering test case(s).
+
+| # | Invariant | Covered By |
+|---|---|---|
+| 1 | `Routes.calendar === '/'` | `routes.test.ts` — "Routes.calendar equals /" |
+| 2 | `Routes.diary(date)` starts with `'/diary/'` and ends with `date` unchanged | `routes.test.ts` — two `Routes.diary` cases |
+| 3 | `Routes.list === '/list'` | `routes.test.ts` — "Routes.list equals /list" |
+| 4 | `Routes.listWithFilter({})` returns exactly `'/list'` (no trailing `?`) | `routes.test.ts` — "empty params returns /list" |
+| 5 | `URLSearchParams` encoding; `month` always precedes `sort` | `routes.test.ts` — "month=2026-04&sort=desc" and single-param cases |
+| 6 | `Routes.chat === '/chat'` | `routes.test.ts` — "Routes.chat equals /chat" |
+| 7 | `Routes.stats === '/stats'` | `routes.test.ts` — "Routes.stats equals /stats" |
+| 8 | No REQ-006 page file contains `"use client"` | `not-found.test.tsx` source-guard; diary page guard covered by `npm run typecheck` + `npm run build` |
+| 9 | `mockRouter` is the same object reference returned by `mockUseRouter()` | `setupNextNavigation.test.ts` — mockRouter.push is callable vi.fn |
+| 10 | `resetNavigationMocks()` is idempotent; safe in any `beforeEach` | `setupNextNavigation.test.ts` — reset clears calls and re-applies throw |
 
 ---
 
 ## Commands to Run
 
 ```bash
-# Run only the 8 new REQ-005 test files
-npx vitest run src/design-system/__tests__/Card.test.tsx \
-  src/design-system/__tests__/EmptyState.test.tsx \
-  src/design-system/__tests__/IconButton.test.tsx \
-  src/design-system/__tests__/FAB.test.tsx \
-  src/design-system/__tests__/useDialogControl.test.ts \
-  src/design-system/__tests__/BottomSheet.test.tsx \
-  src/design-system/__tests__/ConfirmDialog.test.tsx \
-  src/design-system/__tests__/Toast.test.tsx \
-  src/design-system/__tests__/useToast.test.ts
+# Type-check all files including new test files
+npm run typecheck
 
-# Run all design-system tests (includes MoodIcon, moods, personas)
-npx vitest run src/design-system/__tests__/
+# Lint
+npm run lint
 
-# Full test suite
-npx vitest run
+# Full test suite (includes all existing + new REQ-006 files)
+npm test
 
-# Type-check (ensure test files compile alongside source)
-npx tsc --noEmit
-
-# Build check (verifies globals.css token additions don't break Tailwind)
+# Build check: validates Next.js can statically prerender all five placeholder pages
 npm run build
 ```
 
----
-
-## Coverage Matrix
-
-Mapping every Caller Invariant and Edge Contract from `04-api-contract.md`:
-
-| Invariant / Edge | Covering Test(s) |
-|---|---|
-| Shadow MUST be `var(--shadow-card)` inline style on Card | Card case 2 |
-| Card `className` appended after internal classes | Card case 4 |
-| No `"use client"` in Card | Card case 5 |
-| No `"use client"` in EmptyState | EmptyState case 7 |
-| EmptyState string `title` wrapped in `<p>` | EmptyState case 3 |
-| EmptyState ReactNode `title` rendered as-is | EmptyState case 4 |
-| EmptyState optional slots absent when not provided | EmptyState case 2 |
-| IconButton touch target 44×44 always (not overridable by className) | IconButton case 2 |
-| IconButton `aria-label === label` | IconButton case 1 |
-| IconButton `disabled=true` — onClick not fired | IconButton case 4 |
-| IconButton `disabled=true` — `opacity-40 cursor-not-allowed` classes | IconButton case 5 |
-| `"use client"` in IconButton | IconButton case 6 |
-| FAB touch target 56×56 | FAB case 2 |
-| FAB default `fixed bottom-6 right-6 bg-charcoal` | FAB case 4 |
-| `"use client"` in FAB | FAB case 5 |
-| useDialogControl `open=true` → `showModal()` called | useDialogControl case 1 |
-| useDialogControl `open=false` → `close()` called | useDialogControl case 2 |
-| useDialogControl rapid toggle null-guard | useDialogControl case 3 |
-| useDialogControl `onDialogClick` matching target → `onClose` | useDialogControl case 4 |
-| useDialogControl `onDialogClick` non-matching target → no `onClose` | useDialogControl case 5 |
-| BottomSheet always mounted (never conditionally unmounted) | BottomSheet case 3 (grip present when open=false) |
-| BottomSheet backdrop click → `onClose` | BottomSheet case 4 |
-| `"use client"` in BottomSheet | BottomSheet case 6 |
-| ConfirmDialog default labels Korean `'확인'`/`'취소'` | ConfirmDialog case 2 |
-| ConfirmDialog both buttons ≥ 44px height | ConfirmDialog case 2 (min-h class assertion) |
-| ConfirmDialog backdrop click → `onCancel` | ConfirmDialog case 6 |
-| ConfirmDialog `destructive=true` → `bg-danger` on confirm button | ConfirmDialog case 7 |
-| ConfirmDialog never closes itself (caller owns open state) | ConfirmDialog cases 4, 5 (onConfirm/onCancel fired; open not checked internally) |
-| `"use client"` in ConfirmDialog | ConfirmDialog case 8 |
-| Toast renders only when `open=true` | Toast cases 1, 2 |
-| Toast default `role="status"` | Toast case 3 |
-| Toast `role="alert"` opt-in | Toast case 4 |
-| `"use client"` in Toast | Toast case 5 |
-| useToast initial state open=false, message='' | useToast case 1 |
-| useToast `show()` → open=true + message set | useToast case 2 |
-| useToast auto-hides after default 1800ms | useToast case 3 |
-| useToast `show()` mid-timer clears prior timer | useToast case 4 |
-| useToast `hide()` immediately closes | useToast case 5 |
+Targeted run for REQ-006 files only (useful during implementation):
+```bash
+npx vitest run \
+  src/lib/navigation/__tests__/routes.test.ts \
+  src/lib/navigation/__tests__/setupNextNavigation.test.ts \
+  src/app/__tests__/diary-date-page.test.tsx \
+  src/app/__tests__/not-found.test.tsx
+```
 
 ---
 
@@ -241,13 +217,12 @@ Mapping every Caller Invariant and Edge Contract from `04-api-contract.md`:
 
 | Category | Reason |
 |---|---|
-| Visual regression / screenshots | No Playwright or Storybook snapshot framework installed |
-| Browser E2E | Deferred to REQ-007; happy-dom covers DOM behavior for atoms |
-| CSS specificity / Tailwind purging | Build step (`npm run build`) is the gate; not a Vitest concern |
-| Animation timing precision | happy-dom does not compute CSS transitions; slide-up verified via `data-open` attribute only |
-| Escape key native dialog close | happy-dom does not dispatch native dialog `close` events from Escape; covered structurally by useDialogControl hook tests |
-| SSR rendering of server components | Next.js SSR env not available in Vitest; `useEffect` guard is structural |
-| Toast z-index above `showModal` top layer | Cannot be asserted in unit tests; documented constraint in component JSDoc |
+| Placeholder page content for `/`, `/list`, `/chat`, `/stats` | Trivial JSX with no logic; validated by `npm run build` static prerender, not unit tests |
+| E2E navigation (back-routes, scroll restore, modal history) | Deferred to Phase 13; REQ-006 marks these as non-goals |
+| Semantic date validation (Feb 31, month > 12 semantics) | Explicitly deferred to REQ-009; case 4 of `diary-date-page.test.tsx` documents this boundary |
+| Visual regression / screenshots | No Playwright or snapshot framework in project |
+| SSR rendering environment | Next.js SSR env not available in Vitest; structural correctness covered by `npm run build` |
+| Security / auth | No auth, no stored user data, no API surface in this REQ |
 
 ---
 

@@ -1,195 +1,109 @@
-# Requirement Intake — REQ-005
+# Requirement Intake — REQ-006
 
 ## Restatement
 
-REQ-005 builds the foundation of the project's UI vocabulary: seven reusable
-design-system primitives that every subsequent screen REQ will compose from —
-`IconButton` (white circular 44px), `Card` (white, radius 16–20, subtle shadow),
-`FAB` (black 56px, fixed bottom-right), `BottomSheet` (top-rounded 24px with
-grip handle), `Toast` (gray pill, 1.5–2s auto-dismiss), `ConfirmDialog` (with
-destructive variant), and `EmptyState` (icon + title + optional action). All
-primitives live in `src/design-system/`, consume only design tokens already
-defined in `src/app/globals.css @theme` (no hardcoded colors/radii/shadow), and
-guarantee a 44×44 minimum touch target so callers in REQ-007+ never have to
-re-litigate accessibility or visual cohesion.
+REQ-006는 딸깍일기 앱의 **라우팅 셸(routing shell)** 만 구축한다. 5개 최상위 화면(캘린더 / 일기 에디터 / 리스트 / AI 채팅 / 통계)에 대응하는 Next.js App Router 페이지 파일을 생성하고, 모든 화면 간 이동이 브라우저 history-stack 을 그대로 따르도록 한다. 각 page.tsx 는 "REQ-XXX에서 채워집니다" 수준의 **최소 placeholder** 만 렌더하며, 실제 화면 콘텐츠는 후속 화면 REQ 가 채운다. 뒤로가기 시 (a) 진입 경로에 맞는 이전 화면으로 복귀하고, (b) 리스트의 월·정렬, AI 채팅의 스크롤 위치 같은 화면 상태가 보존되는 것이 핵심 가치다. 모달은 history-stack 에 들어가지 않으므로 로컬 React state 로만 관리한다.
 
-## In Scope (7 primitives)
+## In Scope (routing shell only)
 
-| Primitive       | Source (PRD)       | File (target)                                | Single responsibility                                  |
-|-----------------|--------------------|----------------------------------------------|--------------------------------------------------------|
-| `IconButton`    | §1.6.5, §1.6.6     | `src/design-system/IconButton.tsx`           | Inline 44px white circular button hosting one 24px line icon. |
-| `Card`          | §1.6.6             | `src/design-system/Card.tsx`                 | White surface, radius 16–20, shadow y=2 blur=8 op=0.04. |
-| `FAB`           | §1.6.6             | `src/design-system/FAB.tsx`                  | Fixed bottom-right black circular 56px action button.   |
-| `BottomSheet`   | §1.6.6, §5.3       | `src/design-system/BottomSheet.tsx`          | Modal panel: top radius 24, grip handle, backdrop dismiss. |
-| `Toast`         | §1.6.6, §5.2       | `src/design-system/Toast.tsx`                | Pill notification at screen bottom, auto-dismiss 1.5–2s. |
-| `ConfirmDialog` | §5.4               | `src/design-system/ConfirmDialog.tsx`        | Two-button confirm with destructive variant.            |
-| `EmptyState`    | §5.5               | `src/design-system/EmptyState.tsx`           | Icon/illustration + title + description + optional action. |
+- 5개 App Router 페이지 파일 생성:
+  - `/` → `src/app/page.tsx` (캘린더 placeholder; 기존 REQ-001 파일을 유지·정리)
+  - `/diary/[date]` → `src/app/diary/[date]/page.tsx` (에디터 placeholder, dynamic segment)
+  - `/list` → `src/app/list/page.tsx`
+  - `/chat` → `src/app/chat/page.tsx`
+  - `/stats` → `src/app/stats/page.tsx`
+- 404 처리용 `src/app/not-found.tsx` 1개 (간단한 한국어 메시지).
+- 타입 안전 경로 헬퍼: `src/lib/navigation/routes.ts` (≤ 30줄, 단일 책임).
+- `/diary/[date]` 의 date 포맷(YYYY-MM-DD) 유효성 1차 검증 (잘못된 형식이면 `notFound()`).
+- Next.js scroll restoration 기본값 확인 및 필요 시 `next.config.ts` 에 명시.
+- 라우팅 라이브러리 종속성: **추가 설치 없음** (`next/navigation` 만 사용).
 
-Each primitive ships with its own Vitest spec under `tests/design-system/`
-following REQ-003 / REQ-004 precedent (node env by default; happy-dom per file
-where DOM is needed).
+## Out of Scope (page contents → owner REQs)
 
-## Out of Scope (deferred to owner REQ)
-
-- **`Header` composite** (PRD §5.1 — left/title/right slots assembling two/three
-  `IconButton`s) → first concrete use is the calendar top bar, so own it in
-  **REQ-007** (or REQ-006 if the nav shell needs it sooner). REQ-005 only
-  ships the `IconButton` atom; the layout composite is not a primitive.
-- **Mood-color tinted cards / mood-bar chart bars** (PRD §1.6.6 last row) →
-  owned by **REQ-014** (statistics screen). The base `Card` here is achromatic.
-- **Calendar day cell / mood emoji tile** → owned by **REQ-007**.
-- **Photo carousel / fullscreen viewer** → owned by **REQ-011 / REQ-012**.
-- **Chat message bubbles, cited-diary chips, persona avatar pill** → owned by
-  **REQ-015 / REQ-017**.
-- **Theming / dark mode** → PRD §8.2 P1, indexed out of MVP.
-- **Animation / transition system** (slide between screens, fade-slide for
-  modals — PRD §6.1) → owned by **REQ-006** (nav shell) for screen-level
-  transitions; primitive-level animations (toast fade, bottom-sheet slide-up)
-  stay inside each primitive and use plain CSS transitions only.
-- **Storybook / demo page** — PRD §5 marks it optional and REQ-005's acceptance
-  criteria say "선택". Skip to avoid a new dev dependency; Vitest specs cover
-  render-time guarantees.
+| Route / Concern | Owner REQ |
+|---|---|
+| 캘린더 실제 UI (월 그리드·무드 셀) | REQ-007 |
+| 무드 선택 바텀시트 모달 | REQ-008 |
+| 에디터 본문·저장·삭제 로직 | REQ-009 |
+| 에디터 가로 캘린더 드롭다운 | REQ-010 |
+| 사진 추가/카로젤/길게 누름 | REQ-011 |
+| 사진 전체화면 뷰어 | REQ-012 |
+| 리스트 실제 UI·필터 동작 | REQ-013 |
+| 통계 그래프 | REQ-014 |
+| AI 채팅 화면들 (모드 A~D) | REQ-015 ~ REQ-018 |
+| 로딩·에러 페이지(loading.tsx/error.tsx) | 각 화면 REQ |
+| 딥링크·공유 URL | v2 (REQ-006 §Non-Goals) |
+| 새로고침 후 상태 완전 복구 | v2 (REQ-006 §Non-Goals) |
 
 ## Invariants
 
-1. **Token-only styling.** Every color, radius, shadow, font, and the mobile
-   container width must reference a CSS custom property defined under
-   `@theme` in `src/app/globals.css`. No hex literals, no inline magic radius
-   numbers inside component files. Shadow `y=2 blur=8 opacity=0.04` is
-   introduced as a token in REQ-005 (`--shadow-card`) before any component
-   uses it.
-2. **44×44 minimum touch target.** Every interactive primitive (`IconButton`,
-   `FAB`, `BottomSheet` close affordance, `ConfirmDialog` buttons, `Toast`
-   when dismissible, `EmptyState.action`) must occupy at least 44×44 CSS px
-   regardless of icon size. Static primitives (`Card`, `EmptyState` without
-   action) are exempt.
-3. **One file = one primitive.** Each primitive is its own `.tsx` file with a
-   single named export and stays ≤ 100 lines (CLAUDE.md). Subcomponents that
-   start to grow get split (e.g. `BottomSheet` backdrop, `ConfirmDialog`
-   action row). No barrel `index.ts` — callers import per-file
-   (REQ-003 / REQ-004 precedent).
-4. **PRD §1.6.6 dimensions are exact.** `IconButton` container 44px / icon
-   24px; `FAB` 56px; `BottomSheet` top radius 24px with grip handle;
-   `Toast` lifespan in the 1500–2000ms range; `Card` radius within 16–20px.
-   These numbers are non-negotiable and asserted by tests.
-5. **Achromatic UI surface, peach for emphasis only.** Primitives' default
-   surface colors come from `--color-paper`, `--color-cream`, `--color-meta`,
-   `--color-charcoal`. `--color-peach` only appears for explicit
-   active/selected emphasis when a caller opts in (none of the seven
-   primitives require it by default).
-6. **Korean defaults for user-visible strings.** `ConfirmDialog` default
-   button labels are `확인` / `취소` (overridable via props). `Toast` carries
-   no internal strings (caller supplies the message). `EmptyState` carries
-   no defaults — caller supplies `title` and optional `description` (Korean,
-   per CLAUDE.md "Working language").
-7. **Swappable visual layer.** Like `MoodIcon`, every primitive accepts an
-   optional `className` so callers can adjust layout (margin, flex
-   placement) without forking — and so the asset/skin can be swapped later
-   without changing call sites.
-8. **No new runtime dependencies.** Strictly styled wrappers around native
-   HTML elements. No Radix, no Headless UI, no `react-aria`, no animation
-   library. (Test deps already installed; no additions.)
+1. **라우트는 위의 5개 + not-found 만.** REQ-006 안에서 다른 top-level 라우트를 추가하지 않는다.
+2. **각 page.tsx 는 최소 placeholder.** 기존 `src/app/page.tsx` 와 동일한 톤(`<main><h1>{화면명}</h1><p>REQ-XXX에서 채워집니다.</p></main>`)을 유지한다.
+3. **모달은 URL 라우트가 아니다.** BottomSheet / ConfirmDialog / PhotoViewer 등은 부모 화면 안의 로컬 React state(REQ-005 `useDialogControl` 재사용)로만 표현한다 — modal route, intercepting route, parallel route 사용 금지.
+4. **리스트 필터 상태(월 + 정렬)는 URL search params 로 표현한다.** `/list?month=2026-04&sort=desc`. 브라우저 history 가 자동으로 복원해 주므로 별도 sessionStorage 없이 invariant 가 성립한다. (REQ-006 셸에서는 URL 파라미터 컨벤션만 합의하고, 실제 적용은 REQ-013.)
+5. **스크롤 위치 보존은 Next.js App Router 기본 동작에 의존한다.** App Router 는 `Link`/`router.push` 내비게이션에서 자동 scroll restoration 을 수행하며 뒤로가기 시 이전 위치로 복원한다. REQ-006 셸은 이 기본값을 깨지 않는다(레이아웃 overflow 강제, 강제 `window.scrollTo` 등 금지).
+6. **라우팅 라이브러리 추가 금지.** React Router · TanStack Router 등 별도 패키지 설치 금지. 모든 내비게이션은 `next/link` 와 `next/navigation` 으로만 한다.
+7. **경로 문자열 하드코딩 금지.** 컴포넌트는 `Routes.diary('2026-05-17')` 같은 헬퍼만 호출한다. 라우트 변경 시 단일 파일에서 갱신 가능해야 한다.
+8. **루트 레이아웃(420px 컨테이너) 유지.** 기존 `src/app/layout.tsx` 가 모든 라우트에 동일하게 적용된다. REQ-006 에서 per-route layout 을 새로 만들지 않는다.
+9. **CLAUDE.md File size 규칙 준수.** 모든 신규 파일은 100줄 미만, 단일 책임. placeholder 라 자연히 짧다.
 
 ## Open Questions and Recommended Defaults
 
-1. **Server vs Client component split.**
-   *Recommended default:* split as follows so server-rendering is preserved
-   wherever possible. **Server components** (no `"use client"`): `Card`,
-   `EmptyState` — both are purely visual leaves with no event handlers or
-   state. **Client components**: `IconButton`, `FAB` (both accept `onClick`),
-   `BottomSheet` (controlled `open` + `onClose`, focus management,
-   keyboard ESC), `Toast` (timer + transition state), `ConfirmDialog`
-   (controlled visibility + button handlers). This matches the `MoodIcon`
-   precedent of "default to server, opt into client only when needed".
+### Q1. 리스트 필터 상태(월·정렬)는 URL search params 인가 sessionStorage 인가?
+- **권장: URL search params.** `/list?month=2026-04&sort=desc`.
+- 이유: 브라우저 history 가 search params 까지 자동으로 보존 → 뒤로가기 시 별도 코드 없이 invariant 충족. sessionStorage 는 상태 동기화 코드를 따로 짜야 하고, "뒤로가기 도중 다른 탭에서 변경" 같은 엣지케이스가 생긴다. 또한 v2 딥링크/공유 URL 확장 시 그대로 재사용 가능.
+- 트레이드오프: URL 이 조금 길어진다 — MVP 에서는 무시할 수준.
 
-2. **Headless library vs strictly styled wrappers.**
-   *Recommended default:* strictly styled wrappers around native HTML
-   elements. No Radix / Headless UI / react-aria. Rationale: MVP scope, no
-   new runtime dependencies, file-size rule favors small primitives, and the
-   PRD's interaction surface (open/close + auto-dismiss) is small enough to
-   hand-roll. If accessibility regressions show up in REQ-008 / REQ-009,
-   revisit then — not now.
+### Q2. 스크롤 복원은 어떻게 보장하나?
+- **권장: Next.js App Router 기본값 신뢰 + 검증 1회.** App Router 는 `experimental.scrollRestoration` 없이도 표준 브라우저 scroll restoration 을 활용한다. 셸 단계에서 빈 페이지로 검증해 두고, 만약 REQ-013/017 화면 구현 시 깨지면 그 REQ 에서 `experimental.scrollRestoration: true` 또는 수동 복원으로 대응.
+- 이유: 기본 동작이 충분히 동작하는데 미리 옵션을 켜면 미세한 부작용(중복 복원 등)이 생길 수 있다. 셸 단계에서는 회피.
+- 책임 분담: REQ-006 = "기본 동작이 깨지지 않게 만든다", REQ-013/017 = "실 컨텐츠로 검증하고 필요시 보강".
 
-3. **`BottomSheet` semantics — native `<dialog>` or portal'd `<div>`.**
-   *Recommended default:* use the native `<dialog>` element with
-   `showModal()` / `close()`. Pros: native modal semantics (focus trap,
-   `Escape` close, backdrop), zero portal plumbing, works under React 19 +
-   Next.js 15 App Router. Cons: requires a tiny client-side `useEffect` to
-   call `showModal()` when `open` prop flips; styling the `::backdrop`
-   pseudo-element is acceptable and uses tokens. Same approach reused by
-   `ConfirmDialog` so we only solve modal semantics once.
+### Q3. `useNavigation()` 같은 커스텀 훅을 만들어야 하나?
+- **권장: 아니오.** 컴포넌트에서 `next/navigation` 의 `useRouter` / `usePathname` / `useSearchParams` 를 직접 사용한다.
+- 이유: 추가 추상화는 referrer 추적·뒤로가기 가로채기 같은 진짜 요구가 생긴 다음에 도입해야 한다. MVP 에서는 wrapper 가 비용만 늘림. 진짜 필요해지는 시점(예: REQ-017 AI 채팅에서 인용 일기→에디터→채팅 복귀를 보장해야 할 때)에 얇은 wrapper 를 도입한다 — Next.js history 가 자연스럽게 처리하므로 그 시점에도 굳이 필요 없을 가능성이 높다.
 
-4. **`Toast` API shape — controlled component or imperative hook.**
-   *Recommended default:* ship a small **controlled component**
-   (`<Toast message open onClose />`) plus a **`useToast()` hook** that
-   wraps `useState` + auto-dismiss timer. No global singleton, no
-   provider context. Rationale: matches REQ-004 / REQ-002 functional style,
-   trivially testable, no React tree contortions. A `ToastContainer` +
-   `addToast()` queue can be added in a later REQ if multiple simultaneous
-   toasts ever become a requirement (PRD shows only single toasts today).
+### Q4. page.tsx placeholder 컨텐츠는 어떤 톤으로?
+- **권장: 기존 REQ-001 의 `src/app/page.tsx` 와 동일 패턴.**
+  ```tsx
+  <main className="px-6 py-8 text-charcoal">
+    <h1 className="text-3xl">{화면명}</h1>
+    <p className="mt-2 text-meta">REQ-XXX에서 채워집니다.</p>
+  </main>
+  ```
+- 이유: 일관된 톤. 어느 라우트가 어느 REQ 책임인지 화면에서 즉시 확인 가능 → 후속 REQ 진행 추적에 도움.
 
-5. **`ConfirmDialog` destructive variant.**
-   *Recommended default:* add a `destructive?: boolean` prop (default
-   `false`). When `true`, the confirm button uses a red token introduced
-   here (`--color-danger`, e.g. `#E25C5C` — pastel-saturation red picked to
-   harmonize with mood palette; final hex confirmed in technical-design
-   phase against accessibility contrast). This satisfies PRD §5.4 "위험한
-   액션은 [확인]을 빨간색" without inventing a one-off color at the call
-   site.
+### Q5. per-route `layout.tsx` 가 필요한가?
+- **권장: 아니오.** 루트 `src/app/layout.tsx` 의 420px 컨테이너 하나로 충분.
+- 이유: 5개 화면 모두 동일한 좌우 마진·최대 폭을 쓴다. 화면별 헤더(흰 원형 아이콘)는 각 화면 REQ 의 책임이며 layout.tsx 가 아닌 컴포넌트로 풀어야 한다. per-route layout 은 향후 채팅 화면이 sticky composer 같은 특수 레이아웃을 요구할 때 그 REQ 가 도입한다.
 
-6. **`IconButton` and `FAB` — share a base or stay separate.**
-   *Recommended default:* keep them as **two separate files**. They share
-   the "circular icon-only button" idea but diverge on every concrete
-   axis: size (44 vs 56), surface (white vs black), positioning (inline vs
-   `fixed` bottom-right), and shadow (subtle card-shadow vs none/distinct).
-   A shared parent would force a `variant` prop that hides more than it
-   reveals. Keep both ≤ 100 lines and let the duplication remain — it's a
-   handful of style declarations.
+### Q6. `loading.tsx`, `error.tsx`, `not-found.tsx` 중 무엇을 REQ-006 에서 두나?
+- **권장: `not-found.tsx` 만.** 잘못된 URL 진입(예: `/foo`, 형식 깨진 `/diary/abc`) 시 한국어 404 메시지를 보여준다.
+- `loading.tsx` / `error.tsx` 는 각 화면의 데이터 페치·에러 모델이 정해진 뒤(각 화면 REQ) 도입한다. localStorage 기반 MVP 에서는 사실상 loading.tsx 가 의미 없을 가능성이 크다.
 
-7. **`EmptyState` content slots.**
-   *Recommended default:* props =
-   `{ icon?: ReactNode; title: string; description?: string; action?: ReactNode }`.
-   `icon` is `ReactNode` (not `string`) so callers can pass an emoji span,
-   a `MoodIcon`, an SVG, or a future watercolor `<img>` without API
-   change. `action` is `ReactNode` so callers compose a `FAB`-styled
-   button or text link as needed — `EmptyState` itself stays
-   presentation-only.
+### Q7. `/diary/[date]` 의 date 포맷 검증은 어디서?
+- **권장: 두 단계.** (a) REQ-006 셸에서는 정규식 `^\d{4}-\d{2}-\d{2}$` 만 검사, 실패 시 `notFound()`. (b) 실제 날짜 유효성(2026-02-31 등)과 1일 1엔트리 라우팅 로직은 REQ-009 에디터 책임.
+- 이유: 잘못된 형식의 URL 진입을 셸 레벨에서 차단해야 후속 REQ 의 검증 코드가 단순해진다. 동시에 셸이 너무 많은 도메인 룰을 떠안는 것을 피한다.
 
-8. **`className` pass-through on every primitive.**
-   *Recommended default:* **yes**, every primitive exposes an optional
-   `className` merged onto its root element. Mirrors the `MoodIcon`
-   precedent and gives callers an escape hatch for layout-only adjustments
-   (margin, grid placement) without touching interior styles. Internal
-   styles still win on color / radius / shadow because they are listed last
-   in the className concatenation or applied via `style` for non-overridable
-   invariants (size, shadow).
-
-9. **`Toast` exact lifespan.**
-   *Recommended default:* prop `durationMs?: number` with default `1800`
-   (the midpoint of the PRD-mandated 1500–2000ms band). Tests assert the
-   prop is respected and the default falls inside the band.
-
-10. **Demo / Storybook page.**
-    *Recommended default:* **skip** for REQ-005. PRD §5 marks it optional;
-    REQ-005's acceptance criterion says "선택"; adding Storybook brings a
-    non-trivial dev dependency. Vitest render specs already prove each
-    primitive mounts and behaves. A throwaway demo route can be added by
-    REQ-006 if useful for nav-shell validation.
+### Q8. 타입 안전 경로 헬퍼는 어떤 형태로?
+- **권장: `src/lib/navigation/routes.ts`, ≤ 30줄, 객체 + 함수 혼합.**
+  ```ts
+  export const Routes = {
+    calendar: '/',
+    diary: (date: string) => `/diary/${date}` as const,
+    list: '/list',
+    chat: '/chat',
+    stats: '/stats',
+  } as const;
+  ```
+- 이유: 컴포넌트에서 `Routes.diary(entry.date)` 라고 쓰면 라우트 변경 시 단일 지점만 수정. `as const` 로 리터럴 타입 보존 → 후속 REQ 에서 라우트 분기 시 타입 좁히기 용이. 별도 라이브러리(`pathpida` 등) 도입은 과잉.
 
 ## Dependency Check
 
-- **REQ-001 (DONE)** — Provides Next.js 15 + React 19 + Tailwind 4 +
-  TypeScript scaffold and `src/app/globals.css @theme` token block that
-  every primitive will consume. Confirmed present:
-  `--color-cream / charcoal / meta / paper / peach / peach-dark / peach-light / success`,
-  `--color-mood-*`, `--container-mobile: 420px`, `--radius-card: 16px`,
-  `--radius-card-lg: 20px`, `--font-sans`. Two tokens still to be added
-  in REQ-005 implementation: `--shadow-card` (y=2 blur=8 op=0.04) and
-  `--color-danger` (destructive confirm).
-- REQ-005 has no other declared dependencies in `requirements/index.md`.
-  REQ-002 / REQ-003 / REQ-004 are DONE, so the `MoodIcon` / storage types /
-  personas modules are available if any primitive demo or test wants them
-  (none required).
+- **REQ-001 (스캐폴드)**: Status = DONE. Next.js App Router · `src/app/layout.tsx` · `tsconfig.json` paths(`@/*`) · `globals.css` 모두 준비됨. `src/app/page.tsx` placeholder 도 이미 동일 톤으로 존재 — REQ-006 에서 그대로 이어쓰면 됨.
+- REQ-006 은 REQ-002~005 와 **병렬 가능** 항목으로 인덱스에 표시되어 있고, 의존 관계는 REQ-001 하나만이다. REQ-002~005 는 모두 DONE 이지만 REQ-006 는 그들의 산출물에 직접 의존하지 않는다 — placeholder 만 렌더하므로 무드/페르소나/디자인 시스템 호출이 없다.
+- 후속 REQ-007/009/013/014/015 모두 REQ-006 을 dependency 로 명시 → 본 REQ 의 5개 라우트 + 경로 헬퍼가 그들이 채울 자리.
+- 차단 요인 없음. 곧바로 다음 단계(architecture analysis)로 진행 가능.
 
 ## Verdict
 PASS

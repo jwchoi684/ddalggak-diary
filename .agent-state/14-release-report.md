@@ -1,130 +1,195 @@
-# Release Report — REQ-005
+# Release Report — REQ-006
 
 ## Gate Matrix
 
 | # | Phase | Report | Verdict | Rationale |
 |---|---|---|---|---|
-| 00 | Git Safety | `00-git-safety.md` | PASS | Branch `master`, one prior commit (REQ-001~004). Only agent-state status files modified before implementation began; no unrelated user changes. |
-| 01 | Requirement Intake | `01-requirement-intake.md` | PASS | 7 primitives + 2 hooks fully specified; acceptance criteria, scope, non-goals, and PRD cross-references confirmed. |
-| 02 | Architecture Analysis | `02-architecture-report.md` | PASS | `src/design-system/` folder pattern established by REQ-003 (`MoodIcon.tsx`); new files follow identical conventions. |
-| 03 | Technical Design | `03-technical-design.md` | PASS | Props, server/client boundaries, token usage, touch-target strategy, and `useDialogControl` sharing all specified before implementation. |
-| 04 | API/Interface Contract | `04-api-contract.md` | PASS | TypeScript interfaces and JSDoc for all 9 files frozen before implementation; implementation matches contract exactly. |
-| 05 | DB/Migration | `05-db-migration-report.md` | PASS | No DB or storage changes; report explicitly marks not applicable. |
-| 06 | Test Plan | `06-test-plan.md` | PASS | ~51 cases planned across 9 test files; 49 implemented (plan variance explained). |
-| 07 | Implementation | `07-implementation-report.md` | INFO | 9 source files + 9 test files created; `globals.css` additive-only (+10 lines). |
-| 08 | Test Report | `08-test-report.md` | PASS | 131/131 tests, 19 files, 3.08 s. typecheck, lint, build all exit 0. 82 pre-REQ-005 baseline tests unaffected. |
-| 09 | Code Review | `09-code-review-report.md` | PASS | All contracts met; 4 non-blocking suggestions deferred. No blocking issues. |
-| 10 | Security Review | `10-security-report.md` | PASS | Zero new security issues. No dangerouslySetInnerHTML, no hardcoded secrets, no network calls. |
-| 11 | Performance | `11-performance-report.md` | PASS | Thin wrappers over native elements; BottomSheet always-mounted overhead documented and acceptable at MVP scale. |
-| 12 | Infra | `12-infra-report.md` | PASS | Purely frontend; no config, env, or deployment changes. |
-| 13 | E2E | `13-e2e-report.md` | PASS (N/A) | No primitives consumed by any routed page yet. First browser E2E deferred to REQ-007 (Calendar + Editor). Reason documented and accepted. |
+| 00 | Git Safety | 00-git-safety.md | PASS | Working tree clean at REQ-006 start; no pre-existing uncommitted changes |
+| 01 | Requirement Intake | 01-requirement-intake.md | PASS | Scope locked to routing shell only; 9 invariants documented; open questions resolved |
+| 02 | Architecture Report | 02-architecture-report.md | PASS | Next.js App Router chosen; no new dependencies; fits existing project conventions |
+| 03 | Technical Design | 03-technical-design.md | PASS | 7 production files spec'd, all ≤ 41 lines; date guard regex and Routes shape defined |
+| 04 | API Contract | 04-api-contract.md | PASS | 10 Caller Invariants documented; all satisfied by implementation and confirmed by tests |
+| 05 | DB Migration | 05-db-migration-report.md | PASS | Not applicable — routing shell has no database or localStorage changes |
+| 06 | Test Plan | 06-test-plan.md | PASS | 20 test cases planned across 4 files; all cases written and mapped to invariants |
+| 07 | Implementation | 07-implementation-report.md | PASS | All 7 production files + 4 test files created; no existing files modified; 0 fix cycles |
+| 08 | Test Report | 08-test-report.md | PASS | 151/151 tests (23 files); 20 new REQ-006 cases + 131 baseline all green; build 6 routes |
+| 09 | Code Review | 09-code-review-report.md | PASS | All 10 invariants satisfied; no blocking issues; 3 non-blocking suggestions noted |
+| 10 | Security Review | 10-security-report.md | PASS | Zero new security findings; path-traversal guard confirmed; JSDoc nit on Routes.diary |
+| 11 | Performance | 11-performance-report.md | PASS | Zero client JS delta; 5 static routes + 1 dynamic; O(1) date guard; negligible footprint |
+| 12 | Infra | 12-infra-report.md | PASS | No config changes; 5 new routes deployable as-is on any edge/serverless host |
+| 13 | E2E | 13-e2e-report.md | PASS — N/A | Routing shell has no user interactions; back-navigation E2E explicitly deferred to REQ-007 |
+
+All 14 phases PASS. Zero blocking issues across any report.
+
+---
 
 ## Git Diff Summary
 
 ```
- .agent-state/00-git-safety.md            |  16 +-
- .agent-state/01-requirement-intake.md    | 243 ++++...
- .agent-state/02-architecture-report.md   | 139 ++++...
- .agent-state/03-technical-design.md      | 324 ++++...
- .agent-state/04-api-contract.md          | 361 ++++...
- .agent-state/05-db-migration-report.md   |  57 ++--
- .agent-state/06-test-plan.md             | 273 ++++...
- .agent-state/07-implementation-report.md |  88 ++++
- .agent-state/08-test-report.md           | 218 ++++...
- .agent-state/09-code-review-report.md    | 129 ++--
- .agent-state/10-security-report.md       |  88 ++--
- .agent-state/11-performance-report.md    |  99 ++--
- .agent-state/12-infra-report.md          |  29 +--
- .agent-state/13-e2e-report.md            |  70 ++--
- .agent-state/requirements/REQ-005.md     |   2 +-
- .agent-state/requirements/index.md       |   2 +-
- src/app/globals.css                      |  10 +
- 22 files changed, 1760 insertions(+), 1032 deletions(-)
- (+ 18 new untracked files in src/design-system/)
+git diff HEAD --stat (21 files, agent-state only; source tracked as untracked)
+
+Untracked source files (new, not yet committed):
+  src/app/__tests__/          (diary-date-page.test.tsx, not-found.test.tsx)
+  src/app/chat/               (page.tsx)
+  src/app/diary/              ([date]/page.tsx)
+  src/app/list/               (page.tsx)
+  src/app/not-found.tsx
+  src/app/stats/              (page.tsx)
+  src/lib/navigation/         (routes.ts, index.ts, __tests__/*)
+
+Modified (agent-state reports updated during REQ-006 run):
+  .agent-state/00-git-safety.md through .agent-state/13-e2e-report.md (14 files)
+  .agent-state/requirements/REQ-006.md, index.md
+  .agent-state/{architecture,e2e,review,security,test}-report.md (legacy aliases)
 ```
+
+No pre-existing source files were modified by REQ-006. All source changes are additive (new files only).
+
+---
 
 ## Files Changed
 
-### Created (untracked — new for REQ-005)
+### Production — New (7 files, 104 lines total)
 
 | File | Lines | Role |
 |---|---|---|
-| `src/design-system/BottomSheet.tsx` | 54 | Modal panel, top-radius 24, grip handle, always mounted |
-| `src/design-system/Card.tsx` | 34 | White surface, radius 16/20, shadow token |
-| `src/design-system/ConfirmDialog.tsx` | 79 | Two-button confirm, destructive variant, Korean defaults |
-| `src/design-system/EmptyState.tsx` | 49 | Icon + title + description + optional action |
-| `src/design-system/FAB.tsx` | 35 | Fixed bottom-right 56px black action button |
-| `src/design-system/IconButton.tsx` | 46 | White circular 44px header button |
-| `src/design-system/Toast.tsx` | 48 | Gray pill auto-dismiss notification |
-| `src/design-system/useDialogControl.ts` | 45 | Shared `<dialog>` open/close hook for BottomSheet + ConfirmDialog |
-| `src/design-system/useToast.ts` | 57 | Toast lifecycle hook with timer management |
-| `src/design-system/__tests__/BottomSheet.test.tsx` | 98 | 6 cases |
-| `src/design-system/__tests__/Card.test.tsx` | 52 | 5 cases |
-| `src/design-system/__tests__/ConfirmDialog.test.tsx` | 157 | 8 cases |
-| `src/design-system/__tests__/EmptyState.test.tsx` | 67 | 7 cases |
-| `src/design-system/__tests__/FAB.test.tsx` | 51 | 5 cases |
-| `src/design-system/__tests__/IconButton.test.tsx` | 60 | 6 cases |
-| `src/design-system/__tests__/Toast.test.tsx` | 46 | 5 cases |
-| `src/design-system/__tests__/useDialogControl.test.ts` | 96 | 5 cases |
-| `src/design-system/__tests__/useToast.test.ts` | 85 | 5 cases (fake timers) |
+| `src/lib/navigation/routes.ts` | 40 | `Routes` object; `as const` literals; `URLSearchParams` query encoding |
+| `src/lib/navigation/index.ts` | 6 | Barrel re-exporting `Routes` |
+| `src/app/not-found.tsx` | 17 | Korean 404 Server Component with `<a href="/">` |
+| `src/app/diary/[date]/page.tsx` | 17 | Async Server Component; regex date guard; `notFound()` on mismatch |
+| `src/app/list/page.tsx` | 8 | Placeholder (REQ-013) |
+| `src/app/chat/page.tsx` | 8 | Placeholder (REQ-015) |
+| `src/app/stats/page.tsx` | 8 | Placeholder (REQ-014) |
 
-### Modified
+### Tests — New (5 files, 203 lines total)
 
-| File | Delta | Note |
+| File | Cases | Role |
 |---|---|---|
-| `src/app/globals.css` | +10 lines | Added `--color-danger`, `--shadow-card`, `dialog::backdrop` rule — all additive |
-| `.agent-state/` reports | various | REQ-005 phase reports populated; prior REQ-001~004 reports untouched in content |
-| `.agent-state/requirements/REQ-005.md` | +1 line | Status field updated by orchestrator |
-| `.agent-state/requirements/index.md` | +1 line | REQ-005 row status updated |
+| `src/lib/navigation/__tests__/setupNextNavigation.ts` | — | Shared `next/navigation` mock helper for REQ-007+ |
+| `src/lib/navigation/__tests__/routes.test.ts` | 10 | Routes constants, diary helper, listWithFilter encoding |
+| `src/lib/navigation/__tests__/setupNextNavigation.test.ts` | 3 | Self-tests for mock helper |
+| `src/app/__tests__/diary-date-page.test.tsx` | 4 | Date guard: valid / bad-format / slash-separator / out-of-range |
+| `src/app/__tests__/not-found.test.tsx` | 3 | Korean message, anchor href, source-guard |
 
-### Deleted
+### Modified — None
 
-None.
+No existing source files were touched. All REQ-001 through REQ-005 artifacts unchanged.
+
+---
 
 ## Fix Cycles
 
-None — all gates cleared on first cycle.
+None. Implementation passed all four gates (typecheck, lint, test, build) on the first attempt.
+
+---
 
 ## Net Effect
 
-- Design-system folder grows from 1 component (`MoodIcon.tsx`) to **9 source files**: 7 UI primitives + 2 hooks.
-- Every subsequent screen REQ (REQ-007 onward) can compose headers, cards, FABs, modals, toasts, and empty states from a stable, tested, token-safe vocabulary.
-- Touch-target 44x44 and design-token-only styling are now structurally enforced at the primitive layer — callers cannot regress these invariants.
-- Test baseline rises from 82 to **131 cases** (49 new). Build and typecheck remain clean.
+- **Routing shell live**: 6 routes in the Next.js build output (5 static `○` + 1 dynamic `ƒ`).
+- **Routes API ready**: `Routes.calendar`, `Routes.diary(date)`, `Routes.list`, `Routes.listWithFilter(params)`, `Routes.chat`, `Routes.stats` — all exported from `@/lib/navigation`.
+- **Navigation barrel ready**: `src/lib/navigation/index.ts` mirrors `src/lib/storage/index.ts` convention; REQ-007+ import via `@/lib/navigation`.
+- **Mock helper ready**: `setupNextNavigation.ts` exports `mockRouter`, `mockNotFound`, `mockUseRouter`, `mockUseSearchParams`, `mockUseParams`, `mockUsePathname`, `resetNavigationMocks` — consumable by any future test file needing `next/navigation` mocks.
+- **Test count**: 131 → 151 (+20 new REQ-006 cases). All 131 baseline tests (REQ-002 through REQ-005) continue to pass.
+- **Blocking dependency cleared**: REQ-007, REQ-009, REQ-013, REQ-014, REQ-015 all list REQ-006 as a dependency; they are now unblocked.
+
+---
 
 ## Forward-Flagged Constraints
 
-| Constraint | Source | Target REQ |
-|---|---|---|
-| `React.memo` recommended for IconButton/FAB if calendar renders many simultaneously | `11-performance-report.md` §4 | REQ-007 |
-| BottomSheet always-mounted: adopt sites must not mount 5+ sheets per screen simultaneously | `11-performance-report.md` §2 | REQ-008, REQ-016 |
-| `ConfirmDialog` uses hardcoded `id="confirm-msg"`; duplicate IDs if two dialogs mount at once. Defer to `useId()` when multi-dialog scenario materializes. | `09-code-review-report.md` suggestion 2 | REQ-009 or later |
-| Toast `onClose`/`durationMs` props accepted but not consumed internally; clarify JSDoc before REQ-007 surface adoption | `09-code-review-report.md` suggestion 1, 3 | REQ-007 |
-| First browser E2E gate: FAB→editor route, BottomSheet mood picker, Toast on save, ConfirmDialog delete | `13-e2e-report.md` | REQ-007 |
+1. **E2E deferred to REQ-007** (explicit, documented): Back-navigation paths (calendar→editor→back, list→editor→back, chat-citation→editor→back), scroll restoration, and modal history isolation require source screens with real interactions. Playwright will be bootstrapped in REQ-007 alongside the first FAB tap.
+
+2. **JSDoc nit on `Routes.diary`** (non-blocking, security report): `Routes.diary(date)` is a template literal and does not percent-encode its argument. Callers are currently controlled surfaces (calendar grid, list items) supplying pre-validated ISO dates. A JSDoc note stating "caller must supply a pre-validated ISO 8601 date string" is recommended but not required before merge.
+
+3. **`listWithFilter` validation deferred to REQ-013**: `month` and `sort` query param values are not validated at the helper level; invalid values are REQ-013's responsibility.
+
+4. **Semantic date validation deferred to REQ-009**: The regex `/^\d{4}-\d{2}-\d{2}$/` accepts `2026-02-31`. Full calendar-aware validation is REQ-009's responsibility.
+
+5. **`setupNextNavigation.test.ts` lacks `beforeEach(resetNavigationMocks)`** (code review non-blocking suggestion): Each case resets manually; a future 4th test case added by a maintainer might miss this pattern. Low risk for the current 3-case file.
+
+---
 
 ## Commit Message Draft
 
 ```
-feat(design-system): add 7 UI primitives + 2 hooks (REQ-005)
+feat: routing shell with type-safe Routes helper (REQ-006)
 
-IconButton, Card, FAB, BottomSheet, Toast, ConfirmDialog, EmptyState을
-src/design-system/에 추가. useDialogControl + useToast 훅 포함.
-- 모든 색·radius·shadow는 globals.css 토큰만 참조 (하드코딩 없음)
-- 터치 타깃 44×44 인라인 style로 강제 (className 오버라이드 불가)
-- BottomSheet·ConfirmDialog는 useDialogControl 공유로 <dialog> 패턴 통일
-- 49개 신규 테스트; 전체 131/131 통과. typecheck·lint·build 클린.
+Next.js App Router 페이지 5개(/캘린더, /diary/[date], /list, /chat, /stats)와
+한국어 not-found 핸들러를 추가한다. /diary/[date]는 YYYY-MM-DD 정규식 검증 후
+잘못된 형식이면 notFound()를 호출한다. Routes 헬퍼와 next/navigation 공유
+mock(setupNextNavigation)은 REQ-007+에서 재사용 가능한 형태로 제공된다.
+
+151/151 tests pass. Build: 5 static + 1 dynamic route.
 
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 ```
 
+---
+
+## PR Body
+
+```md
+## Summary
+
+- Adds Next.js App Router routing shell: 5 page stubs + Korean `not-found.tsx` (REQ-006).
+- `/diary/[date]` enforces `YYYY-MM-DD` format via regex; returns 404 on mismatch.
+- Type-safe `Routes` helper exported from `@/lib/navigation`; no path strings hardcoded in components.
+- Shared `setupNextNavigation` mock helper ready for REQ-007+ test files.
+
+## Acceptance Criteria
+
+- [x] Routes: `/` `/diary/:date` `/list` `/chat` `/stats` all registered and building.
+- [x] Invalid date format (`/diary/abc`) → 404 (unit-tested, build-confirmed).
+- [x] `Routes.diary('2026-05-17')` → `/diary/2026-05-17` (type-safe, tested).
+- [x] `Routes.listWithFilter` encodes `month`+`sort` with deterministic ordering.
+- [x] No `"use client"` in any page file (grep-guarded by test).
+- [x] No new runtime or dev dependencies added.
+- [x] 131 baseline tests (REQ-002–005) unchanged.
+
+## Technical Notes
+
+- `/diary/[date]` uses `async` + `await params` (Next.js 15 Promise params pattern).
+- `Routes.listWithFilter({})` returns `/list` with no trailing `?` — verified by test.
+- Scroll restoration relies on Next.js App Router default behavior (not overridden).
+- Modal history isolation (BottomSheet not in history stack) is an invariant; enforcement verified via REQ-005 `useDialogControl` which uses local React state only.
+
+## API / Interface Changes
+
+New public export: `@/lib/navigation` → `Routes`
+
+## Data / Migration Notes
+
+None. No localStorage schema touched.
+
+## Tests
+
+- 20 new `it()` cases; 151/151 total pass.
+- `typecheck`, `lint`, `build` all clean.
+
+## Security Review
+
+PASS. Path-traversal blocked at framework + regex level. No secrets, no XSS vectors, no new dependencies.
+
+## E2E Evidence
+
+Deferred to REQ-007 (Playwright bootstrap). Routing shell correctness established via unit tests + production build (6 routes, correct static/dynamic classification).
+
+## Risk / Rollback Plan
+
+Additive only — 7 new files, 0 modified files. Rollback = delete `src/lib/navigation/`, `src/app/diary/`, `src/app/list/`, `src/app/chat/`, `src/app/stats/`, `src/app/not-found.tsx`. No config or schema rollback needed.
+```
+
+---
+
 ## Next REQ
 
-**REQ-006 — history-stack 기반 네비게이션 셸** (Status: TODO)
+**REQ-007 — 메인 캘린더 화면** (Status: TODO)
 
-REQ-006 is unblocked: its only declared dependency is REQ-001 (scaffolding), which is DONE. It establishes the `useRouter` / history-stack navigation that REQ-007 (Calendar), REQ-009 (Editor), and REQ-013 (List) all depend on. Until REQ-006 lands, no routed screen can be built.
+REQ-007 is the first P0 screen REQ and depends on REQ-002, REQ-003, REQ-005, and REQ-006 — all now DONE. Expected scope: month grid rendering mood emoji cells, FAB tap → `Routes.diary(today)`, `useRouter().push()` integration, and the first Playwright E2E bootstrap covering FAB tap → editor route → back → calendar. It is the most complex screen REQ to date (potential 100-line split trigger per CLAUDE.md) and where the first real `"use client"` boundaries will appear.
 
-Expected scope: `next/navigation` `router.push/back` wiring, layout shell with bottom tab bar (or equivalent), and scroll-position / state preservation strategy that satisfies PRD §2.1.
+---
 
 ## Verdict
 
-PASS — ready to mark REQ-005 DONE and proceed to REQ-006.
+PASS — ready to mark REQ-006 DONE.
+
+All 14 gate phases pass. Zero blocking issues. Zero fix cycles. No unrelated changes included. Commit message and PR body are prepared above. Commit timing is at the orchestrator's discretion.

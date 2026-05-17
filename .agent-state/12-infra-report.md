@@ -1,34 +1,45 @@
-# Infra Review Report — REQ-005
+# Infra Review Report — REQ-006
 
 ## Summary
 
-REQ-005 implements seven UI primitive components and two React hooks. The change is entirely frontend code and CSS token additions. No infra surface is touched.
+REQ-006 adds a Next.js App Router routing shell: 5 page files, `not-found.tsx`, and `src/lib/navigation/routes.ts`. Purely frontend routing. No infrastructure surface touched.
 
 ## Scope
 
-- 9 new source files under `src/design-system/`
-- 8 new test files under `src/design-system/__tests__/`
-- `src/app/globals.css`: two new CSS custom properties added inside the existing `@theme {}` block, plus one new `dialog::backdrop` rule
-
-No configuration files, deployment manifests, environment files, or server-side code were modified.
+`package.json` dependency delta, `next.config.ts`, `.env.local.example`, presence/absence of `.github/`/`Dockerfile`/`vercel.json`, deployment behavior from new build output.
 
 ## Environment / Config Changes
 
-None. `package.json` diff is empty — no new dependencies added. `.env.local.example` unchanged. `OPENAI_API_KEY` remains the only declared variable; not consumed by any REQ-005 code.
+None.
+
+- `next.config.ts` unchanged: `const nextConfig: NextConfig = {}`. No experimental flags, no `scrollRestoration` toggle, no rewrites/redirects.
+- `.env.local.example` unchanged.
+- No `NEXT_PUBLIC_*` variables introduced.
 
 ## Deployment Impact
 
-None. Build produces fully static pages (4/4, PASS confirmed). No new routes, API handlers, middleware, or server-side data-fetching.
+Six routes now in build output:
 
-The `dialog::backdrop` CSS rule is a global additive change. Affects `<dialog>` elements rendered anywhere in the app. Currently only `BottomSheet`/`ConfirmDialog` emit `<dialog>`. Blast radius contained. No existing backdrop styling overridden.
+| Route | Type | Status |
+|---|---|---|
+| `/` | Static (○) | Present |
+| `/_not-found` | Static (○) | New (REQ-006) |
+| `/chat` | Static (○) | New |
+| `/diary/[date]` | Dynamic (ƒ) | New |
+| `/list` | Static (○) | New |
+| `/stats` | Static (○) | New |
+
+5 new routes are pure Server Components with no client JS. First Load JS (103 kB) identical across all routes — no client bundle delta. Dynamic `/diary/[date]` is server-rendered on demand; calls `notFound()` for non-`YYYY-MM-DD` segments; no external I/O. Static routes prerender at build on any edge/serverless host without additional config.
+
+No new API routes, server actions, middleware, or streaming responses.
 
 ## Rollback Plan
 
-Standard revert commit. Only adds new files and appends to `globals.css`. No destructive side effects on pre-existing behavior. No data migrations.
+File deletion only. 5 new page files + 2 navigation module files removable without touching shared infra. No migration, no config rollback.
 
 ## Observability Notes
 
-No logging, metrics, or tracing paths introduced. `Toast` `role="status"`/`role="alert"` is client-side accessibility only.
+No logging/metrics/tracing added or removed. Dynamic route appears in Next.js server logs as standard SSR; any 404 from `notFound()` logged at framework level automatically.
 
 ## Blocking Issues
 
@@ -36,9 +47,9 @@ None.
 
 ## Non-Blocking Suggestions
 
-1. **`dialog::backdrop` is global.** Any future `<dialog>` outside design system inherits this rule silently. Worth documenting in `globals.css` with a comment linking to owner components (`BottomSheet`, `ConfirmDialog`) to prevent future specificity conflicts.
-2. **`--color-danger` hardcoded hex.** `#C53030` added directly in `globals.css` without inline PRD reference. Adding `/* PRD §5.4 */` comment would make token auditable without consulting reports.
+- `not-found.tsx` uses bare `<a href="/">` (intentional per design, eslint-disable comment present). When future CDN adds `Content-Security-Policy` header, verify `navigate-to` directives don't affect bare anchor navigation.
+- First real infra surface = REQ-017 (OpenAI server-side proxy): env var handling, secret rotation, rate-limit observability.
 
 ## Verdict
 
-PASS — not applicable. REQ-005 has zero infra surface. First real infra surface arrives at REQ-017 (OpenAI server-side proxy via `OPENAI_API_KEY`).
+PASS — not applicable.

@@ -1,8 +1,8 @@
-# Test Report — REQ-005
+# Test Report — REQ-006
 
 ## Summary
 
-All four verification gates pass. 131/131 tests pass across 19 test files. The 9 new REQ-005 source files exist at the expected paths. Server/client `"use client"` boundaries are correctly enforced. `globals.css` contains all three required additions. Korean defaults (`확인`/`취소`) are present in `ConfirmDialog`. No new runtime or dev dependencies were introduced in REQ-005. All 82 pre-REQ-005 tests (REQ-002 through REQ-004 plus limits fix) continue to pass.
+Independent re-verification of REQ-006 (Next.js App Router routing shell). All four gates pass. 151/151 tests pass across 23 test files. The build produces exactly 6 routes. All 20 REQ-006 test cases are present and match the plan. All 131 baseline tests (REQ-002 through REQ-005) pass unchanged. No source modifications were made.
 
 ---
 
@@ -11,195 +11,174 @@ All four verification gates pass. 131/131 tests pass across 19 test files. The 9
 | Command | Result | Detail |
 |---|---|---|
 | `npm run typecheck` | PASS | Exit 0, no output |
-| `npm run lint` | PASS | No ESLint warnings or errors (cosmetic `next lint` deprecation notice only) |
-| `npm test` | PASS | 131/131 tests, 19 files, 3.08 s |
-| `npm run build` | PASS | Next.js 15.5.18, 4/4 static pages generated |
+| `npm run lint` | PASS | "No ESLint warnings or errors" (cosmetic `next lint` deprecation notice, not an error) |
+| `npm test` | PASS | 151/151 tests, 23 files |
+| `npm run build` | PASS | 6 routes rendered (see Build Output below) |
 
 ---
 
 ## Test Case Coverage vs Plan
 
-Plan projected ~51 cases across 9 new test files. Runner confirms 49 new cases (131 total − 82 baseline). All planned `it()` descriptions are present in the actual test files.
+All 20 REQ-006 `it()` cases are present and match the plan description exactly.
 
-### Card.test.tsx — 5 cases (plan: 5)
+### `src/lib/navigation/__tests__/routes.test.ts` — 10 cases (node env)
 
-| Plan Description | Present |
-|---|---|
-| renders children | yes — "renders children inside a div" |
-| boxShadow token equals var(--shadow-card) | yes |
-| radius tokens — default/large switch | yes |
-| className merged | yes |
-| source-guard: no "use client" | yes |
-
-### EmptyState.test.tsx — 7 cases (plan: 7)
-
-| Plan Description | Present |
-|---|---|
-| renders all 4 slots | yes |
-| omits absent optional slots | yes |
-| string title wrapped in `<p>` | yes |
-| ReactNode title rendered as-is | yes |
-| className merged | yes |
-| description text present | yes |
-| source-guard: no "use client" | yes |
-
-### IconButton.test.tsx — 6 cases (plan: 6)
-
-| Plan Description | Present |
-|---|---|
-| `<button type="button">` with aria-label | yes |
-| touch-target 44×44 | yes |
-| onClick fires on click | yes |
-| disabled prevents onClick | yes |
-| disabled adds opacity-40 / cursor-not-allowed | yes |
-| source-guard: has "use client" | yes |
-
-### FAB.test.tsx — 5 cases (plan: 5)
-
-| Plan Description | Present |
-|---|---|
-| `<button type="button">` with aria-label | yes |
-| touch-target 56×56 | yes |
-| onClick fires | yes |
-| default fixed / bottom-6 / right-6 / bg-charcoal | yes |
-| source-guard: has "use client" | yes |
-
-### useDialogControl.test.ts — 5 cases (plan: 5)
-
-| Plan Description | Present |
-|---|---|
-| open=true calls showModal once | yes |
-| open=false calls close once | yes |
-| toggling true→false→true calls showModal twice | yes |
-| onDialogClick matching target → onClose | yes |
-| onDialogClick non-matching target → no onClose | yes |
-
-### BottomSheet.test.tsx — 6 cases (plan: 6)
-
-| Plan Description | Present |
-|---|---|
-| open=true invokes showModal | yes |
-| open=false invokes close | yes |
-| grip handle always rendered | yes |
-| backdrop click fires onClose | yes |
-| children rendered inside dialog | yes |
-| source-guard: has "use client" | yes |
-
-### ConfirmDialog.test.tsx — 8 cases (plan: 7–8)
-
-| Plan Description | Present |
-|---|---|
-| renders message text | yes |
-| default Korean labels + min-h-[44px] | yes |
-| custom labels override defaults | yes |
-| confirm click fires onConfirm only | yes |
-| cancel click fires onCancel only | yes |
-| backdrop click fires onCancel | yes |
-| destructive=true applies bg-danger | yes |
-| source-guard: has "use client" | yes |
-
-### Toast.test.tsx — 5 cases (plan: 5)
-
-| Plan Description | Present |
-|---|---|
-| renders when open=true | yes |
-| nothing rendered when open=false | yes |
-| default role="status" | yes |
-| role="alert" opt-in | yes |
-| source-guard: has "use client" | yes |
-
-### useToast.test.ts — 5 cases (plan: 5)
-
-| Plan Description | Present |
-|---|---|
-| initial state: open=false, message="" | yes |
-| show() sets open=true and message | yes |
-| auto-hides after 1800ms | yes |
-| re-calling show resets timer | yes |
-| hide() immediately closes | yes |
-
----
-
-## Existing Tests Regression
-
-82 tests from REQ-002 through REQ-004 (including limits fix) pass without modification:
-
-| Suite | Tests |
-|---|---|
-| `src/lib/storage/__tests__/` (7 files) | 44 (41 storage + 3 limits) |
-| `src/design-system/__tests__/moods.test.ts` | 12 |
-| `src/design-system/__tests__/MoodIcon.test.tsx` | 9 |
-| `src/design-system/__tests__/personas.test.ts` | 17 |
-| **Baseline total** | **82** |
-
-All 82 pass. No regressions detected.
-
----
-
-## globals.css Token Additions Verified
-
-All three additions confirmed present in `src/app/globals.css`:
-
-- Line 32: `--shadow-card: 0 2px 8px rgba(0, 0, 0, 0.04);` — inside `@theme {}`
-- Line 35: `--color-danger: #C53030;` — inside `@theme {}`
-- Line 49: `dialog::backdrop {` block — after `html, body` block
-
----
-
-## Source Guards Verified
-
-| File | Expected | Actual |
+| Plan Case | Present | Verified |
 |---|---|---|
-| `Card.tsx` | no `"use client"` | confirmed absent |
-| `EmptyState.tsx` | no `"use client"` | confirmed absent |
-| `IconButton.tsx` | has `"use client"` | confirmed present |
-| `FAB.tsx` | has `"use client"` | confirmed present |
-| `useDialogControl.ts` | has `"use client"` | confirmed present |
-| `BottomSheet.tsx` | has `"use client"` | confirmed present |
-| `ConfirmDialog.tsx` | has `"use client"` | confirmed present |
-| `Toast.tsx` | has `"use client"` | confirmed present |
-| `useToast.ts` | has `"use client"` | confirmed present |
+| Routes.calendar equals "/" | Yes | Routes.calendar === '/' (as const literal) |
+| Routes.list equals "/list" | Yes | Routes.list === '/list' |
+| Routes.chat equals "/chat" | Yes | Routes.chat === '/chat' |
+| Routes.stats equals "/stats" | Yes | Routes.stats === '/stats' |
+| Routes.diary("2026-05-17") returns "/diary/2026-05-17" | Yes | exact string match |
+| Routes.diary(date) starts with "/diary/" and ends with date | Yes | two-part assertion |
+| empty {} returns "/list" no trailing "?" | Yes | exact string match |
+| { month: "2026-04" } returns "/list?month=2026-04" | Yes | exact string match |
+| { sort: "asc" } returns "/list?sort=asc" | Yes | exact string match |
+| { month: "2026-04", sort: "desc" } returns "/list?month=2026-04&sort=desc" | Yes | month precedes sort confirmed |
+
+### `src/app/__tests__/diary-date-page.test.tsx` — 4 cases (happy-dom)
+
+| Plan Case | Present | Verified |
+|---|---|---|
+| valid "2026-05-17" renders heading; notFound not called | Yes | heading.textContent contains date |
+| "not-a-date" rejects with NEXT_NOT_FOUND; notFound called once | Yes | rejects.toThrow + calledTimes(1) |
+| "2026/05/17" fails regex, rejects; notFound called once | Yes | same pattern |
+| "2026-13-01" passes regex, renders without notFound (semantic deferred) | Yes | renders heading, mockNotFound not called |
+
+Top-level `await import` after `vi.mock` is used correctly to ensure mock hoisting applies before module evaluation.
+
+### `src/app/__tests__/not-found.test.tsx` — 3 cases (happy-dom)
+
+| Plan Case | Present | Verified |
+|---|---|---|
+| renders "찾을 수 없는 페이지입니다." | Yes | getByText assertion |
+| anchor href="/" with text "캘린더로 돌아가세요" | Yes | getByRole('link') + getAttribute('href') |
+| source-guard: no "use client" in not-found.tsx | Yes | fs.readFileSync pattern from Card.test.tsx |
+
+### `src/lib/navigation/__tests__/setupNextNavigation.test.ts` — 3 cases (happy-dom)
+
+| Plan Case | Present | Verified |
+|---|---|---|
+| mockRouter.push is callable vi.fn with mock.calls array | Yes | push('/test'), length 1 |
+| mockNotFound() throws "NEXT_NOT_FOUND" | Yes | expect(() => mockNotFound()).toThrow |
+| resetNavigationMocks() clears calls and re-applies throw after mockReset | Yes | all three assertions |
 
 ---
 
-## Korean Defaults Verified
+## Existing Tests Regression (131 baseline)
 
-`src/design-system/ConfirmDialog.tsx` lines 37–38:
+All 131 baseline tests from REQ-002 through REQ-005 pass unchanged:
 
-```
-confirmLabel = '확인',
-cancelLabel = '취소',
-```
-
-Both strings also appear in JSDoc at lines 13–14.
+| File | Tests | Status |
+|---|---|---|
+| `src/lib/storage/__tests__/diaries.test.ts` | 13 | PASS |
+| `src/lib/storage/__tests__/conversations.test.ts` | 9 | PASS |
+| `src/lib/storage/__tests__/settings.test.ts` | 8 | PASS |
+| `src/lib/storage/__tests__/uuid.test.ts` | 3 | PASS |
+| `src/lib/storage/__tests__/ssr.test.ts` | 4 | PASS |
+| `src/lib/storage/__tests__/no-direct-localstorage-access.test.ts` | 1 | PASS |
+| `src/lib/storage/__tests__/limits.test.ts` | 3 | PASS |
+| `src/design-system/__tests__/moods.test.ts` | 12 | PASS |
+| `src/design-system/__tests__/MoodIcon.test.tsx` | 9 | PASS |
+| `src/design-system/__tests__/personas.test.ts` | 17 | PASS |
+| `src/design-system/__tests__/Card.test.tsx` | 5 | PASS |
+| `src/design-system/__tests__/EmptyState.test.tsx` | 7 | PASS |
+| `src/design-system/__tests__/IconButton.test.tsx` | 6 | PASS |
+| `src/design-system/__tests__/FAB.test.tsx` | 5 | PASS |
+| `src/design-system/__tests__/useDialogControl.test.ts` | 5 | PASS |
+| `src/design-system/__tests__/BottomSheet.test.tsx` | 6 | PASS |
+| `src/design-system/__tests__/ConfirmDialog.test.tsx` | 8 | PASS |
+| `src/design-system/__tests__/Toast.test.tsx` | 5 | PASS |
+| `src/design-system/__tests__/useToast.test.ts` | 5 | PASS |
+| **Total** | **131** | **PASS** |
 
 ---
 
-## package.json Stability
+## Build Output (6 routes)
 
-Runtime dependencies: `next`, `react`, `react-dom` — unchanged.
+```
+Route (app)                                 Size  First Load JS
+┌ ○ /                                      141 B         103 kB
+├ ○ /_not-found                            141 B         103 kB
+├ ○ /chat                                  141 B         103 kB
+├ ƒ /diary/[date]                          141 B         103 kB
+├ ○ /list                                  141 B         103 kB
+└ ○ /stats                                 141 B         103 kB
+```
 
-Dev dependencies: `@tailwindcss/postcss`, `@testing-library/react`, `@types/node`, `@types/react`, `@types/react-dom`, `eslint`, `eslint-config-next`, `happy-dom`, `tailwindcss`, `typescript`, `vitest` — all established in REQ-002/REQ-003. No new entries added by REQ-005.
+Exactly 6 routes. `/diary/[date]` is correctly `ƒ` (dynamic server-rendered). All other routes are `○` (static prerendered). Matches self-reported build output in the implementation report.
+
+---
+
+## Source Guards
+
+### No "use client" in any REQ-006 page.tsx file
+
+Grep confirmed zero matches across:
+- `src/app/not-found.tsx`
+- `src/app/diary/[date]/page.tsx`
+- `src/app/chat/page.tsx`
+- `src/app/list/page.tsx`
+- `src/app/stats/page.tsx`
+
+`chat/page.tsx`, `list/page.tsx`, and `stats/page.tsx` contain no `"use client"` directive and no React import (they export default functions returning plain JSX, consistent with Server Components in Next.js 15 with automatic JSX runtime at build time).
+
+`not-found.tsx` and `diary/[date]/page.tsx` import React explicitly, consistent with the Vitest JSX transform requirement documented in the implementation report.
+
+---
+
+## Routes API Shape Verified
+
+Direct inspection of `src/lib/navigation/routes.ts`:
+
+| Property | Type | Value |
+|---|---|---|
+| `Routes.calendar` | `'/'` (as const) | `'/'` |
+| `Routes.list` | `'/list'` (as const) | `'/list'` |
+| `Routes.chat` | `'/chat'` (as const) | `'/chat'` |
+| `Routes.stats` | `'/stats'` (as const) | `'/stats'` |
+| `Routes.diary` | `(date: string) => string` | `` `/diary/${date}` `` |
+| `Routes.listWithFilter` | `(params: { month?: string; sort?: 'asc' \| 'desc' }) => string` | URLSearchParams with month-before-sort ordering |
+
+`src/lib/navigation/index.ts` re-exports `Routes` only; no additional exports.
+
+`setupNextNavigation.ts` exports: `mockRouter`, `mockNotFound`, `mockUseRouter`, `mockUseSearchParams`, `mockUseParams`, `mockUsePathname`, `resetNavigationMocks`. Matches the plan's named export list exactly.
+
+---
+
+## Config Stability
+
+| Check | Result |
+|---|---|
+| `next.config.ts` unchanged | Confirmed — `const nextConfig: NextConfig = {}; export default nextConfig;` only |
+| No `experimental.scrollRestoration` toggle | Confirmed absent |
+| `package.json` unchanged (no new deps) | Confirmed — no new runtime or dev dependencies added by REQ-006 |
+| Scripts unchanged | `test`, `test:watch`, `typecheck`, `lint`, `build`, `dev`, `start` — all pre-existing |
 
 ---
 
 ## Discrepancies / Notes
 
-1. **Test count arithmetic**: Plan projected ~51 cases; runner shows 49 new cases (131 − 82). The grep of `it(` across 9 new test files returns 52 matches, inflated by 3 occurrences where `it` appears in import destructures. The runner count of 49 is authoritative and within the plan's estimate.
+- The implementation report's build output shows 7 static pages (`Generating static pages (7/7)`), which counts internal Next.js pages plus the 6 app routes. The route table shows exactly 6 app routes as required. No discrepancy.
+- The CJS build deprecation warning from Vitest 2.x is cosmetic and pre-existing from REQ-002. Not a REQ-006 issue.
+- `setupNextNavigation.test.ts` uses `// @vitest-environment happy-dom` on line 1 as specified in the plan, even though the helper itself is a pure module (no DOM). This is correct: the plan calls for happy-dom on this file.
+- `diary-date-page.test.tsx` uses top-level `await import` (not a static import) to load the page component after `vi.mock` is applied. This pattern is correct for ensuring mock hoisting applies before module evaluation with Vitest's ESM handling.
 
-2. **ConfirmDialog ARIA workaround**: Tests use `document.querySelectorAll('button')` rather than `screen.getByRole('button')` because `<dialog>` elements without the native `open` attribute are excluded from the a11y tree in happy-dom. This is a test-environment limitation, not a component defect.
+---
 
-3. **BottomSheet backdrop click mechanism**: `fireEvent.click(dialogEl, { target: dialogEl })` correctly exercises the `e.target === ref.current` check. happy-dom sets `e.target` to the dispatched element.
+## Coverage Notes
 
-4. **CJS deprecation warning from Vitest**: The `The CJS build of Vite's Node API is deprecated` warning appears at test startup. It is cosmetic, does not affect results, and was already present from REQ-002.
+All 10 Caller Invariants from `04-api-contract.md` are covered by the 20 test cases. Coverage matrix in `06-test-plan.md` is accurate. No uncovered invariants found.
 
 ---
 
 ## Remaining Risks
 
-- **ConfirmDialog `aria-labelledby` id collision**: `confirm-msg` is hardcoded. Simultaneous dual mounts would collide. Deferred to a future REQ using `useId()`.
-- **Toast z-index vs `showModal()` top layer**: Cannot be unit-tested. Deferred to E2E / REQ-015.
-- **BottomSheet animation frames**: CSS transitions not computed by happy-dom; slide-up verified structurally only. E2E coverage deferred to REQ-007.
+All risks are pre-existing from the implementation report:
+
+- `Routes.listWithFilter` does not validate `month` or `sort` values — deferred to REQ-013.
+- Semantic date validation in `/diary/[date]` (e.g., Feb 31) — deferred to REQ-009.
+- Back-navigation routes, scroll restoration, and modal history isolation — deferred to Phase 13 E2E.
 
 ---
 

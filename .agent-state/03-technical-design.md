@@ -1,230 +1,241 @@
-# Technical Design — REQ-005
+# Technical Design — REQ-006
 
 ## Goal
 
-Produce seven reusable design-system primitives for 딸깍일기. Every subsequent screen REQ composes from these atoms. All primitives live in `src/design-system/`, consume only `globals.css @theme` tokens, hold to ≤ 100 lines per file, and ship with matching Vitest specs.
+Establish the routing shell for 딸깍일기: five Next.js App Router page files, a Korean `not-found.tsx`, a type-safe `Routes` helper module, and a shared `vi.mock('next/navigation')` test helper. No real screen content is produced — each page renders a placeholder. All subsequent screen REQs (007–018) depend on this shell as their routing foundation.
 
 ---
 
 ## Resolved Unknowns
 
-**1. `--color-danger` exact value: `#C53030`**
+**1 — Shared `vi.mock('next/navigation')` helper: introduce now.**
+At `src/lib/navigation/__tests__/setupNextNavigation.ts`. Rationale: REQ-007 (calendar) and REQ-009 (editor) both render Client Components calling `useRouter`/`useSearchParams`. Adding the helper now costs ~40 lines and saves N-REQ files from duplicating. Pattern mirrors `src/lib/storage/__tests__/setup.ts`.
 
-Contrast ratios against `#FFFFFF` (background of confirm button):
+**2 — `src/lib/navigation/index.ts` barrel: yes.**
+Mirrors `src/lib/storage/index.ts` (REQ-002). Callers write `import { Routes } from '@/lib/navigation'`. Single source of truth.
 
-| Candidate | Ratio | WCAG AA 4.5:1 normal |
-|---|---|---|
-| `#E05C5C` (architecture pick) | ~3.8:1 | FAIL |
-| `#D32F2F` | ~4.4:1 | Borderline FAIL |
-| `#C53030` | ~5.4:1 | PASS |
-| `#B91C1C` | ~6.3:1 | PASS, too dark for pastel palette |
-
-`#C53030` passes WCAG AA at 14px button text, harmonizes with desaturated mood palette, sits between `--color-mood-angry: #F4A6A6` and full crimson. Selected.
-
-**2. Toast z-index vs `<dialog>` top layer**
-
-`showModal()` places `<dialog>` in the browser top layer — above any z-index. A `position: fixed` div Toast cannot exceed it.
-
-Strategy: Toast is non-modal status indicator for non-modal contexts (entry saved, action confirmed). PRD shows no scenario where a toast fires inside a BottomSheet/ConfirmDialog. Document constraint in `Toast.tsx` JSDoc. Future: if a REQ needs toast-from-modal, render the `<div>` inside the `<dialog>` DOM subtree as a child.
-
-**3. `EmptyState.title` type: `ReactNode`**
-
-`title: ReactNode` lets callers pass `<h2>`, `<p>`, or string without API change. String value wrapped in `<p className="text-lg text-charcoal font-medium">`; ReactNode rendered as-is. Implemented with `typeof title === 'string'` branch.
+**3 — Page-component test location: centralized `src/app/__tests__/`.**
+App Router pages live at fixed paths. Co-locating tests inside `diary/[date]/` mixes routing segments with tests. Centralized keeps `src/app/` purely routing.
 
 ---
 
 ## File Layout (with line budgets)
 
-```
-src/app/globals.css                          existing — additive (~+6 lines)
-
-src/design-system/
-  Card.tsx                                   server   ≤ 45 lines
-  EmptyState.tsx                             server   ≤ 70 lines
-  IconButton.tsx                             client   ≤ 55 lines
-  FAB.tsx                                    client   ≤ 55 lines
-  useDialogControl.ts                        client   ≤ 40 lines  (shared hook)
-  BottomSheet.tsx                            client   ≤ 85 lines
-  ConfirmDialog.tsx                          client   ≤ 90 lines
-  Toast.tsx                                  client   ≤ 60 lines
-  useToast.ts                                client   ≤ 35 lines
-
-src/design-system/__tests__/
-  Card.test.tsx                              ≤ 60 lines
-  EmptyState.test.tsx                        ≤ 70 lines
-  IconButton.test.tsx                        ≤ 60 lines
-  FAB.test.tsx                               ≤ 60 lines
-  BottomSheet.test.tsx                       ≤ 80 lines
-  ConfirmDialog.test.tsx                     ≤ 80 lines
-  Toast.test.tsx                             ≤ 70 lines
-  useToast.test.ts                           ≤ 50 lines
-```
-
-`useDialogControl.ts` is extracted preemptively because both BottomSheet and ConfirmDialog share the same `useEffect` + ref + backdrop-click logic.
+| File | Status | Budget |
+|---|---|---|
+| `src/app/page.tsx` | Unchanged (REQ-001 placeholder canonical) | 8 lines |
+| `src/app/not-found.tsx` | Create — Korean 404 Server Component | ≤ 20 lines |
+| `src/app/diary/[date]/page.tsx` | Create — async Server Component, regex guard | ≤ 25 lines |
+| `src/app/list/page.tsx` | Create — placeholder | ≤ 10 lines |
+| `src/app/chat/page.tsx` | Create — placeholder | ≤ 10 lines |
+| `src/app/stats/page.tsx` | Create — placeholder | ≤ 10 lines |
+| `src/lib/navigation/routes.ts` | Create — `Routes` object + `listWithFilter` | ≤ 30 lines |
+| `src/lib/navigation/index.ts` | Create — barrel | ≤ 10 lines |
+| `src/lib/navigation/__tests__/setupNextNavigation.ts` | Create — shared mock helper | ≤ 40 lines |
+| `src/lib/navigation/__tests__/routes.test.ts` | Create — unit tests | ≤ 50 lines |
+| `src/app/__tests__/diary-date-page.test.tsx` | Create — date guard test | ≤ 50 lines |
+| `src/app/__tests__/not-found.test.tsx` | Create (recommended) | ≤ 20 lines |
 
 ---
 
-## New Tokens in `globals.css`
+## Routes API (exact shape)
 
-Add inside the existing `@theme { }` block after `--radius-*`:
-
-```css
-/* Shadows — PRD §1.6.6 */
---shadow-card: 0 2px 8px rgba(0, 0, 0, 0.04);
-
-/* Semantic colors — PRD §5.4 */
---color-danger: #C53030;
-```
-
-**Shadow consumption pattern (locked):** Tailwind 4 does NOT auto-generate `shadow-*` utilities from `@theme --shadow-*`. Components needing `--shadow-card` use inline `style={{ boxShadow: 'var(--shadow-card)' }}`. The arbitrary-class `[box-shadow:var(--shadow-card)]` is also acceptable but inline style preferred (more legible diffs, explicit test assertions).
-
----
-
-## CSS Rule for `dialog::backdrop`
-
-Add to `globals.css` after `html, body` block (outside `@theme`):
-
-```css
-dialog::backdrop {
-  background-color: rgba(0, 0, 0, 0.4);
-}
-```
-
-Cannot be Tailwind utility; lives in global stylesheet.
-
----
-
-## Component-by-Component
-
-### 1. Card — server
-- Directive: none
-- Root: `<div>`
-- ARIA: none
-- Props: `{ children: ReactNode; className?: string; large?: boolean }`
-- Token usage: `bg-paper`, `rounded-[var(--radius-card)]` (or large `--radius-card-lg`), `style={{ boxShadow: 'var(--shadow-card)' }}`
-
-### 2. EmptyState — server
-- Directive: none
-- Root: `<div>`
-- Props: `{ icon?: ReactNode; title: ReactNode; description?: string; action?: ReactNode; className?: string }`
-- Title rendering: `if (typeof title === 'string')` wrap in `<p className="text-lg font-medium text-charcoal">`, else render as-is
-- `action` slot is caller's responsibility for touch-target
-
-### 3. IconButton — client
-- Directive: `"use client"`
-- Root: `<button type="button">`
-- ARIA: `aria-label` REQUIRED (Korean, caller-supplied)
-- Props: `{ icon: ReactNode; label: string; onClick: () => void; disabled?: boolean; className?: string }`
-- 44×44 inline style; icon slot 24×24 (caller sizes)
-- Token: `bg-paper`, `rounded-full`; disabled: `opacity-40 cursor-not-allowed`
-
-### 4. FAB — client
-- Directive: `"use client"`
-- Root: `<button type="button">`
-- Props: `{ icon: ReactNode; label: string; onClick: () => void; className?: string }`
-- 56×56 inline style; `bg-charcoal text-paper rounded-full fixed bottom-6 right-6`
-- Caller can override fixed positioning via `className` if needed
-
-### 5. `useDialogControl` hook — client
-- Location: `src/design-system/useDialogControl.ts`
-- Signature: `function useDialogControl(open: boolean, onClose: () => void): { ref: RefObject<HTMLDialogElement | null>; onDialogClick: (e: React.MouseEvent<HTMLDialogElement>) => void }`
-- `useEffect([open])`: when true → `ref.current?.showModal()`; when false → `ref.current?.close()`
-- `onDialogClick`: if `e.target === ref.current`, call `onClose()` (backdrop click detection)
-- `showModal()` called inside `useEffect` (not render) to satisfy React rules + avoid SSR mismatch
-
-### 6. BottomSheet — client
-- Directive: `"use client"`
-- Root: `<dialog>` via `useDialogControl`
-- ARIA: native `<dialog>` with `showModal()` provides `role="dialog"` + `aria-modal="true"`
-- Props: `{ open: boolean; onClose: () => void; children: ReactNode; className?: string }`
-- Token: `bg-paper`, top-radius `style={{ borderRadius: '24px 24px 0 0' }}`, grip handle `<div className="bg-meta w-10 h-1 rounded-full mx-auto mb-4">`
-- Slide-up: plain CSS transition `translate(0, 100%)` → `translate(0, 0)` toggled by `data-open` attribute
-- `<dialog>` always mounted (kept in DOM); CSS class toggles visual state
-
-### 7. Toast — client
-- Directive: `"use client"`
-- Root: `<div role="status">` (or `"alert"` if caller opts in)
-- Props: `{ message: string; open: boolean; onClose: () => void; role?: 'status' | 'alert'; durationMs?: number; className?: string }`
-- Default `durationMs`: 1800
-- Token: `bg-charcoal text-paper rounded-full fixed bottom-24 px-6 py-3 text-sm`
-- Pure controlled component; auto-dismiss handled by `useToast` hook (separated)
-
-### `useToast` hook — client
-- Location: `src/design-system/useToast.ts`
-- Returns: `{ message: string; open: boolean; show: (message: string, durationMs?: number) => void; hide: () => void }`
-- `show()` sets state + schedules `setTimeout(hide, durationMs)`
-- Effect cleans up timeout on unmount / re-call before timer fires
-
-### 8. ConfirmDialog — client
-- Directive: `"use client"`
-- Root: `<dialog>` via `useDialogControl`
-- ARIA: `aria-labelledby` pointing to message `<p>`
-- Props:
 ```ts
-{
-  open: boolean;
-  message: string;
-  onConfirm: () => void;
-  onCancel: () => void;
-  confirmLabel?: string;       // default '확인'
-  cancelLabel?: string;        // default '취소'
-  destructive?: boolean;       // default false
-  className?: string;
+// src/lib/navigation/routes.ts
+
+export const Routes = {
+  calendar: '/' as const,
+  diary: (date: string): string => `/diary/${date}`,
+  list: '/list' as const,
+  listWithFilter: (params: { month?: string; sort?: 'asc' | 'desc' }): string => {
+    const sp = new URLSearchParams();
+    if (params.month) sp.set('month', params.month);
+    if (params.sort) sp.set('sort', params.sort);
+    const qs = sp.toString();
+    return qs ? `/list?${qs}` : '/list';
+  },
+  chat: '/chat' as const,
+  stats: '/stats' as const,
+} as const;
+```
+
+Rationale:
+- `as const` on string literals: preserves literal types for caller narrowing.
+- `diary` as plain function returning `string` — dynamic segment unknown at compile time.
+- `URLSearchParams` for query construction — correct percent-encoding, deterministic order.
+- No external path library — over-engineering for 5 routes.
+
+---
+
+## `/diary/[date]` Page Skeleton
+
+```tsx
+// src/app/diary/[date]/page.tsx
+import { notFound } from 'next/navigation';
+
+interface PageProps {
+  params: Promise<{ date: string }>;
+}
+
+export default async function DiaryPage({ params }: PageProps) {
+  const { date } = await params;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) notFound();
+  return (
+    <main className="px-6 py-8 text-charcoal">
+      <h1 className="text-3xl">{date} 일기</h1>
+      <p className="mt-2 text-meta">REQ-009에서 채워집니다.</p>
+    </main>
+  );
 }
 ```
-- Token: `bg-paper`, `rounded-[var(--radius-card-lg)]` (20px), `style={{ boxShadow: 'var(--shadow-card)' }}`; confirm button bg: `destructive ? 'bg-danger text-paper' : 'bg-charcoal text-paper'`
-- Buttons min 44px height (`min-h-[44px]` or `py-3`)
-- Backdrop click → `onCancel` (via `useDialogControl.onDialogClick`)
-- Controlled: never closes itself; caller flips `open` after `onConfirm`/`onCancel`
+
+Next.js 15 types `params` as `Promise<{ date: string }>`. Sync read without `await` yields `undefined` in some build modes. Regex covers format only; semantic check (Feb 31) deferred to REQ-009.
+
+---
+
+## `not-found.tsx` Skeleton
+
+```tsx
+// src/app/not-found.tsx
+export default function NotFound() {
+  return (
+    <main className="px-6 py-8 text-charcoal">
+      <h1 className="text-3xl">찾을 수 없는 페이지입니다.</h1>
+      <p className="mt-2 text-meta">
+        주소를 확인하거나{' '}
+        <a href="/" className="underline">
+          캘린더로 돌아가세요
+        </a>
+        .
+      </p>
+    </main>
+  );
+}
+```
+
+Bare `<a href="/">` rather than `next/link` — fallback screen, not a primary navigation surface. Server Component; no `"use client"`.
+
+---
+
+## Shared `next/navigation` Mock Helper
+
+```ts
+// src/lib/navigation/__tests__/setupNextNavigation.ts
+import { vi } from 'vitest';
+
+export const mockRouter = {
+  push: vi.fn(),
+  replace: vi.fn(),
+  back: vi.fn(),
+  prefetch: vi.fn(),
+  refresh: vi.fn(),
+  forward: vi.fn(),
+};
+
+export const mockNotFound = vi.fn(() => {
+  throw new Error('NEXT_NOT_FOUND');
+});
+
+export function mockUseRouter() { return mockRouter; }
+export function mockUseSearchParams() { return new URLSearchParams(); }
+export function mockUseParams(): Record<string, string> { return {}; }
+export function mockUsePathname(): string { return '/'; }
+
+export function resetNavigationMocks() {
+  mockRouter.push.mockReset();
+  mockRouter.replace.mockReset();
+  mockRouter.back.mockReset();
+  mockRouter.prefetch.mockReset();
+  mockNotFound.mockReset().mockImplementation(() => {
+    throw new Error('NEXT_NOT_FOUND');
+  });
+}
+```
+
+Per-file usage:
+```ts
+vi.mock('next/navigation', () => ({
+  useRouter: () => mockUseRouter(),
+  useSearchParams: () => mockUseSearchParams(),
+  useParams: () => mockUseParams(),
+  usePathname: () => mockUsePathname(),
+  notFound: mockNotFound,
+}));
+beforeEach(() => resetNavigationMocks());
+```
+
+Opt-in per test file (not auto-loaded by Vitest `setupFiles`) — same model as the storage shim.
+
+---
+
+## Test Design Sketch (handover to Phase 8)
+
+**`routes.test.ts`** (node env, ≤ 50 lines):
+- Each static path constant equals expected literal.
+- `Routes.diary('2026-05-17')` → `'/diary/2026-05-17'`
+- `Routes.listWithFilter({ month: '2026-04', sort: 'desc' })` → `'/list?month=2026-04&sort=desc'`
+- `Routes.listWithFilter({})` → `'/list'` (no trailing `?`)
+- `Routes.listWithFilter({ sort: 'asc' })` → `'/list?sort=asc'`
+
+**`diary-date-page.test.tsx`** (happy-dom env, ≤ 50 lines):
+- Strategy: render async Server Component's returned JSX directly.
+- Valid date `'2026-05-17'`: heading contains the date.
+- Invalid `'not-a-date'`: `mockNotFound` called, error caught.
+- `'2026-13-01'`: passes regex, renders (semantic check is REQ-009's).
+
+**`not-found.test.tsx`** (happy-dom env, ≤ 20 lines):
+- Renders Korean message.
+- Anchor points to `'/'`.
 
 ---
 
 ## Implementation Order
 
-1. **`globals.css`** — add 2 tokens + `dialog::backdrop` rule. Run `npm run build` to verify.
-2. **`Card.tsx`** — simplest server primitive; establishes `boxShadow: 'var(--shadow-card)'` pattern.
-3. **`EmptyState.tsx`** — second server primitive; establishes ReactNode title pattern.
-4. **`IconButton.tsx`** — leaf client primitive; establishes `"use client"` + required `aria-label`.
-5. **`FAB.tsx`** — leaf client primitive; fixed positioning.
-6. **`useDialogControl.ts`** — shared hook; unit-testable.
-7. **`BottomSheet.tsx`** — composite client; consumes `useDialogControl`.
-8. **`ConfirmDialog.tsx`** — composite client; consumes `useDialogControl`.
-9. **`Toast.tsx` + `useToast.ts`** — client pair; independent of dialog.
-10. **Tests** — written after sources stable.
+1. `src/lib/navigation/routes.ts`
+2. `src/lib/navigation/index.ts` (barrel)
+3. `src/lib/navigation/__tests__/setupNextNavigation.ts`
+4. `src/lib/navigation/__tests__/routes.test.ts`
+5. `src/app/not-found.tsx`
+6. `src/app/diary/[date]/page.tsx`
+7. `src/app/{list,chat,stats}/page.tsx` (parallel)
+8. `src/app/__tests__/diary-date-page.test.tsx`
+9. `src/app/__tests__/not-found.test.tsx`
+10. `npm run typecheck && npm run lint && npm test && npm run build`
 
 ---
 
-## Test Design Sketch (handover to test-engineer)
+## Backend / Data / Infra Design
 
-All test files: `// @vitest-environment happy-dom`; `afterEach(cleanup)`.
-
-**Card**: renders children in `<div>`; `boxShadow` style equals `var(--shadow-card)`; `className` on root; source-guard no `"use client"`.
-
-**EmptyState**: renders icon/title/description/action; string title wrapped in `<p>`; ReactNode title rendered as-is; source-guard no `"use client"`.
-
-**IconButton**: `<button type="button">`; `aria-label === label`; width/height = 44; `onClick` fires on click; source-guard has `"use client"`.
-
-**FAB**: same structure as IconButton; width/height = 56; source-guard has `"use client"`.
-
-**useDialogControl**: mock `HTMLDialogElement.prototype.showModal/close`; on `open=true` mock called once; on `false` close mock called once; `onDialogClick` with matching `e.target` calls `onClose`; mismatched target does not.
-
-**BottomSheet**: `open=true` → `open` attribute present; grip handle rendered; `onClose` fires on backdrop click; source-guard has `"use client"`.
-
-**ConfirmDialog**: renders `message`; default `confirmLabel='확인'`/`cancelLabel='취소'`; `onConfirm`/`onCancel` fire on respective clicks; `destructive=true` applies `bg-danger` class; backdrop click → `onCancel`; source-guard has `"use client"`.
-
-**Toast**: renders when `open=true`, absent when `open=false`; `role="status"` default; `role="alert"` opt-in; source-guard has `"use client"`.
-
-**useToast**: `vi.useFakeTimers()`; `show('msg', 1800)` → `open=true`; advance 1800ms → `open=false`; `hide()` immediate; timer cleared on re-call.
+None.
 
 ---
 
-## Risks
+## Backward Compatibility
 
-1. **Prop-signature lock-in.** REQ-007+ will import. Designs intentionally conservative. Add props only when a consuming REQ explicitly needs them.
-2. **`bg-danger` utility availability.** Tailwind 4 should auto-generate from `@theme --color-danger`. Verify in step-1 build. Fallback: `style={{ backgroundColor: 'var(--color-danger)' }}`.
-3. **`<dialog>` ref wiring under React 19.** New `ref` prop (no `forwardRef`). `useRef<HTMLDialogElement>` directly as `ref={ref}` should compile. Verify.
-4. **happy-dom `showModal()` stub.** Mock `HTMLDialogElement.prototype.showModal/close` in tests before asserting calls.
-5. **BottomSheet animation timing.** Keep `<dialog>` always mounted; toggle visual state via CSS class on `data-open`. Conditional `open && <dialog>` would break slide animation.
+`src/app/page.tsx` unchanged. No existing import paths move. All changes purely additive.
+
+---
+
+## Performance Considerations
+
+All page files are Server Components — produce static HTML, no client JS bundle growth. `routes.ts` is tiny and tree-shakes if unused.
+
+---
+
+## Risks and Tradeoffs
+
+| Risk | Mitigation |
+|---|---|
+| Next.js 15 `params` is `Promise`. Sync read silently yields `undefined`. | Typed as `Promise<...>` and `await`-ed. TypeScript catches if a future caller reads sync. |
+| `notFound()` throws internally; test without mock crashes. | Shared helper mocks it to a catchable `Error`. |
+| `happy-dom` env per-file directive easy to forget. | Test files carry `// @vitest-environment happy-dom`. Omitting is visible at run. |
+| `URLSearchParams` insertion order. | Params set in fixed order (`month` then `sort`) for deterministic test output. |
+
+---
+
+## Open Questions
+
+None blocking. All 3 architecture unknowns resolved.
 
 ---
 

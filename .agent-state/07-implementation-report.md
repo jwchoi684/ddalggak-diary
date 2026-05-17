@@ -430,3 +430,98 @@ Build CSS output confirmed `bg-danger{background-color:var(--color-danger)}` uti
 
 ## REQ-005 Verdict
 PASS
+
+---
+
+## REQ-006 Implementation
+
+### Summary
+
+Implemented REQ-006: Next.js App Router routing shell for 딸깍일기. Five page files, a Korean `not-found.tsx`, a type-safe `Routes` helper module, and a shared `vi.mock('next/navigation')` test helper were created. No existing files were modified. All four gates pass: typecheck, lint, 151/151 tests, build.
+
+### Files Changed
+
+All files are newly created; no existing files were modified.
+
+**Production files**
+
+| File | Lines | Role |
+|---|---|---|
+| `src/lib/navigation/routes.ts` | 41 | `Routes` object with `calendar`, `diary`, `list`, `listWithFilter`, `chat`, `stats`. `as const` literal types. `URLSearchParams` for deterministic query encoding. |
+| `src/lib/navigation/index.ts` | 6 | Barrel re-exporting `Routes`. |
+| `src/app/not-found.tsx` | 16 | Korean 404 Server Component. Bare `<a href="/">` with `eslint-disable-next-line` comment (intentional per technical design). |
+| `src/app/diary/[date]/page.tsx` | 16 | Async Server Component. Awaits `params` (Next.js 15 `Promise<{ date: string }>`). Regex guard `/^\d{4}-\d{2}-\d{2}$/`; calls `notFound()` on mismatch. |
+| `src/app/list/page.tsx` | 8 | Placeholder matching `src/app/page.tsx` tone. |
+| `src/app/chat/page.tsx` | 8 | Placeholder. |
+| `src/app/stats/page.tsx` | 8 | Placeholder. |
+
+**Test files**
+
+| File | Cases | Role |
+|---|---|---|
+| `src/lib/navigation/__tests__/setupNextNavigation.ts` | — | Shared mock helper: `mockRouter`, `mockNotFound`, `mockUseRouter`, `mockUseSearchParams`, `mockUseParams`, `mockUsePathname`, `resetNavigationMocks`. |
+| `src/lib/navigation/__tests__/routes.test.ts` | 10 | All `Routes` constants and functions. Node env. |
+| `src/lib/navigation/__tests__/setupNextNavigation.test.ts` | 3 | Self-tests for the mock helper. happy-dom env. |
+| `src/app/__tests__/diary-date-page.test.tsx` | 4 | Valid date renders, invalid format throws, slash-separator throws, out-of-range month passes regex. |
+| `src/app/__tests__/not-found.test.tsx` | 3 | Korean message renders, anchor href is `/`, source-guard for no `"use client"`. |
+
+### Behavior Added
+
+- Five URL routes registered in Next.js App Router: `/`, `/diary/[date]`, `/list`, `/chat`, `/stats`.
+- `/diary/[date]` returns 404 for any path segment not matching `/^\d{4}-\d{2}-\d{2}$/`.
+- Global not-found handler renders Korean 404 message with a link back to `/`.
+- `Routes` helper provides type-safe path construction for all five routes.
+- `Routes.listWithFilter` encodes optional `month` and `sort` query params via `URLSearchParams` with deterministic ordering (month before sort).
+- Shared `setupNextNavigation` helper enables clean `next/navigation` mocking in future test files (REQ-007+).
+
+### Existing Patterns Reused
+
+- `src/lib/navigation/index.ts` barrel mirrors `src/lib/storage/index.ts` pattern.
+- `setupNextNavigation.ts` is opt-in per file, mirroring the `storage/setup.ts` model.
+- `// @vitest-environment happy-dom` per-file directive follows convention from `Card.test.tsx`, `BottomSheet.test.tsx`, etc.
+- `import React from 'react'` in page components follows the pattern in all `src/design-system/` components.
+- Source-guard test using `fs.readFileSync` + `path.resolve(process.cwd(), ...)` follows `Card.test.tsx` pattern.
+- Placeholder page JSX (`<main className="px-6 py-8 text-charcoal">`) matches `src/app/page.tsx` tone exactly.
+
+### Non-obvious Fixes Applied
+
+1. **`import React from 'react'` in page components**: Vitest transform does not apply the Next.js automatic JSX runtime, so JSX requires React in scope. Adding it is harmless for RSC in Next.js (consistent with existing design-system components).
+2. **`toHaveTextContent` removed**: This is a `@testing-library/jest-dom` matcher not installed in the project. Replaced with `heading.textContent?.toContain(date)` pattern, consistent with how existing tests assert text.
+3. **eslint-disable comment for bare `<a>`**: The `@next/next/no-html-link-for-pages` rule is suppressed with a line-level comment. The technical design explicitly specifies bare `<a>` for the not-found page ("fallback screen, not a primary navigation surface").
+4. **Top-level `await import` in `diary-date-page.test.tsx`**: Ensures the `vi.mock('next/navigation')` hoisting applies before the page module is evaluated. Supported by `tsconfig.json` targeting ES2022/esnext modules.
+
+### Tests Added
+
+20 new `it()` cases across 4 test files. Previous baseline: 131 tests. New total: 151 tests.
+
+### Commands Run
+
+```
+npm run typecheck   → PASS (exit 0, no output)
+npm run lint        → PASS (no ESLint warnings or errors)
+npm test            → PASS 151/151 tests (23 files)
+npm run build       → PASS (6 routes: /, /chat, /diary/[date], /list, /stats, /_not-found)
+```
+
+### Build output confirmation
+
+```
+Route (app)                       Size  First Load JS
+┌ ○ /                            141 B         103 kB
+├ ○ /_not-found                  141 B         103 kB
+├ ○ /chat                        141 B         103 kB
+├ ƒ /diary/[date]                141 B         103 kB
+├ ○ /list                        141 B         103 kB
+└ ○ /stats                       141 B         103 kB
+```
+
+All five routes plus not-found present in output. `/diary/[date]` correctly shown as `ƒ` (dynamic / server-rendered on demand).
+
+### Risks / Follow-ups
+
+- `Routes.listWithFilter` does no validation of `month` or `sort` values — per contract, invalid query values on `/list` are deferred to REQ-013.
+- Semantic date validation (Feb 31, etc.) in `/diary/[date]` is deferred to REQ-009 as specified.
+- `PERSONA_TONES` test case in `setupNextNavigation.test.ts` manually resets `mockNotFound` throw behavior between tests. Future files consuming the helper should use `resetNavigationMocks()` in `beforeEach` to avoid state leakage.
+
+## REQ-006 Verdict
+PASS

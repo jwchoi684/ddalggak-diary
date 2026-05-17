@@ -2,25 +2,24 @@
 
 ## Summary
 
-REQ-005 delivers seven presentational UI primitives, two ephemeral-state hooks,
-eight Vitest spec files, and two additive CSS token lines plus one CSS rule in
-`globals.css`. No data layer is involved at any level.
+REQ-006 is a Next.js App Router routing shell. It creates five `page.tsx` placeholders,
+`not-found.tsx`, `src/lib/navigation/routes.ts` (pure path constants and builders), a
+barrel `index.ts`, and a shared Vitest mock helper. No data is read, written, or modeled
+by any of these files.
 
 ## Schema Change Required
 
-None. REQ-005 touches only `src/design-system/` (new files) and
-`src/app/globals.css` (additive tokens). The existing storage schema —
-`DiaryEntry`, `SearchConversation`, `Settings`, and their localStorage keys
-(`ddalkkak:diaries:v1`, `ddalkkak:conversations:v1`, `ddalkkak:settings:v1`) —
-is entirely untouched.
+None. This project has no database. The confirmed storage layer is `localStorage` with
+fixed keys established by REQ-002 (`ddalkkak:diaries:v1`, `ddalkkak:conversations:v1`,
+`ddalkkak:settings:v1`). REQ-006 files do not reference any of those keys.
 
 ## Migration Strategy
 
-Not applicable. No migration file is required.
+Not applicable.
 
 ## Backfill / Default / Nullability
 
-Not applicable. No stored fields are added, removed, or retyped.
+Not applicable.
 
 ## Index Requirements
 
@@ -28,46 +27,43 @@ Not applicable.
 
 ## Existing Data Compatibility
 
-Full compatibility preserved. `src/lib/storage/types.ts` and all sibling
-storage modules are read-only from REQ-005's perspective; none of the seven
-primitives or two hooks import from `src/lib/storage/`.
+The `/diary/[date]` dynamic segment accepts `date` as a URL path string. The regex guard
+`^\d{4}-\d{2}-\d{2}$` is consistent with `DiaryEntry.date: string` (`YYYY-MM-DD`) defined
+in REQ-002. No change to the stored type is implied; the URL segment is a read-only key
+for routing, not a schema field.
 
 ## Rollback Considerations
 
-Not applicable. CSS token additions are additive and safe to revert by
-removing two lines from `@theme {}`. No data is written anywhere.
+Not applicable. All changes are additive TypeScript/TSX files with no persistence side
+effects. Removing them reverts the routing surface only.
 
 ## Query Performance Risk
 
-None. REQ-005 contains no data access paths.
+None. `routes.ts` is a pure constant module. No storage reads occur in any REQ-006 file.
 
 ## Seed / Fixture Impact
 
-None. `src/lib/storage/__tests__/fixtures.ts` is not modified.
+None.
 
 ## Files Expected to Change
 
-- `src/app/globals.css` — additive: `--shadow-card`, `--color-danger` tokens;
-  `dialog::backdrop` rule.
-- `src/design-system/Card.tsx` (new)
-- `src/design-system/EmptyState.tsx` (new)
-- `src/design-system/IconButton.tsx` (new)
-- `src/design-system/FAB.tsx` (new)
-- `src/design-system/useDialogControl.ts` (new)
-- `src/design-system/BottomSheet.tsx` (new)
-- `src/design-system/ConfirmDialog.tsx` (new)
-- `src/design-system/Toast.tsx` (new)
-- `src/design-system/useToast.ts` (new)
-- `src/design-system/__tests__/*.test.{tsx,ts}` — 8 new spec files
+- `src/app/not-found.tsx` (new)
+- `src/app/diary/[date]/page.tsx` (new)
+- `src/app/list/page.tsx` (new)
+- `src/app/chat/page.tsx` (new)
+- `src/app/stats/page.tsx` (new)
+- `src/lib/navigation/routes.ts` (new)
+- `src/lib/navigation/index.ts` (new)
+- `src/lib/navigation/__tests__/setupNextNavigation.ts` (new)
+- `src/lib/navigation/__tests__/routes.test.ts` (new)
+- `src/app/__tests__/diary-date-page.test.tsx` (new)
+- `src/app/__tests__/not-found.test.tsx` (new)
 
-No storage, schema, migration, seed, or fixture file is modified.
+No existing file is modified for data reasons.
 
 ## Test Requirements
 
-Vitest specs assert render behavior and prop contracts only. No storage mock,
-no `localStorage` stub, and no fixture setup is required for any of the eight
-spec files. `useToast.test.ts` uses `vi.useFakeTimers()` for timer control —
-this is in-memory only and carries no persistence side-effects.
+No migration tests are needed. `routes.test.ts` validates path-string correctness only.
 
 ## Verdict
-PASS — not applicable; REQ-005 is presentational primitives only.
+PASS — not applicable; REQ-006 is a routing shell with no persistence.

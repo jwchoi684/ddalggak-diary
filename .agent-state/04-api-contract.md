@@ -1,258 +1,162 @@
-# API Contract — REQ-005
+# API / Interface Contract — REQ-006
 
 ## Scope
 
-Internal TypeScript module contract for 9 new files under `src/design-system/`. All boundaries are intra-frontend function signatures, prop interfaces, and hook return shapes. No HTTP endpoints, no backend, no storage keys change.
+Two surfaces: (1) Next.js App Router route contracts — URL paths, handler files, accepted params, and HTTP status codes — and (2) the internal TypeScript module contract for `@/lib/navigation`, including the `Routes` helper and the shared `next/navigation` Vitest mock helper. No external HTTP endpoints or backend changes are involved.
 
 ---
 
-## Public Exports per File
+## Route Contracts
 
-| File | Export | Kind |
+| Path | Handler file | Component type | Dynamic params | Query params | Status codes | Owner REQ |
+|---|---|---|---|---|---|---|
+| `/` | `src/app/page.tsx` | Server | none | none | 200 | REQ-007 |
+| `/diary/[date]` | `src/app/diary/[date]/page.tsx` | Server (async) | `date: string` (path segment) | none | 200, 404 | REQ-009 |
+| `/list` | `src/app/list/page.tsx` | Server | none | `month=YYYY-MM`, `sort=asc\|desc` | 200 | REQ-013 |
+| `/chat` | `src/app/chat/page.tsx` | Server | none | none | 200 | REQ-015 |
+| `/stats` | `src/app/stats/page.tsx` | Server | none | none | 200 | REQ-014 |
+| `*` (all unmatched) | `src/app/not-found.tsx` | Server | none | none | 404 | REQ-006 |
+
+Route notes:
+- `/diary/[date]` returns 404 if `date` does not match `/^\d{4}-\d{2}-\d{2}$/`. Semantic date validation (e.g., Feb 31) is deferred to REQ-009.
+- `/list` query params are optional; omitting either leaves the page at default state. Both params are deep-linkable and round-trippable via `Routes.listWithFilter(params)`.
+- No `"use client"` directive in any REQ-006 shell file. Client Components belong to later screen REQs.
+
+---
+
+## Public Exports from `@/lib/navigation`
+
+```ts
+// src/lib/navigation/routes.ts
+
+/**
+ * Type-safe route builder for 딸깍일기.
+ * Import via: import { Routes } from '@/lib/navigation'
+ */
+export const Routes = {
+  /** Calendar root screen. Always '/'. */
+  calendar: '/' as const,
+
+  /**
+   * Diary editor for a specific date.
+   * @param date - ISO 8601 date string, e.g. '2026-05-17'
+   * @returns '/diary/2026-05-17'
+   */
+  diary: (date: string): string => `/diary/${date}`,
+
+  /** Diary list screen (no filters). Always '/list'. */
+  list: '/list' as const,
+
+  /**
+   * Diary list with optional month and sort filters.
+   * Params are set in fixed order (month → sort) for deterministic URLs.
+   * @param params.month - 'YYYY-MM' format; omit to leave unset
+   * @param params.sort  - 'asc' | 'desc'; omit to leave unset
+   * @returns '/list', '/list?month=YYYY-MM', '/list?sort=asc|desc',
+   *          or '/list?month=YYYY-MM&sort=asc|desc'
+   */
+  listWithFilter: (params: { month?: string; sort?: 'asc' | 'desc' }): string => {
+    const sp = new URLSearchParams();
+    if (params.month) sp.set('month', params.month);
+    if (params.sort)  sp.set('sort', params.sort);
+    const qs = sp.toString();
+    return qs ? `/list?${qs}` : '/list';
+  },
+
+  /** AI chat screen. Always '/chat'. */
+  chat: '/chat' as const,
+
+  /** Stats screen. Always '/stats'. */
+  stats: '/stats' as const,
+} as const;
+```
+
+Barrel (`src/lib/navigation/index.ts`) re-exports `Routes` so callers write `import { Routes } from '@/lib/navigation'`.
+
+---
+
+## Test Helper Exports from `@/lib/navigation/__tests__/setupNextNavigation`
+
+```ts
+// Mutable mock for the Next.js router object
+export const mockRouter: {
+  push:     ReturnType<typeof vi.fn>;
+  replace:  ReturnType<typeof vi.fn>;
+  back:     ReturnType<typeof vi.fn>;
+  prefetch: ReturnType<typeof vi.fn>;
+  refresh:  ReturnType<typeof vi.fn>;
+  forward:  ReturnType<typeof vi.fn>;
+};
+
+// Throws Error('NEXT_NOT_FOUND') to simulate Next.js notFound()
+export const mockNotFound: ReturnType<typeof vi.fn>;
+
+// Drop-in implementations for vi.mock factory
+export function mockUseRouter(): typeof mockRouter;
+export function mockUseSearchParams(): URLSearchParams;
+export function mockUseParams(): Record<string, string>;
+export function mockUsePathname(): string;
+
+// Call in beforeEach to reset all mocks; re-applies throw behavior on mockNotFound
+export function resetNavigationMocks(): void;
+```
+
+**When to use.** Any test file that renders a Client Component calling `useRouter`/`useSearchParams`/`useParams`/`usePathname`, or that invokes `notFound()`, must add at the top:
+
+```ts
+import { mockRouter, mockNotFound, mockUseRouter, mockUseSearchParams,
+         mockUseParams, mockUsePathname, resetNavigationMocks }
+  from '@/lib/navigation/__tests__/setupNextNavigation';
+
+vi.mock('next/navigation', () => ({
+  useRouter:       () => mockUseRouter(),
+  useSearchParams: () => mockUseSearchParams(),
+  useParams:       () => mockUseParams(),
+  usePathname:     () => mockUsePathname(),
+  notFound:        mockNotFound,
+}));
+
+beforeEach(() => resetNavigationMocks());
+```
+
+Opt-in per file (not in Vitest `setupFiles`) — same model as the storage shim.
+
+---
+
+## Caller Invariants
+
+1. `Routes.calendar` is the string literal `'/'`.
+2. `Routes.diary(date)` always returns a string starting with `'/diary/'` and ending with the `date` argument unchanged.
+3. `Routes.list` is the string literal `'/list'`.
+4. `Routes.listWithFilter({})` returns exactly `'/list'` (no trailing `?`).
+5. `Routes.listWithFilter(params)` encodes via `URLSearchParams` (correct percent-encoding); `month` always precedes `sort`.
+6. `Routes.chat` is `'/chat'`.
+7. `Routes.stats` is `'/stats'`.
+8. No REQ-006 page file contains `"use client"`. Client Components belong to consuming screen REQs.
+9. `mockRouter` is the same object reference returned by `mockUseRouter()` — tests may spy on `mockRouter.push` etc. directly.
+10. `resetNavigationMocks()` is idempotent; safe in any `beforeEach`.
+
+---
+
+## Error Contract Summary
+
+| Trigger | Mechanism | Result |
 |---|---|---|
-| `Card.tsx` | `Card` | `function` (Server Component) |
-| `EmptyState.tsx` | `EmptyState` | `function` (Server Component) |
-| `IconButton.tsx` | `IconButton` | `function` (Client Component) |
-| `FAB.tsx` | `FAB` | `function` (Client Component) |
-| `BottomSheet.tsx` | `BottomSheet` | `function` (Client Component) |
-| `Toast.tsx` | `Toast` | `function` (Client Component) |
-| `ConfirmDialog.tsx` | `ConfirmDialog` | `function` (Client Component) |
-| `useDialogControl.ts` | `useDialogControl` | `function` (Client Hook) |
-| `useToast.ts` | `useToast` | `function` (Client Hook) |
-
-All exports named. No default exports. No barrel `index.ts`.
-
----
-
-## Per-Component Detail
-
-### Card — Server Component
-
-```ts
-interface CardProps {
-  children: ReactNode;
-  className?: string;
-  large?: boolean;  // true → --radius-card-lg (20px); default 16px
-}
-function Card(props: CardProps): JSX.Element
-```
-
-**Behavior.** `<div>` with `bg-paper`, border-radius from `--radius-card` (or large), `style={{ boxShadow: 'var(--shadow-card)' }}`. No interactive elements; no listeners.
-
-**Invariants.** No `"use client"`. Shadow MUST be `var(--shadow-card)` via inline `style`. `className` appended after internal classes.
-
----
-
-### EmptyState — Server Component
-
-```ts
-interface EmptyStateProps {
-  icon?: ReactNode;
-  title: ReactNode;            // string → wrapped in <p>; ReactNode → as-is
-  description?: string;
-  action?: ReactNode;          // touch target = caller's responsibility
-  className?: string;
-}
-function EmptyState(props: EmptyStateProps): JSX.Element
-```
-
-**Behavior.** Centered column: icon → title → description → action. `typeof title === 'string'` branch wraps in `<p className="text-lg font-medium text-charcoal">`; else renders ReactNode directly.
-
-**Invariants.** No `"use client"`. `action` slot's touch-target burden is on caller.
-
----
-
-### IconButton — Client Component
-
-```ts
-interface IconButtonProps {
-  icon: ReactNode;
-  label: string;              // Korean aria-label; required
-  onClick: () => void;
-  disabled?: boolean;
-  className?: string;
-}
-function IconButton(props: IconButtonProps): JSX.Element
-```
-
-**Behavior.** `<button type="button" aria-label={label}>` at exactly 44×44 via `style={{ width: 44, height: 44 }}`. Surface `bg-paper rounded-full`. Disabled: `opacity-40 cursor-not-allowed`; `onClick` not fired when disabled.
-
-**Invariants.** `label` non-empty Korean. Touch target 44×44 always. `"use client"` present.
-
----
-
-### FAB — Client Component
-
-```ts
-interface FABProps {
-  icon: ReactNode;
-  label: string;              // Korean aria-label; required
-  onClick: () => void;
-  className?: string;
-}
-function FAB(props: FABProps): JSX.Element
-```
-
-**Behavior.** `<button type="button" aria-label={label}>` at exactly 56×56 via inline style. Default: `bg-charcoal text-paper rounded-full fixed bottom-6 right-6`. Caller may override `fixed` via `className`.
-
-**Invariants.** Touch target 56×56. `"use client"` present.
-
----
-
-### useDialogControl — Client Hook
-
-```ts
-interface DialogControlResult {
-  ref: RefObject<HTMLDialogElement | null>;
-  onDialogClick: (e: React.MouseEvent<HTMLDialogElement>) => void;
-}
-function useDialogControl(open: boolean, onClose: () => void): DialogControlResult
-```
-
-**Behavior.**
-- `useEffect([open])`: `open=true` → `ref.current?.showModal()`; `false` → `ref.current?.close()`.
-- `showModal()`/`close()` called inside `useEffect`, never at render.
-- `onDialogClick(e)`: if `e.target === ref.current`, calls `onClose()`. Interior clicks don't bubble to `<dialog>` as target — only backdrop clicks trigger close.
-
-**Invariants.** Must be used in `"use client"` file. Caller passes `ref` to `<dialog ref={ref}>`. Caller responsible for flipping `open=false` in their `onClose` handler.
-
----
-
-### BottomSheet — Client Component
-
-```ts
-interface BottomSheetProps {
-  open: boolean;
-  onClose: () => void;
-  children: ReactNode;
-  className?: string;
-}
-function BottomSheet(props: BottomSheetProps): JSX.Element
-```
-
-**Behavior.** `<dialog>` via `useDialogControl`. **Always mounted in DOM** (never conditionally rendered); slide-up via CSS `translate(0, 100%) → translate(0, 0)` toggled by `data-open` attribute. Top radius `style={{ borderRadius: '24px 24px 0 0' }}`. Grip handle: `<div className="bg-meta w-10 h-1 rounded-full mx-auto mb-4">`. `showModal()` provides native focus trap + Escape key close.
-
-**Invariants.** Native `<dialog>` provides `role="dialog"` + `aria-modal="true"`. Escape key fires native `close` → caller's `onClose` via `useDialogControl`. Never conditionally unmount — breaks slide-out animation.
-
----
-
-### Toast — Client Component
-
-```ts
-interface ToastProps {
-  message: string;
-  open: boolean;
-  onClose: () => void;
-  role?: 'status' | 'alert';   // default 'status'
-  durationMs?: number;          // informational; default 1800
-  className?: string;
-}
-function Toast(props: ToastProps): JSX.Element
-```
-
-**Behavior.** Renders `<div role={role}>` only when `open === true`. Fixed pill: `bg-charcoal text-paper rounded-full fixed bottom-24 px-6 py-3 text-sm`. **Pure controlled component**; auto-dismiss is caller's responsibility (typically `useToast`).
-
-**Invariants.** `durationMs` informational only; timer logic in `useToast`. Toast does NOT appear above `showModal()` top layer — render inside `<dialog>` DOM subtree if needed inside modal.
-
----
-
-### ConfirmDialog — Client Component
-
-```ts
-interface ConfirmDialogProps {
-  open: boolean;
-  message: string;
-  onConfirm: () => void;        // caller must flip open=false
-  onCancel: () => void;          // caller must flip open=false
-  confirmLabel?: string;         // default '확인'
-  cancelLabel?: string;          // default '취소'
-  destructive?: boolean;         // default false → bg-charcoal; true → bg-danger
-  className?: string;
-}
-function ConfirmDialog(props: ConfirmDialogProps): JSX.Element
-```
-
-**Behavior.** `<dialog>` via `useDialogControl`. Layout: `bg-paper rounded-[var(--radius-card-lg)]` with `style={{ boxShadow: 'var(--shadow-card)' }}`. `aria-labelledby` → message `<p>`. Confirm: `destructive ? 'bg-danger text-paper' : 'bg-charcoal text-paper'`, `min-h-[44px]`. Cancel: outlined/muted, `min-h-[44px]`. Backdrop click → `onCancel`. Component never closes itself — caller owns `open` state.
-
-**Invariants.** Both buttons ≥ 44px height. `destructive` defaults false; opt-in. Default labels Korean `'확인'`/`'취소'`.
-
----
-
-### useToast — Client Hook
-
-```ts
-interface ToastState {
-  message: string;
-  open: boolean;
-  show: (message: string, durationMs?: number) => void;
-  hide: () => void;
-}
-function useToast(): ToastState
-```
-
-**Behavior.** `useState` for `{ message, open }`. `show()` sets `open=true` + `message`, clears any existing timeout, schedules `setTimeout(hide, durationMs ?? 1800)`. `hide()` sets `open=false`. Cleanup on unmount clears pending timer. No global singleton; isolated state per call site.
-
-**Invariants.** Spread `useToast()` return onto `<Toast message={message} open={open} onClose={hide} />`. `durationMs` to `show()` overrides default per invocation.
-
----
-
-## Caller Invariants (Cross-Cutting)
-
-1. **Token-only styling.** Colors, radii, shadows from `globals.css @theme`. No hex literals in component files.
-2. **Touch targets.** Enforced via inline `style` or Tailwind constraint — not overridable by `className`.
-3. **`className` is layout-only.** Margin, flex, z-index. Interior surface remains under primitive control.
-4. **No barrel.** Per-file imports.
-5. **Server/Client boundary.** `Card` and `EmptyState` safe in Server Components. Others require client boundary at or above the import site.
-
----
-
-## Error / Edge Contract Summary
-
-| Primitive | Edge | Contract |
-|---|---|---|
-| `IconButton` | `disabled=true` | `onClick` not fired; visual `opacity-40`. |
-| `ConfirmDialog` | backdrop click | Routes to `onCancel`. |
-| `BottomSheet` | Escape key | Native `<dialog>` `close` event → `onClose`. |
-| `Toast` | `show()` mid-timer | Prior timer cleared; new starts from 0. |
-| `Toast` inside `<dialog>` | z-index below top layer | Render inside dialog DOM subtree. |
-| `EmptyState` | `title` ReactNode | As-is; string wraps in styled `<p>`. |
-| `useDialogControl` | rapid `open` toggle | `showModal`/`close` guarded by ref null-check. |
-
----
-
-## Backward Compatibility
-
-New files with no prior consumers. Prop shapes additive by design — future REQs may add optional props only. `src/app/globals.css` is the only existing file changed (additive: 2 tokens + 1 CSS rule block).
-
----
-
-## Import Path Discipline
-
-```ts
-import { Card }          from '@/design-system/Card'
-import { EmptyState }    from '@/design-system/EmptyState'
-import { IconButton }    from '@/design-system/IconButton'
-import { FAB }           from '@/design-system/FAB'
-import { BottomSheet }   from '@/design-system/BottomSheet'
-import { Toast }         from '@/design-system/Toast'
-import { ConfirmDialog } from '@/design-system/ConfirmDialog'
-import { useDialogControl } from '@/design-system/useDialogControl'
-import { useToast }      from '@/design-system/useToast'
-```
-
-No barrel `index.ts`.
+| `date` path segment fails `/^\d{4}-\d{2}-\d{2}$/` | `notFound()` inside `DiaryPage` | 404 — renders `not-found.tsx` |
+| Any URL not matching the 5 routes | App Router fallthrough | 404 — renders `not-found.tsx` |
+| Invalid `month`/`sort` query values on `/list` | No server-side validation in shell; deferred to REQ-013 | 200 (shell renders; REQ-013 handles bad values) |
 
 ---
 
 ## Out of Scope
 
-- `Header` composite (REQ-007).
-- Mood-tinted card variants (REQ-014).
-- Calendar day cell, mood emoji tile (REQ-007).
-- Chat bubbles, cited-diary chips, persona avatar pill (REQ-015/017).
-- Dark mode (P1).
-- Screen-level transition system (REQ-006).
-- Storybook / demo page.
+- Intercepting routes (`@(.)diary/[date]`) and parallel routes.
+- Modal routes — local React state only; no URL segment allocated.
+- Dynamic route params beyond `[date]`.
+- Scroll restoration and history-state persistence — owned by each screen REQ.
+- Semantic date validation — REQ-009.
+- Deep-link sharing and PWA routing — v2.
+- Any backend, database, or auth contract.
 
 ---
 
