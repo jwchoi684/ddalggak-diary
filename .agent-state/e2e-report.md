@@ -1,87 +1,156 @@
-# E2E Report — REQ-006
+# E2E Report — REQ-007
 
 ## Summary
 
-REQ-006 delivers a routing shell: 5 App Router page stubs, a Korean `not-found.tsx`,
-and a type-safe `Routes` helper. Every page renders a placeholder only — no user
-interaction exists. The REQ-006 acceptance criterion marks back-navigation E2E as
-"recommended", and the 3 required entry paths (calendar→editor, list→editor,
-chat→editor) each depend on a source screen not yet built. No E2E framework is
-installed. E2E validation is deferred to REQ-007, where Playwright will be bootstrapped
-alongside the first real user interaction (FAB tap → `/diary/[today]`).
+1 spec, 1 test case. Independently re-run against the live dev server. 1/1 PASS (2.9s, Chromium). The spec covers the REQ-007 acceptance criterion "E2E: 권장 — 앱 열기 → 오늘 일기 쓰기 시작" using FAB as the trigger entry point.
+
+---
 
 ## Scenario Tested
 
-Not executed. The recommended back-navigation scenario requires:
+**Golden path: app open → calendar visible → FAB tap → `/diary/[today]`**
 
-- A tappable date cell on the calendar (REQ-007)
-- A tappable card on the list screen (REQ-013)
-- A tappable cited-diary chip in the AI chat (REQ-017)
+User opens the app at `/`, sees the current month label, confirms the `<main>` landmark is rendered, clicks the FAB labeled `오늘 일기 쓰기`, and lands on the today diary editor route (`/diary/YYYY-MM-DD`).
 
-None of these source interactions exist. Navigating to each route by URL would only
-confirm that placeholder text renders — behaviour already verified by `npm run build`
-(static prerender of 5 routes + not-found) and the 20 unit tests in the test report.
+---
 
 ## Steps
 
-No steps executed. Pre-condition checks performed before issuing the deferral verdict:
+1. Navigate to `http://localhost:3000/` (webServer boots via `npm run dev`).
+2. Assert `{month}월` text is visible (e.g. `5월` for May).
+3. Assert `role=main` is visible.
+4. Click `role=button, name="오늘 일기 쓰기"` (the FAB).
+5. Assert URL equals `/diary/2026-05-18` (today in YYYY-MM-DD local format).
 
-1. Confirmed no E2E framework is installed — `playwright.config.*` is absent from the
-   repository root; `package.json` contains no reference to `playwright`, `cypress`,
-   or any `test:e2e` script.
-2. Confirmed the build produces exactly 6 routes with correct static/dynamic
-   classification (`/diary/[date]` as `ƒ`, all others as `○`) per the test report.
-3. Confirmed 151/151 unit tests pass, covering all 10 Caller Invariants from the API
-   contract, the date-format guard, and the not-found page content.
-4. Confirmed the 3 REQ-006 entry paths each have a defined owner REQ:
-   calendar (REQ-007), list (REQ-013), AI chat cited-diary (REQ-017).
+---
 
 ## Test Files Added / Updated
 
-None. No E2E test files were created or modified for this increment.
+| File | Status | Cases |
+|---|---|---|
+| `e2e/calendar.spec.ts` | Added in REQ-007 | 1 |
+
+No changes were made during this E2E validation pass. The file is confirmed correct as-is.
+
+---
 
 ## Commands Run
 
-```bash
-# Confirmed no Playwright config present
-ls /Users/jay/Documents/Projects/ai_diary/playwright.config*
-# → zsh: no matches found
-
-# Confirmed no E2E framework in package.json
-grep -E "playwright|cypress|e2e" /Users/jay/Documents/Projects/ai_diary/package.json
-# → (no output — no matches)
+```
+npm run test:e2e
 ```
 
-## Results
+Exit code: 0. Output: `1 passed (9.7s)`.
 
-No E2E tests ran. Routing shell correctness is established through:
+---
 
-- 151/151 unit tests passing (`npm test`)
-- `npm run build` producing exactly 6 routes
-- `npm run typecheck` and `npm run lint` both clean
+## Spec Quality Verification
+
+### Query strategy — no `data-testid`
+
+The spec uses exclusively role/text/aria-label queries:
+- `page.getByText(monthLabel)` — visible text match on `{month}월`
+- `page.getByRole('main')` — semantic landmark
+- `page.getByRole('button', { name: '오늘 일기 쓰기' })` — button ARIA name
+
+No `data-testid`, CSS selectors, or fragile XPath used. Aligns with Playwright best-practice accessible queries.
+
+### Date computation alignment
+
+The spec computes today using `new Date()` with plain JS:
+```ts
+const yyyy = today.getFullYear();
+const mm = String(today.getMonth() + 1).padStart(2, '0');
+const dd = String(today.getDate()).padStart(2, '0');
+// → `/diary/2026-05-18`
+```
+
+The production `CalendarScreen` derives `today` via:
+```ts
+new Date().toLocaleDateString('sv')  // → "YYYY-MM-DD" in local TZ
+```
+
+Both use the same local timezone. Both produce `YYYY-MM-DD` zero-padded format. The computed strings are identical as long as test runner and Next.js server share the same TZ — which they do (same machine process). No TZ skew risk.
+
+The month label comparison `${today.getMonth() + 1}월` in the spec matches what `CalendarHeader` renders from its 0-based `month` prop `(month + 1)월`. Consistent.
+
+---
+
+## Acceptance Criterion Mapping
+
+| REQ-007 Criterion | Covered by E2E | Method |
+|---|---|---|
+| 헤더 우측 3개 아이콘 렌더 | No (unit-covered in `CalendarHeader.test.tsx`) | — |
+| 월 표시 "{M}월" | Yes | `getByText(monthLabel)` |
+| `<main>` landmark visible | Yes | `getByRole('main')` |
+| FAB 탭 → 오늘 에디터 | Yes | click + `toHaveURL` |
+| 빈 날짜 탭 → 에디터 + 모달 자동 열림 | No (REQ-008/009 scope) | — |
+| 일기 있는 날짜 탭 → 에디터 (모달 없음) | No (REQ-009 scope) | — |
+| MoodIcon vs 숫자 셀 렌더 | No (unit-covered in `CalendarDayCell.test.tsx`, `CalendarGrid.test.tsx`) | — |
+
+The FAB trigger is a valid substitute for "오늘 셀 탭" (both call `onFAB`/`onCellTap(today)` → same route). FAB is the more reliable selector because it is always present at fixed position regardless of mood state on today's cell.
+
+---
+
+## Not Covered in REQ-007 E2E (deferred)
+
+The following are intentionally excluded from this first E2E spec. Each has unit-test coverage and is tracked for future E2E expansion per REQ scope.
+
+| Journey | Deferred To | Unit Coverage |
+|---|---|---|
+| Cell tap on empty date → editor + mood picker modal auto-open | REQ-008 / REQ-009 | `CalendarScreen.test.tsx` FAB routing; modal flag in REQ-009 |
+| Cell tap on filled date → editor (no modal) | REQ-009 | `CalendarDayCell.test.tsx` onTap case |
+| Month nav prev/next arrows | REQ-007 unit | `CalendarScreen.test.tsx` prevMonth/nextMonth |
+| Month nav left/right swipe | REQ-007 unit | `CalendarScreen.test.tsx` pointer events |
+| Header icon routing to /list /stats /chat | REQ-013 / REQ-014 / REQ-015 | `CalendarHeader.test.tsx` (callback presence) |
+| Back-navigation state preservation (scroll, month, sort) | REQ-013+ | Deferred to those REQs |
+
+---
+
+## E2E Test Bootstrap Health
+
+| Property | Value |
+|---|---|
+| Playwright version | `^1.44.0` (devDependencies) |
+| `testDir` | `./e2e` |
+| Browsers | Chromium only (Desktop Chrome) |
+| `webServer.command` | `npm run dev` |
+| `webServer.url` | `http://localhost:3000` |
+| `webServer.reuseExistingServer` | `true` (local), `false` (CI) |
+| `webServer.timeout` | 120 000ms |
+| Test timeout | 30 000ms |
+| CI retries | 1 |
+| Local retries | 0 |
+| `vitest.config.ts` excludes `e2e/**` | Confirmed (line 9) |
+| Chromium binaries installed | Confirmed (test ran without install step) |
+
+---
+
+## Hand-off to Future REQs
+
+| Future REQ | Suggested E2E case to add |
+|---|---|
+| REQ-008 (mood picker) | `빈 날짜 셀 탭 → 무드 선택 모달 자동 열림` — assert `role=dialog` with mood buttons visible |
+| REQ-009 (editor) | `무드 선택 → 텍스트 입력 → 저장 → 캘린더 복귀 후 셀에 MoodIcon` — full write flow |
+| REQ-013 (list) | `헤더 리스트 아이콘 탭 → /list 화면 → 일기 카드 탭 → 에디터 → 뒤로 가기 → /list 스크롤 복원` |
+| REQ-014 (stats) | `헤더 통계 아이콘 탭 → /stats 화면` — chart visible |
+| REQ-015/018 (chat) | `AI chat 페르소나 선택 → 메시지 → cited diary chip 탭 → /diary/[date]` |
+
+All new specs should be added to `e2e/` alongside `calendar.spec.ts`. Filename convention: `{feature}.spec.ts`.
+
+---
 
 ## Failures
 
-None. No test was run that could fail.
+None.
+
+---
 
 ## Screenshots / Artifacts
 
-None.
+No screenshots captured. `trace: 'on-first-retry'` is configured — traces are generated automatically on CI failure. No failures occurred, so no traces were produced.
 
-## Not Tested
-
-| Check | Reason deferred |
-|---|---|
-| calendar → editor → back returns to calendar | Calendar cell tap owned by REQ-007; source screen is a placeholder |
-| list → editor → back returns to list with month+sort state preserved | List card tap owned by REQ-013; URL search-param convention agreed but not wired |
-| AI chat cited-diary chip → editor → back returns to chat | Cited-diary chip owned by REQ-017 |
-| Scroll restoration on back-navigation | Requires real content with scroll height; deferred to REQ-013/REQ-017 |
-| Modal history isolation (BottomSheet does not enter history stack) | Requires mood-selection modal from REQ-008 |
-| `/diary/invalid` URL → not-found page in browser | Covered structurally by unit test cases 2/3 and `npm run build`; browser-level check deferred to REQ-007 Playwright bootstrap |
-
-Playwright will be installed and the first E2E test file committed as part of REQ-007,
-covering: FAB tap → `/diary/[today]` route, back-button → calendar. REQ-013 and
-REQ-017 will each add E2E coverage for their respective entry paths into the editor.
+---
 
 ## Verdict
-PASS — not applicable. Routing-shell E2E deferred to REQ-007 (Playwright bootstrap + first real user journey).
+PASS

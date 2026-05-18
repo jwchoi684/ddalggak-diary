@@ -10,6 +10,7 @@
   --color-peach-dark: #E8AE76;
   --color-peach-light: #F5D6C8;
   --color-success: #B4E4B4;
+  --color-cell-empty: #C8C8C8;
 
   /* Mood pastels — PRD §3.4 (REQ-003에서 MoodIcon이 참조) */
   --color-mood-joy: #FFE066;

@@ -6,5 +6,6 @@ export default defineConfig({
     environment: 'node',
     setupFiles: ['./src/lib/storage/__tests__/setup.ts'],
     alias: { '@': path.resolve(__dirname, 'src') },
+    exclude: ['node_modules', 'e2e/**'],
   },
 });

@@ -1,184 +1,194 @@
-# Test Report — REQ-006
+# Test Report — REQ-007
 
 ## Summary
 
-Independent re-verification of REQ-006 (Next.js App Router routing shell). All four gates pass. 151/151 tests pass across 23 test files. The build produces exactly 6 routes. All 20 REQ-006 test cases are present and match the plan. All 131 baseline tests (REQ-002 through REQ-005) pass unchanged. No source modifications were made.
+Independent re-run of all verification gates for REQ-007 (main calendar screen). All five commands passed on first attempt. 181/181 unit tests pass across 28 files, 1/1 Playwright E2E spec passes, and all source guards match the self-reported claims. Baseline of 151 tests from REQ-002 through REQ-006 is fully intact. No production source files were modified during verification.
 
 ---
 
 ## Commands Run
 
-| Command | Result | Detail |
+| Command | Exit Code | Output |
 |---|---|---|
-| `npm run typecheck` | PASS | Exit 0, no output |
-| `npm run lint` | PASS | "No ESLint warnings or errors" (cosmetic `next lint` deprecation notice, not an error) |
-| `npm test` | PASS | 151/151 tests, 23 files |
-| `npm run build` | PASS | 6 routes rendered (see Build Output below) |
+| `npm run typecheck` | 0 | No output (clean) |
+| `npm run lint` | 0 | `No ESLint warnings or errors` (cosmetic `next lint` deprecation notice only) |
+| `npm test` | 0 | `181 passed (181)` across 28 files in 4.77s |
+| `npm run build` | 0 | 7 routes generated, no TS/lint errors in build pipeline |
+| `npm run test:e2e` | 0 | `1 passed (8.6s)` — chromium golden path |
 
 ---
 
-## Test Case Coverage vs Plan
+## Tests Added / Updated
 
-All 20 REQ-006 `it()` cases are present and match the plan description exactly.
+### New unit test files (REQ-007)
 
-### `src/lib/navigation/__tests__/routes.test.ts` — 10 cases (node env)
+| File | Cases | Environment | Notes |
+|---|---|---|---|
+| `src/lib/storage/__tests__/useDiaries.test.ts` | 4 | happy-dom | `vi.mock('@/lib/storage')` for readDiaries; 1 in `initial state` block, 3 in `after mount effect` block |
+| `src/app/__tests__/CalendarDayCell.test.tsx` | 7 | happy-dom | cell rendering, token class names, onTap, aria-label |
+| `src/app/__tests__/CalendarGrid.test.tsx` | 5 | happy-dom | 7-day header order, day count, offset, mood rendering, onCellTap |
+| `src/app/__tests__/CalendarHeader.test.tsx` | 6 | happy-dom | month label, nav arrows, 3 icon buttons |
+| `src/app/__tests__/CalendarScreen.test.tsx` | 8 | happy-dom | month display, isReady guard, FAB render, FAB routing, prev/next arrows, swipe left/right |
 
-| Plan Case | Present | Verified |
+### New E2E file
+
+| File | Cases | Runner |
 |---|---|---|
-| Routes.calendar equals "/" | Yes | Routes.calendar === '/' (as const literal) |
-| Routes.list equals "/list" | Yes | Routes.list === '/list' |
-| Routes.chat equals "/chat" | Yes | Routes.chat === '/chat' |
-| Routes.stats equals "/stats" | Yes | Routes.stats === '/stats' |
-| Routes.diary("2026-05-17") returns "/diary/2026-05-17" | Yes | exact string match |
-| Routes.diary(date) starts with "/diary/" and ends with date | Yes | two-part assertion |
-| empty {} returns "/list" no trailing "?" | Yes | exact string match |
-| { month: "2026-04" } returns "/list?month=2026-04" | Yes | exact string match |
-| { sort: "asc" } returns "/list?sort=asc" | Yes | exact string match |
-| { month: "2026-04", sort: "desc" } returns "/list?month=2026-04&sort=desc" | Yes | month precedes sort confirmed |
+| `e2e/calendar.spec.ts` | 1 | Playwright, Chromium only |
 
-### `src/app/__tests__/diary-date-page.test.tsx` — 4 cases (happy-dom)
-
-| Plan Case | Present | Verified |
-|---|---|---|
-| valid "2026-05-17" renders heading; notFound not called | Yes | heading.textContent contains date |
-| "not-a-date" rejects with NEXT_NOT_FOUND; notFound called once | Yes | rejects.toThrow + calledTimes(1) |
-| "2026/05/17" fails regex, rejects; notFound called once | Yes | same pattern |
-| "2026-13-01" passes regex, renders without notFound (semantic deferred) | Yes | renders heading, mockNotFound not called |
-
-Top-level `await import` after `vi.mock` is used correctly to ensure mock hoisting applies before module evaluation.
-
-### `src/app/__tests__/not-found.test.tsx` — 3 cases (happy-dom)
-
-| Plan Case | Present | Verified |
-|---|---|---|
-| renders "찾을 수 없는 페이지입니다." | Yes | getByText assertion |
-| anchor href="/" with text "캘린더로 돌아가세요" | Yes | getByRole('link') + getAttribute('href') |
-| source-guard: no "use client" in not-found.tsx | Yes | fs.readFileSync pattern from Card.test.tsx |
-
-### `src/lib/navigation/__tests__/setupNextNavigation.test.ts` — 3 cases (happy-dom)
-
-| Plan Case | Present | Verified |
-|---|---|---|
-| mockRouter.push is callable vi.fn with mock.calls array | Yes | push('/test'), length 1 |
-| mockNotFound() throws "NEXT_NOT_FOUND" | Yes | expect(() => mockNotFound()).toThrow |
-| resetNavigationMocks() clears calls and re-applies throw after mockReset | Yes | all three assertions |
+Total new unit cases: 30. Total unit suite: 181 (151 baseline + 30 new). E2E suite: 1.
 
 ---
 
-## Existing Tests Regression (131 baseline)
+## Results
 
-All 131 baseline tests from REQ-002 through REQ-005 pass unchanged:
+### Unit test breakdown — all 28 files
 
-| File | Tests | Status |
+| Suite file | Tests | Status |
 |---|---|---|
-| `src/lib/storage/__tests__/diaries.test.ts` | 13 | PASS |
-| `src/lib/storage/__tests__/conversations.test.ts` | 9 | PASS |
-| `src/lib/storage/__tests__/settings.test.ts` | 8 | PASS |
-| `src/lib/storage/__tests__/uuid.test.ts` | 3 | PASS |
-| `src/lib/storage/__tests__/ssr.test.ts` | 4 | PASS |
-| `src/lib/storage/__tests__/no-direct-localstorage-access.test.ts` | 1 | PASS |
-| `src/lib/storage/__tests__/limits.test.ts` | 3 | PASS |
-| `src/design-system/__tests__/moods.test.ts` | 12 | PASS |
-| `src/design-system/__tests__/MoodIcon.test.tsx` | 9 | PASS |
 | `src/design-system/__tests__/personas.test.ts` | 17 | PASS |
-| `src/design-system/__tests__/Card.test.tsx` | 5 | PASS |
-| `src/design-system/__tests__/EmptyState.test.tsx` | 7 | PASS |
-| `src/design-system/__tests__/IconButton.test.tsx` | 6 | PASS |
-| `src/design-system/__tests__/FAB.test.tsx` | 5 | PASS |
+| `src/lib/storage/__tests__/uuid.test.ts` | 3 | PASS |
+| `src/lib/storage/__tests__/settings.test.ts` | 8 | PASS |
+| `src/lib/storage/__tests__/conversations.test.ts` | 9 | PASS |
+| `src/lib/navigation/__tests__/routes.test.ts` | 10 | PASS |
+| `src/lib/storage/__tests__/diaries.test.ts` | 13 | PASS |
+| `src/lib/storage/__tests__/ssr.test.ts` | 4 | PASS |
+| `src/lib/storage/__tests__/limits.test.ts` | 3 | PASS |
+| `src/lib/storage/__tests__/no-direct-localstorage-access.test.ts` | 1 | PASS |
+| `src/design-system/__tests__/moods.test.ts` | 12 | PASS |
 | `src/design-system/__tests__/useDialogControl.test.ts` | 5 | PASS |
-| `src/design-system/__tests__/BottomSheet.test.tsx` | 6 | PASS |
 | `src/design-system/__tests__/ConfirmDialog.test.tsx` | 8 | PASS |
-| `src/design-system/__tests__/Toast.test.tsx` | 5 | PASS |
+| `src/design-system/__tests__/MoodIcon.test.tsx` | 9 | PASS |
+| `src/app/__tests__/CalendarDayCell.test.tsx` | 7 | PASS |
+| `src/design-system/__tests__/BottomSheet.test.tsx` | 6 | PASS |
 | `src/design-system/__tests__/useToast.test.ts` | 5 | PASS |
-| **Total** | **131** | **PASS** |
+| `src/lib/storage/__tests__/useDiaries.test.ts` | 4 | PASS |
+| `src/app/__tests__/diary-date-page.test.tsx` | 4 | PASS |
+| `src/app/__tests__/CalendarHeader.test.tsx` | 6 | PASS |
+| `src/design-system/__tests__/EmptyState.test.tsx` | 7 | PASS |
+| `src/design-system/__tests__/Card.test.tsx` | 5 | PASS |
+| `src/design-system/__tests__/FAB.test.tsx` | 5 | PASS |
+| `src/design-system/__tests__/IconButton.test.tsx` | 6 | PASS |
+| `src/app/__tests__/CalendarGrid.test.tsx` | 5 | PASS |
+| `src/app/__tests__/CalendarScreen.test.tsx` | 8 | PASS |
+| `src/lib/navigation/__tests__/setupNextNavigation.test.ts` | 3 | PASS |
+| `src/design-system/__tests__/Toast.test.tsx` | 5 | PASS |
+| `src/app/__tests__/not-found.test.tsx` | 3 | PASS |
+| **Total** | **181** | **PASS** |
+
+### E2E golden path
+
+`캘린더 화면 진입 후 FAB 탭 시 오늘 일기 에디터로 이동` — navigates to `/`, asserts month label visible, asserts `role=main` visible, clicks FAB `오늘 일기 쓰기`, asserts URL matches `/diary/YYYY-MM-DD` for today. PASS (2.3s, Chromium).
 
 ---
 
-## Build Output (6 routes)
+## Failures
 
-```
-Route (app)                                 Size  First Load JS
-┌ ○ /                                      141 B         103 kB
-├ ○ /_not-found                            141 B         103 kB
-├ ○ /chat                                  141 B         103 kB
-├ ƒ /diary/[date]                          141 B         103 kB
-├ ○ /list                                  141 B         103 kB
-└ ○ /stats                                 141 B         103 kB
-```
-
-Exactly 6 routes. `/diary/[date]` is correctly `ƒ` (dynamic server-rendered). All other routes are `○` (static prerendered). Matches self-reported build output in the implementation report.
+None.
 
 ---
 
 ## Source Guards
 
-### No "use client" in any REQ-006 page.tsx file
+### "use client" directives
 
-Grep confirmed zero matches across:
-- `src/app/not-found.tsx`
-- `src/app/diary/[date]/page.tsx`
-- `src/app/chat/page.tsx`
-- `src/app/list/page.tsx`
-- `src/app/stats/page.tsx`
-
-`chat/page.tsx`, `list/page.tsx`, and `stats/page.tsx` contain no `"use client"` directive and no React import (they export default functions returning plain JSX, consistent with Server Components in Next.js 15 with automatic JSX runtime at build time).
-
-`not-found.tsx` and `diary/[date]/page.tsx` import React explicitly, consistent with the Vitest JSX transform requirement documented in the implementation report.
-
----
-
-## Routes API Shape Verified
-
-Direct inspection of `src/lib/navigation/routes.ts`:
-
-| Property | Type | Value |
+| File | Directive | Expected |
 |---|---|---|
-| `Routes.calendar` | `'/'` (as const) | `'/'` |
-| `Routes.list` | `'/list'` (as const) | `'/list'` |
-| `Routes.chat` | `'/chat'` (as const) | `'/chat'` |
-| `Routes.stats` | `'/stats'` (as const) | `'/stats'` |
-| `Routes.diary` | `(date: string) => string` | `` `/diary/${date}` `` |
-| `Routes.listWithFilter` | `(params: { month?: string; sort?: 'asc' \| 'desc' }) => string` | URLSearchParams with month-before-sort ordering |
+| `src/app/page.tsx` | present (line 1) | Required — thin client boundary |
+| `src/app/_components/CalendarDayCell.tsx` | present (line 1) | Required — click handler |
+| `src/app/_components/CalendarGrid.tsx` | NOT present | Correct — pure component rendered inside client tree |
+| `src/app/_components/CalendarHeader.tsx` | present (line 1) | Required — callback props |
+| `src/app/_components/CalendarScreen.tsx` | present (line 1) | Required — state + router |
+| `src/lib/storage/useDiaries.ts` | present (line 3) | Required — React hook |
 
-`src/lib/navigation/index.ts` re-exports `Routes` only; no additional exports.
+### `src/app/page.tsx` line count
 
-`setupNextNavigation.ts` exports: `mockRouter`, `mockNotFound`, `mockUseRouter`, `mockUseSearchParams`, `mockUseParams`, `mockUsePathname`, `resetNavigationMocks`. Matches the plan's named export list exactly.
+7 lines. Confirmed thin boundary: `"use client"` + blank line + import `CalendarScreen` + blank line + default export wrapping `<CalendarScreen />` + closing brace + blank line.
+
+### Config files
+
+| File | Claim | Verified |
+|---|---|---|
+| `vitest.config.ts` | `exclude: ['node_modules', 'e2e/**']` | Yes — line 9 |
+| `playwright.config.ts` | Present at repo root; `testDir: './e2e'`; Chromium only; `webServer` on port 3000 | Yes |
+| `package.json` | `@playwright/test: ^1.44.0` in devDependencies | Yes — line 33 |
+| `package.json` | `test:e2e` and `test:e2e:install` scripts | Yes — lines 13–14 |
+
+### `globals.css` token
+
+`--color-cell-empty: #C8C8C8` confirmed at line 13 of `src/app/globals.css`.
 
 ---
 
-## Config Stability
+## Build Output (7 routes)
 
-| Check | Result |
-|---|---|
-| `next.config.ts` unchanged | Confirmed — `const nextConfig: NextConfig = {}; export default nextConfig;` only |
-| No `experimental.scrollRestoration` toggle | Confirmed absent |
-| `package.json` unchanged (no new deps) | Confirmed — no new runtime or dev dependencies added by REQ-006 |
-| Scripts unchanged | `test`, `test:watch`, `typecheck`, `lint`, `build`, `dev`, `start` — all pre-existing |
+```
+Route (app)                  Size    First Load JS
+┌ ○ /                       2.71 kB      105 kB
+├ ○ /_not-found              138 B       103 kB
+├ ○ /chat                    138 B       103 kB
+├ ƒ /diary/[date]            138 B       103 kB
+├ ○ /list                    138 B       103 kB
+└ ○ /stats                   138 B       103 kB
+```
+
+`/` now ships 2.71 kB of client JS (CalendarScreen tree) versus the 138–141 B placeholder size from REQ-006. `/diary/[date]` remains `ƒ` (dynamic). All 7 routes (6 app routes + `/_not-found`) present.
+
+---
+
+## Existing Tests Regression
+
+151 baseline tests from REQ-002 through REQ-006 all pass without modification. No baseline test file was touched by REQ-007.
+
+---
+
+## Test Plan Coverage vs Plan (`06-test-plan.md`)
+
+### Planned case counts vs actual
+
+| Plan file | Planned cases | Actual cases | Delta |
+|---|---|---|---|
+| `useDiaries.test.ts` | 4 | 4 | 0 |
+| `CalendarDayCell.test.tsx` | 6 | 7 | +1 (aria-label split into two `it()` calls) |
+| `CalendarGrid.test.tsx` | 5 | 5 | 0 |
+| `CalendarHeader.test.tsx` | 6 | 6 | 0 |
+| `CalendarScreen.test.tsx` | 8 | 8 | 0 |
+| `e2e/calendar.spec.ts` | 1 | 1 | 0 |
+
+All plan invariants covered. `CalendarDayCell` has one extra case (strictly a superset).
 
 ---
 
 ## Discrepancies / Notes
 
-- The implementation report's build output shows 7 static pages (`Generating static pages (7/7)`), which counts internal Next.js pages plus the 6 app routes. The route table shows exactly 6 app routes as required. No discrepancy.
-- The CJS build deprecation warning from Vitest 2.x is cosmetic and pre-existing from REQ-002. Not a REQ-006 issue.
-- `setupNextNavigation.test.ts` uses `// @vitest-environment happy-dom` on line 1 as specified in the plan, even though the helper itself is a pure module (no DOM). This is correct: the plan calls for happy-dom on this file.
-- `diary-date-page.test.tsx` uses top-level `await import` (not a static import) to load the page component after `vi.mock` is applied. This pattern is correct for ensuring mock hoisting applies before module evaluation with Vitest's ESM handling.
+1. **`useDiaries` initial `isReady=false` test adapted**: happy-dom flushes `useEffect` synchronously inside `renderHook`, making `isReady=false` unobservable from outside the render cycle. The plan's `it('returns isReady=false … before the effect runs')` case was rewritten to verify post-effect state. The hydration guard (grid suppressed while `!isReady`) is separately and correctly verified in `CalendarScreen.test.tsx` via a mock that returns `{ isReady: false }` — no production behavior gap.
+
+2. **`CalendarDayCell` 7 cases vs 6 in plan**: aria-label invariant was split into two `it()` calls (entry-present vs entry-absent). Total coverage is a strict superset of the plan.
+
+3. **Swipe threshold is 40px in production, plan noted 50px as option**: `CalendarScreen.test.tsx` fires events with ±60px deltas, which satisfies either threshold. No test gap.
+
+4. **Cosmetic warnings (non-blocking)**: Vitest CJS deprecation warning and `next lint` deprecation notice both pre-exist from earlier REQs.
 
 ---
 
 ## Coverage Notes
 
-All 10 Caller Invariants from `04-api-contract.md` are covered by the 20 test cases. Coverage matrix in `06-test-plan.md` is accurate. No uncovered invariants found.
+All caller invariants from `04-api-contract.md` scoped to REQ-007 are covered:
+
+- No direct `localStorage` access — `vi.mock('@/lib/storage')` boundary in `useDiaries.test.ts` enforces the abstraction.
+- All navigation via `Routes.*` — `CalendarScreen.test.tsx` FAB test asserts `mockRouter.push` receives the `Routes.diary(today)` output, not a raw string.
+- Token class discipline (`text-cell-empty`, `text-peach`, `bg-peach`) — `CalendarDayCell.test.tsx` checks className values; no hex literals asserted anywhere.
+- Korean string discipline — all button aria-labels, weekday headers, and month label in Korean verified across `CalendarGrid`, `CalendarHeader`, and `CalendarScreen` tests.
+- Sunday-first weekday order — `CalendarGrid.test.tsx` case 1.
+- Grid suppressed while `!isReady` — `CalendarScreen.test.tsx` case 2.
 
 ---
 
 ## Remaining Risks
 
-All risks are pre-existing from the implementation report:
-
-- `Routes.listWithFilter` does not validate `month` or `sort` values — deferred to REQ-013.
-- Semantic date validation in `/diary/[date]` (e.g., Feb 31) — deferred to REQ-009.
-- Back-navigation routes, scroll restoration, and modal history isolation — deferred to Phase 13 E2E.
+1. **`useDiaries` reactive sync**: hook reads once on mount. After REQ-009 saves an entry and back-navigates, the calendar will not reflect the new entry until remount. Documented in implementation report as known deferred risk (REQ-009 scope).
+2. **Swipe UX on real touch devices**: pointer events used; `touch-action: none` CSS may be needed to prevent browser swipe-back gesture from intercepting. Deferred to manual QA.
+3. **Year not shown in header**: `year` state exists and is threaded through correctly; suppressed in MVP per PRD. Trivial addition later.
 
 ---
 

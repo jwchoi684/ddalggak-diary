@@ -1,162 +1,280 @@
-# API / Interface Contract — REQ-006
+# API Contract — REQ-007
 
 ## Scope
 
-Two surfaces: (1) Next.js App Router route contracts — URL paths, handler files, accepted params, and HTTP status codes — and (2) the internal TypeScript module contract for `@/lib/navigation`, including the `Routes` helper and the shared `next/navigation` Vitest mock helper. No external HTTP endpoints or backend changes are involved.
+Internal TypeScript module contracts for the main calendar screen. No HTTP endpoints, RPC, queues, or external integrations. Covers:
+- Route `/` — behavior change from placeholder to live screen
+- `src/lib/storage/useDiaries.ts` — new React hook
+- `src/app/_components/CalendarScreen.tsx` — new composite screen (no props)
+- `src/app/_components/CalendarHeader.tsx` — new sub-component
+- `src/app/_components/CalendarGrid.tsx` — new sub-component
+- `src/app/_components/CalendarDayCell.tsx` — new leaf component
 
 ---
 
-## Route Contracts
+## Route Contract for `/`
 
-| Path | Handler file | Component type | Dynamic params | Query params | Status codes | Owner REQ |
-|---|---|---|---|---|---|---|
-| `/` | `src/app/page.tsx` | Server | none | none | 200 | REQ-007 |
-| `/diary/[date]` | `src/app/diary/[date]/page.tsx` | Server (async) | `date: string` (path segment) | none | 200, 404 | REQ-009 |
-| `/list` | `src/app/list/page.tsx` | Server | none | `month=YYYY-MM`, `sort=asc\|desc` | 200 | REQ-013 |
-| `/chat` | `src/app/chat/page.tsx` | Server | none | none | 200 | REQ-015 |
-| `/stats` | `src/app/stats/page.tsx` | Server | none | none | 200 | REQ-014 |
-| `*` (all unmatched) | `src/app/not-found.tsx` | Server | none | none | 404 | REQ-006 |
+| Property | Value |
+|---|---|
+| Path | `/` |
+| Method | GET (page navigation) |
+| Auth | None (localStorage only) |
+| SSR behavior | Server returns empty calendar shell (no MoodIcons). MoodIcons appear after first client effect. |
+| Previously | 7-line placeholder stub |
+| Now | Full calendar screen with 7-column grid, header, FAB |
 
-Route notes:
-- `/diary/[date]` returns 404 if `date` does not match `/^\d{4}-\d{2}-\d{2}$/`. Semantic date validation (e.g., Feb 31) is deferred to REQ-009.
-- `/list` query params are optional; omitting either leaves the page at default state. Both params are deep-linkable and round-trippable via `Routes.listWithFilter(params)`.
-- No `"use client"` directive in any REQ-006 shell file. Client Components belong to later screen REQs.
+`src/app/page.tsx` becomes thin `"use client"` boundary that renders `<CalendarScreen />`.
 
 ---
 
-## Public Exports from `@/lib/navigation`
+## Public Exports per File
+
+| File | Export | Kind |
+|---|---|---|
+| `src/lib/storage/useDiaries.ts` | `useDiaries` | named function (hook) |
+| `src/app/_components/CalendarScreen.tsx` | `CalendarScreen` | named function component |
+| `src/app/_components/CalendarHeader.tsx` | `CalendarHeader` | named function component |
+| `src/app/_components/CalendarGrid.tsx` | `CalendarGrid` | named function component |
+| `src/app/_components/CalendarDayCell.tsx` | `CalendarDayCell` | named const (`React.memo`-wrapped) |
+
+No barrel file is created or modified.
+
+---
+
+## Per-Module Detail
+
+### `useDiaries` hook
 
 ```ts
-// src/lib/navigation/routes.ts
+// React hook — client-only. Direct import only;
+// NOT re-exported from @/lib/storage/index.ts (that barrel is SSR-safe).
+"use client";
+
+import { useEffect, useState } from 'react';
+import { readDiaries, type DiaryEntry } from '@/lib/storage';
 
 /**
- * Type-safe route builder for 딸깍일기.
- * Import via: import { Routes } from '@/lib/navigation'
+ * Reads all diary entries from localStorage once on mount.
+ *
+ * Returns `isReady: false` on initial SSR/hydration render so callers can
+ * suppress hydration-mismatch content. Transitions to `isReady: true`
+ * synchronously after first effect.
+ *
+ * Never throws. If localStorage unavailable, `readDiaries()` returns [] and
+ * `isReady` still becomes true.
+ *
+ * Always import via: import { useDiaries } from '@/lib/storage/useDiaries'
  */
-export const Routes = {
-  /** Calendar root screen. Always '/'. */
-  calendar: '/' as const,
-
-  /**
-   * Diary editor for a specific date.
-   * @param date - ISO 8601 date string, e.g. '2026-05-17'
-   * @returns '/diary/2026-05-17'
-   */
-  diary: (date: string): string => `/diary/${date}`,
-
-  /** Diary list screen (no filters). Always '/list'. */
-  list: '/list' as const,
-
-  /**
-   * Diary list with optional month and sort filters.
-   * Params are set in fixed order (month → sort) for deterministic URLs.
-   * @param params.month - 'YYYY-MM' format; omit to leave unset
-   * @param params.sort  - 'asc' | 'desc'; omit to leave unset
-   * @returns '/list', '/list?month=YYYY-MM', '/list?sort=asc|desc',
-   *          or '/list?month=YYYY-MM&sort=asc|desc'
-   */
-  listWithFilter: (params: { month?: string; sort?: 'asc' | 'desc' }): string => {
-    const sp = new URLSearchParams();
-    if (params.month) sp.set('month', params.month);
-    if (params.sort)  sp.set('sort', params.sort);
-    const qs = sp.toString();
-    return qs ? `/list?${qs}` : '/list';
-  },
-
-  /** AI chat screen. Always '/chat'. */
-  chat: '/chat' as const,
-
-  /** Stats screen. Always '/stats'. */
-  stats: '/stats' as const,
-} as const;
+export function useDiaries(): { entries: DiaryEntry[]; isReady: boolean }
 ```
 
-Barrel (`src/lib/navigation/index.ts`) re-exports `Routes` so callers write `import { Routes } from '@/lib/navigation'`.
+**Caller invariants:**
+- `entries` is stable array reference after `isReady=true`. Doesn't change between renders unless a write triggers re-read (REQ-009+).
+- `isReady` transitions exactly once: `false → true`. Never reverts.
+- Empty dependency `[]` — fires once per mount.
+- Callers must gate MoodIcon rendering on `isReady`.
 
 ---
 
-## Test Helper Exports from `@/lib/navigation/__tests__/setupNextNavigation`
+### `CalendarScreen` component
 
 ```ts
-// Mutable mock for the Next.js router object
-export const mockRouter: {
-  push:     ReturnType<typeof vi.fn>;
-  replace:  ReturnType<typeof vi.fn>;
-  back:     ReturnType<typeof vi.fn>;
-  prefetch: ReturnType<typeof vi.fn>;
-  refresh:  ReturnType<typeof vi.fn>;
-  forward:  ReturnType<typeof vi.fn>;
-};
+"use client";
 
-// Throws Error('NEXT_NOT_FOUND') to simulate Next.js notFound()
-export const mockNotFound: ReturnType<typeof vi.fn>;
-
-// Drop-in implementations for vi.mock factory
-export function mockUseRouter(): typeof mockRouter;
-export function mockUseSearchParams(): URLSearchParams;
-export function mockUseParams(): Record<string, string>;
-export function mockUsePathname(): string;
-
-// Call in beforeEach to reset all mocks; re-applies throw behavior on mockNotFound
-export function resetNavigationMocks(): void;
+/**
+ * Root screen component for `/`.
+ * Owns: visible-month state, today, diary loading, swipe, navigation callbacks.
+ * Renders: CalendarHeader + (when isReady) CalendarGrid + FAB.
+ * Consumed only by src/app/page.tsx.
+ */
+export function CalendarScreen(): JSX.Element
 ```
 
-**When to use.** Any test file that renders a Client Component calling `useRouter`/`useSearchParams`/`useParams`/`usePathname`, or that invokes `notFound()`, must add at the top:
-
-```ts
-import { mockRouter, mockNotFound, mockUseRouter, mockUseSearchParams,
-         mockUseParams, mockUsePathname, resetNavigationMocks }
-  from '@/lib/navigation/__tests__/setupNextNavigation';
-
-vi.mock('next/navigation', () => ({
-  useRouter:       () => mockUseRouter(),
-  useSearchParams: () => mockUseSearchParams(),
-  useParams:       () => mockUseParams(),
-  usePathname:     () => mockUsePathname(),
-  notFound:        mockNotFound,
-}));
-
-beforeEach(() => resetNavigationMocks());
-```
-
-Opt-in per file (not in Vitest `setupFiles`) — same model as the storage shim.
+**Behavior contract:**
+- Visible month initialized to user's local current month.
+- `today` derived per render via `new Date().toLocaleDateString('sv')` → YYYY-MM-DD.
+- Calls `useDiaries()`; builds `Map<string, DiaryEntry>` via `useMemo([entries])`.
+- Suppresses `CalendarGrid` while `!isReady` (hydration safety).
+- `onCellTap(date)` → `router.push(Routes.diary(date))`. No distinction empty/filled — editor handles auto-open (REQ-008/009).
+- `onFAB()` → `router.push(Routes.diary(today))`.
+- Month nav: `prevMonth` / `nextMonth` use `new Date(year, month ± 1, 1)`.
+- Swipe: pointer events on container; horizontal delta > 40px → month ±1. Vertical scroll unaffected.
+- Stabilizes `onCellTap` + `onFAB` with `useCallback` for `React.memo` effectiveness.
+- No props; no ref forward.
 
 ---
 
-## Caller Invariants
+### `CalendarHeader` component
 
-1. `Routes.calendar` is the string literal `'/'`.
-2. `Routes.diary(date)` always returns a string starting with `'/diary/'` and ending with the `date` argument unchanged.
-3. `Routes.list` is the string literal `'/list'`.
-4. `Routes.listWithFilter({})` returns exactly `'/list'` (no trailing `?`).
-5. `Routes.listWithFilter(params)` encodes via `URLSearchParams` (correct percent-encoding); `month` always precedes `sort`.
-6. `Routes.chat` is `'/chat'`.
-7. `Routes.stats` is `'/stats'`.
-8. No REQ-006 page file contains `"use client"`. Client Components belong to consuming screen REQs.
-9. `mockRouter` is the same object reference returned by `mockUseRouter()` — tests may spy on `mockRouter.push` etc. directly.
-10. `resetNavigationMocks()` is idempotent; safe in any `beforeEach`.
+```ts
+"use client";
+
+export interface CalendarHeaderProps {
+  /** Full year of visible month (e.g. 2026). Received but not rendered in MVP. */
+  year: number;
+  /** 0-based month (0=January…11=December). Rendered as `{month+1}월`. */
+  month: number;
+  /** ‹ button handler. */
+  onPrev: () => void;
+  /** › button handler. */
+  onNext: () => void;
+  /** 검색 IconButton handler. */
+  onSearch: () => void;
+  /** 통계 IconButton handler. */
+  onStats: () => void;
+  /** 리스트 IconButton handler. */
+  onList: () => void;
+}
+
+/**
+ * Header bar for calendar screen.
+ * Left: ‹ + "{month+1}월" (text-3xl font-bold) + ›
+ * Right: 3 IconButtons (검색, 통계, 리스트).
+ * Arrows are plain <button> (not IconButton — distinguishes from circular icons).
+ * Icon SVGs inline at top of file. All targets ≥ 44px.
+ */
+export function CalendarHeader(props: CalendarHeaderProps): JSX.Element
+```
+
+**Invariants:** `month` 0–11 (caller validates); component is pure (no useRouter); all callbacks no-arg, return ignored.
+
+---
+
+### `CalendarGrid` component
+
+```ts
+import type { DiaryEntry } from '@/lib/storage';
+
+export interface CalendarGridProps {
+  /** Full year (e.g. 2026). Used for date math, not displayed. */
+  year: number;
+  /** 0-based month (0=January…11=December). */
+  month: number;
+  /**
+   * Lookup map of diary entries keyed by "YYYY-MM-DD".
+   * Built by caller via useMemo for O(1) per-cell lookup.
+   * May be empty.
+   */
+  diaryByDate: Map<string, DiaryEntry>;
+  /** Today's date "YYYY-MM-DD" (local TZ). */
+  today: string;
+  /** Called when any in-month cell tapped. */
+  onCellTap: (date: string) => void;
+}
+
+/**
+ * Pure 7-column monthly grid.
+ * Renders 일·월·화·수·목·금·토 weekday header (Sunday-first) + 7×N day grid.
+ * Out-of-month leading/trailing slots are non-interactive empty <div>.
+ *
+ * Date math (no external library):
+ *   firstDay = new Date(year, month, 1)
+ *   startOffset = firstDay.getDay()  // 0=Sun…6=Sat
+ *   lastDate = new Date(year, month + 1, 0).getDate()
+ * Cells: [null × startOffset] + [1..lastDate] + trailing nulls to multiple of 7.
+ *
+ * dateKey: `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`
+ *
+ * No "use client" needed — rendered inside client subtree.
+ */
+export function CalendarGrid(props: CalendarGridProps): JSX.Element
+```
+
+**Invariants:** `diaryByDate` keys YYYY-MM-DD; out-of-month entries ignored silently; `onCellTap` never called for null slots; component is stateless.
+
+---
+
+### `CalendarDayCell` component
+
+```ts
+import type { DiaryEntry } from '@/lib/storage';
+
+export interface CalendarDayCellProps {
+  /** YYYY-MM-DD. Passed verbatim to onTap. Used as aria-label base. */
+  date: string;
+  /**
+   * Entry for this date if exists.
+   * Present: render MoodIcon(id=entry.mood, size=32).
+   * Absent: render grey numeral extracted from date.
+   */
+  entry?: DiaryEntry;
+  /**
+   * Today emphasis:
+   * - entry present: 4px peach dot below MoodIcon
+   * - entry absent: font-bold text-peach numeral instead of text-cell-empty
+   */
+  isToday: boolean;
+  /** Called when tapped. Fires regardless of entry presence. */
+  onTap: (date: string) => void;
+}
+
+/**
+ * Single day cell. React.memo-wrapped — re-renders only when props change.
+ * Requires callers to stabilize onTap with useCallback for memo effectiveness.
+ * Hot path: up to 31 cells per month change.
+ *
+ * Touch target: <button> with min-h-[44px].
+ * aria-label: "{date}" or "{date} 일기 있음" based on entry.
+ */
+export const CalendarDayCell: React.MemoExoticComponent<
+  (props: CalendarDayCellProps) => JSX.Element
+>
+```
+
+**Invariants:** `date` must be valid YYYY-MM-DD; `onTap` called with verbatim `date` prop; `React.memo` comparison shallow — callers must not construct new `entry` object per render; `isToday` derived in parent.
+
+---
+
+## Caller Invariants (Cross-Cutting)
+
+1. **No direct localStorage access.** Only via `useDiaries() → readDiaries()`.
+2. **All navigation via `Routes.*`.** Raw path strings forbidden.
+3. **Token discipline.** Grey empty cell = `text-cell-empty` (→ `--color-cell-empty: #C8C8C8`). Today = `text-peach`/`bg-peach`. No hardcoded hex.
+4. **No competing width constraint.** No `max-w-*` or `w-full` override of layout 420px.
+5. **Korean labels.** Weekdays, month, aria-label, FAB label all Korean.
+6. **Callback stabilization.** `CalendarScreen` must `useCallback` `onCellTap`/`onFAB` so `React.memo` works.
 
 ---
 
 ## Error Contract Summary
 
-| Trigger | Mechanism | Result |
+| Scenario | Behavior |
+|---|---|
+| `readDiaries()` returns `[]` | `useDiaries` returns `{ entries: [], isReady: true }`. Grid empty. No error. |
+| `useDiaries` effect exception | Propagates to React error boundary. No special handling. |
+| Cell tapped no entry | `onTap(date)` fires. Routing proceeds. Editor/picker is REQ-009 concern. |
+| `Routes.diary(date)` valid YYYY-MM-DD | Always returns valid path. |
+| `router.push` failure | Next.js internal. |
+| `month` outside 0–11 | Undefined; JS Date wraps. Caller must validate. |
+
+---
+
+## Import Path Discipline
+
+| What | Correct path | Forbidden |
 |---|---|---|
-| `date` path segment fails `/^\d{4}-\d{2}-\d{2}$/` | `notFound()` inside `DiaryPage` | 404 — renders `not-found.tsx` |
-| Any URL not matching the 5 routes | App Router fallthrough | 404 — renders `not-found.tsx` |
-| Invalid `month`/`sort` query values on `/list` | No server-side validation in shell; deferred to REQ-013 | 200 (shell renders; REQ-013 handles bad values) |
+| `useDiaries` hook | `'@/lib/storage/useDiaries'` | barrel (`'@/lib/storage'`) |
+| Types (`DiaryEntry`, `MoodId`) | `'@/lib/storage'` | sub-modules |
+| `Routes` | `'@/lib/navigation'` | hardcoded strings |
+| `IconButton`, `FAB` | `'@/design-system/IconButton'` etc. (per-file, no barrel) | inline reimplementation |
+| `MoodIcon` | `'@/design-system/MoodIcon'` | inline emoji |
+| Sub-components | direct `'./CalendarHeader'` etc. | re-exported |
 
 ---
 
 ## Out of Scope
 
-- Intercepting routes (`@(.)diary/[date]`) and parallel routes.
-- Modal routes — local React state only; no URL segment allocated.
-- Dynamic route params beyond `[date]`.
-- Scroll restoration and history-state persistence — owned by each screen REQ.
-- Semantic date validation — REQ-009.
-- Deep-link sharing and PWA routing — v2.
-- Any backend, database, or auth contract.
+| Item | Owner |
+|---|---|
+| Mood picker auto-open on empty cell | REQ-008 / REQ-009 |
+| Editor form, save, field rendering | REQ-009 |
+| Bottom photo strip | v2 |
+| Month/year picker modal | P1 |
+| Left-side header icons (settings, archive) | v2 |
+| Search/list/stats/chat screen content | REQ-013~018 |
+| Skeleton during `!isReady` | Not MVP |
+| Re-read entries after write (reactive store) | REQ-009+ |
+| Landscape mode | MVP-out |
 
 ---
 

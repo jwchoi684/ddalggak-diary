@@ -1,51 +1,63 @@
-# Performance Review Report — REQ-006
+# Performance Review — REQ-007
 
 ## Summary
 
-REQ-006 is a routing shell: 5 page stubs, 404 handler, `Routes` helper. No data fetching, no client JS, no state, no rendering logic beyond static placeholder text. Performance footprint effectively zero.
+REQ-007 delivers the first real interactive screen: 7-column monthly calendar grid with mood icons, header navigation, swipe, FAB. Feature surface is small; traffic bounded by single-user local-storage app. No blocking issues. One low-priority stabilization gap (already flagged as NB-2 in code review) and two trivial per-render allocations noted.
 
 ## Scope
 
-12 in-scope files reviewed (production + tests). Prior reports: 04-api-contract, 08-test-report, 09-code-review.
+Files reviewed: 4 calendar components + `useDiaries` hook + agent-state reports (04, 07, 08, 09).
 
 ## Findings
 
-### 1. Bundle delta — zero
+### 1. Cell render cost on month change — Info (React.memo effective)
 
-Build output: all routes at 141 B page size with 103 kB First Load JS. The 103 kB is Next.js framework baseline. REQ-006 adds zero client JS. No `"use client"` in any REQ-006 file. Page-size delta is the placeholder HTML — sub-200 bytes per route.
+`CalendarDayCell` is `React.memo`-wrapped (named function pattern, preserves DevTools display name). `CalendarGrid` props: `year`, `month`, `diaryByDate` (useMemo-stable), `today` (string stable), `onCellTap` (useCallback-stable). On month nav, all 31 cells receive new `date`-derived props and correctly re-render — by design.
 
-### 2. Static prerendering for 5 of 6 routes
+Math: 31 cells × shallow memo compare (~1 µs) + DOM diff = ~31–50 µs. Imperceptible.
 
-`/`, `/list`, `/chat`, `/stats`, `/_not-found` classified `○` (static). Prerendered at build, served from edge cache. TTFB sub-50ms on CDN.
+### 2. `diaryByDate` Map build — Info
 
-### 3. `/diary/[date]` dynamic — negligible SSR compute
+`useMemo([entries])` builds `Map<string, DiaryEntry>` in O(n) where n ≤ 365 entries/year. Not rebuilt on month nav (entries reference stable after `isReady=true`). Correct.
 
-`ƒ` (dynamic), triggered by `async` + `await params`. Per request:
-1. Await params (effectively synchronous).
-2. One regex test — O(1), under 1µs.
-3. Either `notFound()` (throws) or returns JSX tree.
+### 3. First Load JS delta — Info (acceptable)
 
-No I/O, no DB, no fetch. REQ-009 will introduce data fetching here; that's the point to revisit.
+`/` route: 138 B → 2.71 kB. Delta = 2.57 kB covering 4 components + hook. Shared chunk 103 kB unchanged. Acceptable for mobile-first app. No tree-shaking concern (per-file imports, no barrel aggregation).
 
-### 4. `Routes` helper — string concatenation only
+### 4. Three inline arrow callbacks in CalendarScreen — Low (NB-2 from code review)
 
-`Routes.diary(date)` is template literal. `Routes.listWithFilter` allocates one `URLSearchParams` + ≤ 2 `.set()` calls. Both called at navigation time in browser. Negligible.
+`onSearch`/`onStats`/`onList` are inline arrows, new function refs per render. Zero impact today (CalendarHeader not memoized). Required if CalendarHeader is ever memoized. Already documented.
 
-### 5. Layout — zero hydration cost
+### 5. `today` re-derived per render — Low (trivial)
 
-`layout.tsx` is Server Component, no `"use client"`, no providers, no dynamic imports. All 5 page stubs also Server Components. No hydration boundary at shell level.
+`new Date().toLocaleDateString('sv')` runs every `CalendarScreen` render. Microsecond-level. `useCallback([router, today])` compares by string value, doesn't invalidate within same day. Past-midnight refresh is correct behavior. Could `useMemo(() => ..., [])` but cost is unmeasurable.
 
-### 6. Scroll restoration
+### 6. `useDiaries` synchronous localStorage read — Info
 
-Next.js App Router handles natively. REQ-006 adds no custom scroll logic.
+Runs once per mount, after first paint, on client. JSON.parse of ≤200 kB completes in single-digit ms. SSR shell renders empty; entries appear after hydration. Correct pattern for localStorage-backed apps.
 
-### 7. Build time impact
+### 7. `useDiaries` does not re-read after writes — Info (deferred)
 
-Build generates 7/7 static pages including the 6 new routes. ~0.5–1s build-time delta. No concern.
+After REQ-009 saves an entry and user navigates back, `useDiaries` won't reflect new entry unless component remounts. Next.js App Router navigation between pages triggers a new mount in practice. If REQ-009 uses cached `router.back()`, stale state risk. Deferred per API contract invariant. No action for REQ-007.
 
-### 8. No N+1, no cache, no pagination, no batch jobs
+### 8. Pointer event handlers — Info (no state, no re-render)
 
-Not applicable.
+`useRef<number | null>` for `pointerStartX` — no state set. `onPointerDown`/`onPointerUp` are `useCallback`-stable. One `setVisibleMonth` per completed gesture (minimum). NB-3 missing `onPointerCancel` is correctness, not perf.
+
+### 9. `CalendarGrid` cell array allocation — Info (trivial)
+
+`slots: (number | null)[]` of ≤42 elements per render. O(42), stack-allocated in V8. No concern.
+
+## Capacity Math
+
+| Metric | Value | Notes |
+|---|---|---|
+| Max cells rendered per month | 42 (6 weeks × 7) | In-month ≤ 31; rest empty divs |
+| React.memo shallow compare cost | ~31 µs (31 × ~1 µs) | Per month nav |
+| `diaryByDate` Map build | O(n), n ≤ 365 | Once per mount |
+| localStorage payload | < 200 kB | 365 entries × ~500 B |
+| First Load JS `/` | 2.71 kB page chunk + 103 kB shared | Delta from REQ-006: +2.57 kB |
+| Inline callback allocations | 3 new fns per render | No observable cost |
 
 ## Blocking Issues
 
@@ -53,11 +65,11 @@ None.
 
 ## Non-Blocking Suggestions
 
-1. **REQ-007/013 hydration measurement**: when `/` and `/list` gain `"use client"` boundaries, measure First Load JS delta against current 103 kB baseline. Confirm design-system components are tree-shaken when not imported.
-
-2. **`/diary/[date]` dynamic vs static reassessment for REQ-009**: when REQ-009 adds localStorage reading (client-side), the route may convert to client component. At that point consider if `async` shell + `ƒ` dynamic SSR is still warranted, or whether route can revert to `○` static with a client child doing data load. Future housekeeping note.
-
-3. **`Routes.listWithFilter` allocation**: allocates `URLSearchParams` per call. Irrelevant at personal-diary frequencies. If ever called in tight loop (e.g., 365 list items each constructing URL), memoize. Not a concern for REQ-006 or near-term REQs.
+1. **Stabilize `onSearch`/`onStats`/`onList` with `useCallback`** (NB-2). No impact today; required if CalendarHeader is memoized in future. Low effort.
+2. **Memoize `today` with `useMemo([], [])`**. Truly trivial.
+3. **Add `onPointerCancel` handler** (NB-3). Correctness fix.
+4. **Verify `touch-action` CSS on swipe container**. Browser swipe-back / overscroll may compete with 40px threshold on real mobile. Deferred to manual QA (test report Risk 2).
 
 ## Verdict
+
 PASS

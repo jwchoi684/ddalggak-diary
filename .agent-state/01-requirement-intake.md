@@ -1,109 +1,129 @@
-# Requirement Intake — REQ-006
+# Requirement Intake — REQ-007
 
 ## Restatement
 
-REQ-006는 딸깍일기 앱의 **라우팅 셸(routing shell)** 만 구축한다. 5개 최상위 화면(캘린더 / 일기 에디터 / 리스트 / AI 채팅 / 통계)에 대응하는 Next.js App Router 페이지 파일을 생성하고, 모든 화면 간 이동이 브라우저 history-stack 을 그대로 따르도록 한다. 각 page.tsx 는 "REQ-XXX에서 채워집니다" 수준의 **최소 placeholder** 만 렌더하며, 실제 화면 콘텐츠는 후속 화면 REQ 가 채운다. 뒤로가기 시 (a) 진입 경로에 맞는 이전 화면으로 복귀하고, (b) 리스트의 월·정렬, AI 채팅의 스크롤 위치 같은 화면 상태가 보존되는 것이 핵심 가치다. 모달은 history-stack 에 들어가지 않으므로 로컬 React state 로만 관리한다.
+REQ-007 converts the app entry screen (`src/app/page.tsx`) from a placeholder into the **main calendar screen**: a 7-column monthly grid showing `MoodIcon` (32px) on days that have entries and grey (`#C8C8C8`) numerals on days that do not. The header exposes three right-side `IconButton`s (검색→`/chat`, 통계→`/stats`, 리스트→`/list`); a charcoal `FAB` (✏) sits bottom-right and routes to today's editor. Tapping any in-month cell routes to `/diary/[date]`. Month navigation works via arrow controls and horizontal swipe. This is the **first interactive screen** in the codebase and therefore the first real consumer of REQ-002 storage reads, REQ-003 MoodIcon, REQ-005 primitives, and REQ-006 `Routes`.
 
-## In Scope (routing shell only)
+## In Scope
 
-- 5개 App Router 페이지 파일 생성:
-  - `/` → `src/app/page.tsx` (캘린더 placeholder; 기존 REQ-001 파일을 유지·정리)
-  - `/diary/[date]` → `src/app/diary/[date]/page.tsx` (에디터 placeholder, dynamic segment)
-  - `/list` → `src/app/list/page.tsx`
-  - `/chat` → `src/app/chat/page.tsx`
-  - `/stats` → `src/app/stats/page.tsx`
-- 404 처리용 `src/app/not-found.tsx` 1개 (간단한 한국어 메시지).
-- 타입 안전 경로 헬퍼: `src/lib/navigation/routes.ts` (≤ 30줄, 단일 책임).
-- `/diary/[date]` 의 date 포맷(YYYY-MM-DD) 유효성 1차 검증 (잘못된 형식이면 `notFound()`).
-- Next.js scroll restoration 기본값 확인 및 필요 시 `next.config.ts` 에 명시.
-- 라우팅 라이브러리 종속성: **추가 설치 없음** (`next/navigation` 만 사용).
+- Convert `/` into a Client Component (`"use client"`) that owns the visible month and the loaded diary list.
+- Read entries via `readDiaries()` (REQ-002) inside `useEffect` so SSR returns the empty calendar shell with no hydration mismatch.
+- Render a 7×6 (max 42) grid for the visible month using **only days that fall inside the current month** (out-of-month cells render empty placeholders or are omitted — PRD §4.1.4 "이번 달 외 날짜는 미표시").
+- Render today's date with subtle emphasis (text-only, no background — PRD §4.1.4).
+- Render a header row with right-aligned IconButtons (🔍 검색, 📊 통계, 📋 리스트) wired through `Routes.chat / stats / list`.
+- Render a large "M월 ›" month label (left-aligned, 32–40pt) with adjacent ‹ › arrow affordances for prev/next month.
+- Implement horizontal swipe (touch) → month ±1.
+- Render an `FAB` (✏ pen icon) fixed bottom-right that routes to `Routes.diary(today)` where `today = "YYYY-MM-DD"` from the user's local timezone.
+- Tap on any in-month cell → `router.push(Routes.diary(cellDate))`. Empty vs filled cells route identically; the mood-picker auto-open is a downstream concern (REQ-008/009).
+- Bootstrap **Playwright** at the project level (config + first golden spec: open app → calendar visible → FAB → `/diary/[today]`).
+- Hook extracted: `useDiaries()` at `src/lib/storage/useDiaries.ts` that wraps `readDiaries` + `useState` + `useEffect` (justified below in Q5).
 
-## Out of Scope (page contents → owner REQs)
+## Out of Scope (deferred to owner REQ)
 
-| Route / Concern | Owner REQ |
-|---|---|
-| 캘린더 실제 UI (월 그리드·무드 셀) | REQ-007 |
-| 무드 선택 바텀시트 모달 | REQ-008 |
-| 에디터 본문·저장·삭제 로직 | REQ-009 |
-| 에디터 가로 캘린더 드롭다운 | REQ-010 |
-| 사진 추가/카로젤/길게 누름 | REQ-011 |
-| 사진 전체화면 뷰어 | REQ-012 |
-| 리스트 실제 UI·필터 동작 | REQ-013 |
-| 통계 그래프 | REQ-014 |
-| AI 채팅 화면들 (모드 A~D) | REQ-015 ~ REQ-018 |
-| 로딩·에러 페이지(loading.tsx/error.tsx) | 각 화면 REQ |
-| 딥링크·공유 URL | v2 (REQ-006 §Non-Goals) |
-| 새로고침 후 상태 완전 복구 | v2 (REQ-006 §Non-Goals) |
+| Item | Deferred to | PRD reference |
+|---|---|---|
+| Mood picker bottom sheet | REQ-008 | §4.2 |
+| Editor content (form, save, fields) | REQ-009 | §4.3 |
+| Auto-opening the picker on empty cell tap | REQ-009 (editor owns its modal lifecycle) | §4.1.7 + §4.2.1 |
+| Bottom photo strip | v2 (not an MVP REQ) | §4.1.6 |
+| Month / year picker modal | P1 (not an MVP REQ) | §4.1.3 |
+| Landscape mode handling | MVP-out | §10.4 |
+| Left-side header icons (⚙ settings, 📦 archive) | v2 | §4.1.2 |
+| Dark mode / theme switching | v2 | §13.2 |
+| Multi-month preloading / virtualization | Not needed at MVP scale | — |
+| Search / list / stats / chat screen *content* | REQ-013 / REQ-014 / REQ-015–018 | — |
 
 ## Invariants
 
-1. **라우트는 위의 5개 + not-found 만.** REQ-006 안에서 다른 top-level 라우트를 추가하지 않는다.
-2. **각 page.tsx 는 최소 placeholder.** 기존 `src/app/page.tsx` 와 동일한 톤(`<main><h1>{화면명}</h1><p>REQ-XXX에서 채워집니다.</p></main>`)을 유지한다.
-3. **모달은 URL 라우트가 아니다.** BottomSheet / ConfirmDialog / PhotoViewer 등은 부모 화면 안의 로컬 React state(REQ-005 `useDialogControl` 재사용)로만 표현한다 — modal route, intercepting route, parallel route 사용 금지.
-4. **리스트 필터 상태(월 + 정렬)는 URL search params 로 표현한다.** `/list?month=2026-04&sort=desc`. 브라우저 history 가 자동으로 복원해 주므로 별도 sessionStorage 없이 invariant 가 성립한다. (REQ-006 셸에서는 URL 파라미터 컨벤션만 합의하고, 실제 적용은 REQ-013.)
-5. **스크롤 위치 보존은 Next.js App Router 기본 동작에 의존한다.** App Router 는 `Link`/`router.push` 내비게이션에서 자동 scroll restoration 을 수행하며 뒤로가기 시 이전 위치로 복원한다. REQ-006 셸은 이 기본값을 깨지 않는다(레이아웃 overflow 강제, 강제 `window.scrollTo` 등 금지).
-6. **라우팅 라이브러리 추가 금지.** React Router · TanStack Router 등 별도 패키지 설치 금지. 모든 내비게이션은 `next/link` 와 `next/navigation` 으로만 한다.
-7. **경로 문자열 하드코딩 금지.** 컴포넌트는 `Routes.diary('2026-05-17')` 같은 헬퍼만 호출한다. 라우트 변경 시 단일 파일에서 갱신 가능해야 한다.
-8. **루트 레이아웃(420px 컨테이너) 유지.** 기존 `src/app/layout.tsx` 가 모든 라우트에 동일하게 적용된다. REQ-006 에서 per-route layout 을 새로 만들지 않는다.
-9. **CLAUDE.md File size 규칙 준수.** 모든 신규 파일은 100줄 미만, 단일 책임. placeholder 라 자연히 짧다.
+1. **Data access**: the calendar reads diaries **only** via `readDiaries()` from `@/lib/storage`. No direct `localStorage` access, no new storage abstraction.
+2. **Design-system reuse**: all interactive chrome composes existing primitives — `IconButton` and `FAB` (REQ-005), `MoodIcon` (REQ-003). No new SVG paths, no hardcoded emoji outside `MOODS`, no inline circular-button markup.
+3. **Routing**: every navigation goes through `Routes.*` (REQ-006). Raw string literals like `'/diary/...'` are forbidden in the calendar code.
+4. **Layout context**: the 420px max-width container is already provided by `layout.tsx` (REQ-001/006). The calendar must not introduce a competing width constraint.
+5. **SSR safety**: storage reads happen inside `useEffect`. The initial render must produce the empty-grid shell (no MoodIcons) so server HTML and first client paint match.
+6. **Out-of-month cells**: cells before the 1st of the month and after the last day are not displayed as numbers or mood icons (per §4.1.4). They occupy grid slots silently to preserve weekday alignment.
+7. **One screen per file → 100-line guideline**: the calendar is decomposed into `page.tsx` (thin boundary), `CalendarScreen`, `CalendarHeader`, `CalendarGrid`, and `CalendarDayCell` so no single file exceeds the soft cap.
+8. **Visual tokens**: today's emphasis, grey number color, cream background, header icon container — all sourced from existing CSS tokens (`text-charcoal`, `text-meta`, brand peach `#F5C896`, etc.). No new design tokens.
+9. **Locale**: month label, weekday header (일·월·화·수·목·금·토), and aria-labels are Korean.
+10. **Today determination**: derive `today` once per render using local timezone (`new Date()` formatted to `YYYY-MM-DD`), not UTC.
 
 ## Open Questions and Recommended Defaults
 
-### Q1. 리스트 필터 상태(월·정렬)는 URL search params 인가 sessionStorage 인가?
-- **권장: URL search params.** `/list?month=2026-04&sort=desc`.
-- 이유: 브라우저 history 가 search params 까지 자동으로 보존 → 뒤로가기 시 별도 코드 없이 invariant 충족. sessionStorage 는 상태 동기화 코드를 따로 짜야 하고, "뒤로가기 도중 다른 탭에서 변경" 같은 엣지케이스가 생긴다. 또한 v2 딥링크/공유 URL 확장 시 그대로 재사용 가능.
-- 트레이드오프: URL 이 조금 길어진다 — MVP 에서는 무시할 수준.
+### Q1. Component file layout — monolithic or split?
 
-### Q2. 스크롤 복원은 어떻게 보장하나?
-- **권장: Next.js App Router 기본값 신뢰 + 검증 1회.** App Router 는 `experimental.scrollRestoration` 없이도 표준 브라우저 scroll restoration 을 활용한다. 셸 단계에서 빈 페이지로 검증해 두고, 만약 REQ-013/017 화면 구현 시 깨지면 그 REQ 에서 `experimental.scrollRestoration: true` 또는 수동 복원으로 대응.
-- 이유: 기본 동작이 충분히 동작하는데 미리 옵션을 켜면 미세한 부작용(중복 복원 등)이 생길 수 있다. 셸 단계에서는 회피.
-- 책임 분담: REQ-006 = "기본 동작이 깨지지 않게 만든다", REQ-013/017 = "실 컨텐츠로 검증하고 필요시 보강".
+**Recommendation: split.** A single `page.tsx` will trivially exceed 100 lines once header + grid + swipe handler + state + effects coexist. Proposed split:
 
-### Q3. `useNavigation()` 같은 커스텀 훅을 만들어야 하나?
-- **권장: 아니오.** 컴포넌트에서 `next/navigation` 의 `useRouter` / `usePathname` / `useSearchParams` 를 직접 사용한다.
-- 이유: 추가 추상화는 referrer 추적·뒤로가기 가로채기 같은 진짜 요구가 생긴 다음에 도입해야 한다. MVP 에서는 wrapper 가 비용만 늘림. 진짜 필요해지는 시점(예: REQ-017 AI 채팅에서 인용 일기→에디터→채팅 복귀를 보장해야 할 때)에 얇은 wrapper 를 도입한다 — Next.js history 가 자연스럽게 처리하므로 그 시점에도 굳이 필요 없을 가능성이 높다.
+- `src/app/page.tsx` — thin `"use client"` boundary that renders `<CalendarScreen />`.
+- `src/app/_components/CalendarScreen.tsx` — owns visible-month state, today's date, diary load, swipe handler, navigation callbacks.
+- `src/app/_components/CalendarHeader.tsx` — right-side IconButton row + "M월 ›" label + prev/next arrows.
+- `src/app/_components/CalendarGrid.tsx` — pure grid renderer; accepts `{ year, month, diaryByDate, today, onCellTap }`.
+- `src/app/_components/CalendarDayCell.tsx` — single cell; wrapped in `React.memo`.
 
-### Q4. page.tsx placeholder 컨텐츠는 어떤 톤으로?
-- **권장: 기존 REQ-001 의 `src/app/page.tsx` 와 동일 패턴.**
-  ```tsx
-  <main className="px-6 py-8 text-charcoal">
-    <h1 className="text-3xl">{화면명}</h1>
-    <p className="mt-2 text-meta">REQ-XXX에서 채워집니다.</p>
-  </main>
-  ```
-- 이유: 일관된 톤. 어느 라우트가 어느 REQ 책임인지 화면에서 즉시 확인 가능 → 후속 REQ 진행 추적에 도움.
+Total: 5 files, each comfortably under 100 lines.
 
-### Q5. per-route `layout.tsx` 가 필요한가?
-- **권장: 아니오.** 루트 `src/app/layout.tsx` 의 420px 컨테이너 하나로 충분.
-- 이유: 5개 화면 모두 동일한 좌우 마진·최대 폭을 쓴다. 화면별 헤더(흰 원형 아이콘)는 각 화면 REQ 의 책임이며 layout.tsx 가 아닌 컴포넌트로 풀어야 한다. per-route layout 은 향후 채팅 화면이 sticky composer 같은 특수 레이아웃을 요구할 때 그 REQ 가 도입한다.
+### Q2. Where do `_components` live?
 
-### Q6. `loading.tsx`, `error.tsx`, `not-found.tsx` 중 무엇을 REQ-006 에서 두나?
-- **권장: `not-found.tsx` 만.** 잘못된 URL 진입(예: `/foo`, 형식 깨진 `/diary/abc`) 시 한국어 404 메시지를 보여준다.
-- `loading.tsx` / `error.tsx` 는 각 화면의 데이터 페치·에러 모델이 정해진 뒤(각 화면 REQ) 도입한다. localStorage 기반 MVP 에서는 사실상 loading.tsx 가 의미 없을 가능성이 크다.
+**Recommendation: `src/app/_components/`** (Next.js convention — the leading underscore tells the App Router this folder is *not* a route segment). This keeps screen-specific composites colocated with the route that owns them. Cross-screen composites that emerge later (e.g. a shared `Toolbar` once the list screen also wants header icons) graduate to `src/components/`.
 
-### Q7. `/diary/[date]` 의 date 포맷 검증은 어디서?
-- **권장: 두 단계.** (a) REQ-006 셸에서는 정규식 `^\d{4}-\d{2}-\d{2}$` 만 검사, 실패 시 `notFound()`. (b) 실제 날짜 유효성(2026-02-31 등)과 1일 1엔트리 라우팅 로직은 REQ-009 에디터 책임.
-- 이유: 잘못된 형식의 URL 진입을 셸 레벨에서 차단해야 후속 REQ 의 검증 코드가 단순해진다. 동시에 셸이 너무 많은 도메인 룰을 떠안는 것을 피한다.
+### Q3. Month state location — `useState` or URL search params?
 
-### Q8. 타입 안전 경로 헬퍼는 어떤 형태로?
-- **권장: `src/lib/navigation/routes.ts`, ≤ 30줄, 객체 + 함수 혼합.**
-  ```ts
-  export const Routes = {
-    calendar: '/',
-    diary: (date: string) => `/diary/${date}` as const,
-    list: '/list',
-    chat: '/chat',
-    stats: '/stats',
-  } as const;
-  ```
-- 이유: 컴포넌트에서 `Routes.diary(entry.date)` 라고 쓰면 라우트 변경 시 단일 지점만 수정. `as const` 로 리터럴 타입 보존 → 후속 REQ 에서 라우트 분기 시 타입 좁히기 용이. 별도 라이브러리(`pathpida` 등) 도입은 과잉.
+**Recommendation: `useState`** inside `CalendarScreen`. Month is transient navigation state with no deep-link, share, or refresh-stability requirement at MVP. URL search params (`?month=YYYY-MM`) add a `useSearchParams` dependency, force the route to be dynamic, and complicate the back-stack semantics already covered by REQ-006. If a "share this month" use case appears in v2, migrate then.
+
+### Q4. Swipe vs arrows for month navigation?
+
+**Recommendation: both.** Arrows (‹ ›) are keyboard- and mouse-accessible (desktop, screen readers) and serve as the visible affordance for the "›" call-out in PRD §4.1.3. Swipe is required on mobile per §4.1.7 ("좌우 스와이프"). Implement swipe with native `pointerdown`/`pointerup` deltas (no library); a horizontal delta > ~40px commits month ±1. No vertical scroll lock — the page itself does not scroll meaningfully at this point.
+
+### Q5. Extract a `useDiaries()` hook?
+
+**Recommendation: yes, create it now in REQ-007.** Justification:
+
+- Pattern (`useState<DiaryEntry[]>([]) + useEffect(() => setEntries(readDiaries()))`) is reused identically by REQ-009 (editor preload), REQ-013 (list), REQ-014 (stats). Deferring duplicates the boilerplate in four places and risks divergence on SSR-guard logic.
+- It is the cheapest possible hook: ~10 lines, zero external dependencies, returns `DiaryEntry[]`.
+- Location: `src/lib/storage/useDiaries.ts`. Re-exported from `@/lib/storage` only if downstream REQs prefer that import path — REQ-007 imports it directly.
+
+**Counter-argument considered**: defer to REQ-013 to avoid speculative generalization. Rejected because (a) the hook is so small that "generalize later" creates more churn than "extract now," and (b) the pattern is already concrete: REQ-009/013/014 each name diary loading as a known step. This is YAGNI-compliant — the second caller is in the next REQ.
+
+### Q6. FAB position conflict with calendar?
+
+**Recommendation: no change.** REQ-005's `FAB` defaults to `fixed bottom-6 right-6`. The calendar bottom area is intentionally empty (photo strip is v2). No layout collision, no className override needed.
+
+### Q7. Header layout — left side?
+
+**Recommendation: render only the right-side group (3 IconButtons) for MVP.** PRD §4.1.2 explicitly defers ⚙ settings and 📦 archive ("MVP는 좌측 아이콘 생략하거나 1개만"). Leaving the left empty matches the v0 build-order and avoids placeholder buttons that route nowhere.
+
+### Q8. Today's date highlight when an entry exists?
+
+**Recommendation: emphasize today identically in both cases, applied to whichever element occupies the cell.** If the cell shows a number, apply `font-bold text-peach` (`#F5C896` brand accent — already in CSS tokens). If the cell shows a MoodIcon, render a small 4px `bg-peach` dot beneath the icon (PRD §4.1.4 explicitly allows "작은 점"). This keeps the affordance "this is today" visible even when the mood occupies the number slot. Single brand color usage matches §1.6.2 ("primary `#F5C896` used only for selected/active emphasis").
+
+### Q9. MoodIcon size in cells?
+
+**Recommendation: 32.** PRD §4.1.4 specifies "~32px"; REQ-003's `MoodIcon` accepts arbitrary `size`. Pass `size={32}` literal. No new token needed (a single call site does not warrant a constant).
+
+### Q10. Playwright bootstrap scope?
+
+**Recommendation: bootstrap in REQ-007.** REQ-005 and REQ-006 forward-designated this REQ as the E2E entry point. Concrete scope:
+
+- Install `@playwright/test` as a devDependency.
+- Add `playwright.config.ts` at repo root with `testDir: 'e2e'`, base URL pointing at `http://localhost:3000`, Chromium-only for MVP.
+- Add an npm script `test:e2e` and (optionally) `test:e2e:ui`.
+- Write **one** golden spec at `e2e/calendar.spec.ts`: navigate to `/`, assert header IconButtons + month label visible, click FAB, assert URL becomes `/diary/<today>`. Subsequent REQs add their own specs to the same `e2e/` folder.
+
+Anything beyond this single spec (mocked diary fixture, swipe gesture coverage, header-icon routing matrix) belongs to REQ-007's own test plan (Phase 8), not its intake.
+
+### Q11. `React.memo` on `CalendarDayCell`?
+
+**Recommendation: yes.** A month renders up to 31 visible cells, and `CalendarScreen` re-renders on every month change. Cells take a stable date string + an optional `MoodId` + an `onTap` callback; if the callback is stabilized via `useCallback`, memoization is essentially free and prevents N re-renders on month transitions. Add a brief code comment naming the hot-path so future readers understand the wrapping is deliberate.
 
 ## Dependency Check
 
-- **REQ-001 (스캐폴드)**: Status = DONE. Next.js App Router · `src/app/layout.tsx` · `tsconfig.json` paths(`@/*`) · `globals.css` 모두 준비됨. `src/app/page.tsx` placeholder 도 이미 동일 톤으로 존재 — REQ-006 에서 그대로 이어쓰면 됨.
-- REQ-006 은 REQ-002~005 와 **병렬 가능** 항목으로 인덱스에 표시되어 있고, 의존 관계는 REQ-001 하나만이다. REQ-002~005 는 모두 DONE 이지만 REQ-006 는 그들의 산출물에 직접 의존하지 않는다 — placeholder 만 렌더하므로 무드/페르소나/디자인 시스템 호출이 없다.
-- 후속 REQ-007/009/013/014/015 모두 REQ-006 을 dependency 로 명시 → 본 REQ 의 5개 라우트 + 경로 헬퍼가 그들이 채울 자리.
-- 차단 요인 없음. 곧바로 다음 단계(architecture analysis)로 진행 가능.
+| Dep | Status (per `index.md`) | What REQ-007 consumes |
+|---|---|---|
+| REQ-002 | DONE | `readDiaries()`, `DiaryEntry`, `MoodId` types from `@/lib/storage` |
+| REQ-003 | DONE | `MoodIcon` component, `MOOD_MAP` (transitively via MoodIcon) |
+| REQ-005 | DONE | `IconButton`, `FAB` primitives from `@/design-system` |
+| REQ-006 | DONE | `Routes.calendar / diary / list / chat / stats` from `@/lib/navigation` |
+| REQ-001 | DONE | Next.js App Router scaffold, Tailwind tokens, 420px container, `src/app/layout.tsx` |
+
+All upstream dependencies are merged. No blocking gaps. Out-of-scope screens (`/list`, `/stats`, `/chat`, `/diary/[date]`) exist as REQ-006 placeholder routes — they are valid navigation targets even though their content lands in later REQs.
 
 ## Verdict
 PASS

@@ -525,3 +525,98 @@ All five routes plus not-found present in output. `/diary/[date]` correctly show
 
 ## REQ-006 Verdict
 PASS
+
+---
+
+## REQ-007 Implementation
+
+### Summary
+
+Implemented REQ-007: the main calendar screen replaces the placeholder `page.tsx` with a fully functional 7-column monthly mood grid, 3-icon header (검색/통계/리스트), horizontal swipe + arrow month navigation, and FAB routing to today's diary. Playwright E2E was bootstrapped for the first time. All quality gates pass: typecheck, lint, 181/181 unit tests, Next.js build, and 1/1 Playwright E2E test.
+
+### Files Changed
+
+| File | Action | Lines |
+|---|---|---|
+| `src/app/globals.css` | Additive — `--color-cell-empty: #C8C8C8` after `--color-success` | +1 |
+| `src/lib/storage/useDiaries.ts` | Created | 28 |
+| `src/app/_components/CalendarDayCell.tsx` | Created | 58 |
+| `src/app/_components/CalendarGrid.tsx` | Created | 74 |
+| `src/app/_components/CalendarHeader.tsx` | Created | 87 |
+| `src/app/_components/CalendarScreen.tsx` | Created | 83 |
+| `src/app/page.tsx` | Replaced placeholder with thin `"use client"` boundary | 6 |
+| `package.json` | Added `@playwright/test ^1.44.0` devDep + 2 e2e scripts | +4 |
+| `playwright.config.ts` | Created at repo root | 22 |
+| `e2e/calendar.spec.ts` | Created | 17 |
+| `vitest.config.ts` | Added `exclude: ['node_modules', 'e2e/**']` | +1 |
+| `src/lib/storage/__tests__/useDiaries.test.ts` | Created | 52 |
+| `src/app/__tests__/CalendarDayCell.test.tsx` | Created | 77 |
+| `src/app/__tests__/CalendarGrid.test.tsx` | Created | 72 |
+| `src/app/__tests__/CalendarHeader.test.tsx` | Created | 65 |
+| `src/app/__tests__/CalendarScreen.test.tsx` | Created | 95 |
+
+### Behavior Added
+
+- **`/` route** now renders the full calendar screen.
+- **7-column monthly grid**: dates 1–last rendered with `CalendarDayCell`; out-of-month leading/trailing slots are non-interactive empty `<div>` elements. Sunday-first (일~토).
+- **MoodIcon on diary dates**: if a diary entry exists for a date, its `MoodIcon` (size=32) replaces the numeral.
+- **Today emphasis**: numeral → `font-bold text-peach`; or peach dot below MoodIcon when entry exists.
+- **Header**: `{month+1}월` label, ‹/› plain buttons with `aria-label` 이전 달/다음 달, 3 `IconButton` instances with inline SVG icons (검색/통계/리스트).
+- **Month navigation**: ‹/› arrows and horizontal pointer swipe (threshold ±40px).
+- **FAB**: pen icon SVG, `aria-label="오늘 일기 쓰기"`, navigates to `Routes.diary(today)`.
+- **Hydration safety**: `CalendarGrid` suppressed while `useDiaries` `isReady=false`.
+- **Playwright E2E**: `playwright.config.ts` + `e2e/calendar.spec.ts` golden path (calendar → FAB → diary URL).
+
+### Existing Patterns Reused
+
+- `MoodIcon` from `@/design-system/MoodIcon` — unchanged.
+- `IconButton` from `@/design-system/IconButton` — 3 instances in CalendarHeader.
+- `FAB` from `@/design-system/FAB` — pen icon JSX passed as `icon` prop.
+- `Routes.diary(date)`, `Routes.stats`, `Routes.list` from `@/lib/navigation` — all navigation via `Routes.*`.
+- `readDiaries` from `@/lib/storage` — called inside `useDiaries`.
+- `setupNextNavigation` helpers — reused in `CalendarScreen.test.tsx` with same `vi.mock('next/navigation')` pattern as `diary-date-page.test.tsx`.
+- `makeDiary` fixture from `@/lib/storage/__tests__/fixtures` — used in 4 test files.
+- `// @vitest-environment happy-dom` + `afterEach(cleanup)` — consistent with all existing component tests.
+- `toLocaleDateString('sv')` ISO date trick — used in production and tests.
+
+### Tests Added / Updated
+
+| File | Cases |
+|---|---|
+| `src/lib/storage/__tests__/useDiaries.test.ts` | 4 |
+| `src/app/__tests__/CalendarDayCell.test.tsx` | 7 |
+| `src/app/__tests__/CalendarGrid.test.tsx` | 5 |
+| `src/app/__tests__/CalendarHeader.test.tsx` | 6 |
+| `src/app/__tests__/CalendarScreen.test.tsx` | 8 |
+| `e2e/calendar.spec.ts` | 1 (Playwright) |
+
+Total new unit cases: 30. Total suite: 181 tests (was 151).
+
+**Config change**: `vitest.config.ts` gained `exclude: ['node_modules', 'e2e/**']` so Playwright spec files using `@playwright/test`'s `test()` are not picked up by Vitest.
+
+**Test adjustment**: `useDiaries` initial-state test was revised — happy-dom flushes `useEffect` synchronously inside `renderHook`, so `isReady=false` is not observable from the test. The test verifies post-effect state. The hydration guard is validated by `CalendarScreen.test.tsx` case "grid suppressed while isReady=false".
+
+### Commands Run
+
+```
+npm install                  # installed @playwright/test
+npm run typecheck            # PASS (0 errors)
+npm run lint                 # PASS (0 warnings/errors)
+npm test                     # PASS (181/181 tests, 28 files)
+npm run build                # PASS (Next 15.5.18, 7 routes)
+npm run test:e2e:install     # Chromium 148.0.7778.96 downloaded (~277 MB total)
+npm run test:e2e             # PASS (1/1 test)
+```
+
+First run of E2E failed because port 3000 was occupied by a prior dev server. After freeing the port, the test passed on the first retry.
+
+### Risks / Follow-ups
+
+1. **`useDiaries` isReady=false not unit-testable in happy-dom**: Environment limitation, not production bug.
+2. **Swipe threshold 40px**: May cause accidental month changes; adjust to 50px based on user testing.
+3. **Year not shown in header**: Per PRD, only `M월` displayed. Cross-year navigation works but year is not visible. `year` prop is already passed and available for trivial future addition.
+4. **Search no-op**: `onSearch` handler is `() => {}` — REQ-013 scope.
+5. **Re-read on write**: `useDiaries` reads once on mount. After REQ-009 saves, calendar won't auto-update until remount. Reactive store deferred to REQ-009+.
+
+## REQ-007 Verdict
+PASS

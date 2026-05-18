@@ -1,8 +1,7 @@
+"use client";
+
+import { CalendarScreen } from './_components/CalendarScreen';
+
 export default function HomePage() {
-  return (
-    <main className="px-6 py-8 text-charcoal">
-      <h1 className="text-3xl">캘린더 자리</h1>
-      <p className="mt-2 text-meta">REQ-007에서 채워집니다.</p>
-    </main>
-  );
+  return <CalendarScreen />;
 }

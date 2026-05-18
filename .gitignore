@@ -12,3 +12,8 @@ dist
 
 next-env.d.ts
 *.tsbuildinfo
+
+# Playwright (REQ-007)
+test-results/
+playwright-report/
+playwright/.cache/

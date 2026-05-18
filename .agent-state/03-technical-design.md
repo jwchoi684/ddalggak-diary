@@ -1,241 +1,302 @@
-# Technical Design — REQ-006
+# Technical Design — REQ-007
 
 ## Goal
 
-Establish the routing shell for 딸깍일기: five Next.js App Router page files, a Korean `not-found.tsx`, a type-safe `Routes` helper module, and a shared `vi.mock('next/navigation')` test helper. No real screen content is produced — each page renders a placeholder. All subsequent screen REQs (007–018) depend on this shell as their routing foundation.
+Convert `src/app/page.tsx` from placeholder to main calendar screen: 7-column monthly mood grid, 3-icon header, horizontal swipe month nav, FAB → today's diary editor. Also bootstraps Playwright E2E.
 
 ---
 
 ## Resolved Unknowns
 
-**1 — Shared `vi.mock('next/navigation')` helper: introduce now.**
-At `src/lib/navigation/__tests__/setupNextNavigation.ts`. Rationale: REQ-007 (calendar) and REQ-009 (editor) both render Client Components calling `useRouter`/`useSearchParams`. Adding the helper now costs ~40 lines and saves N-REQ files from duplicating. Pattern mirrors `src/lib/storage/__tests__/setup.ts`.
+**1 — Icon SVG source: inline SVG.** `lucide-react` is in CLAUDE.md notes but NOT in `package.json`. 3 small inline SVGs cost ~60 bytes each, tree-shaken. Aligns with "no new deps" principle.
 
-**2 — `src/lib/navigation/index.ts` barrel: yes.**
-Mirrors `src/lib/storage/index.ts` (REQ-002). Callers write `import { Routes } from '@/lib/navigation'`. Single source of truth.
+**2 — `useDiaries` barrel re-export: NO.** Storage barrel is SSR-safe pure-data. Hook file has `"use client"` — must not be pulled into Server Component trees via barrel. Direct import: `import { useDiaries } from '@/lib/storage/useDiaries'`. File comment: `// React hook — client-only. Direct import only; NOT re-exported.`
 
-**3 — Page-component test location: centralized `src/app/__tests__/`.**
-App Router pages live at fixed paths. Co-locating tests inside `diary/[date]/` mixes routing segments with tests. Centralized keeps `src/app/` purely routing.
+**3 — Weekday header row location: inside `CalendarGrid`.** Grid is self-contained layout unit. Keeps `CalendarHeader` focused on month + nav.
 
 ---
 
-## File Layout (with line budgets)
+## File Layout
 
-| File | Status | Budget |
+| File | Type | Budget |
 |---|---|---|
-| `src/app/page.tsx` | Unchanged (REQ-001 placeholder canonical) | 8 lines |
-| `src/app/not-found.tsx` | Create — Korean 404 Server Component | ≤ 20 lines |
-| `src/app/diary/[date]/page.tsx` | Create — async Server Component, regex guard | ≤ 25 lines |
-| `src/app/list/page.tsx` | Create — placeholder | ≤ 10 lines |
-| `src/app/chat/page.tsx` | Create — placeholder | ≤ 10 lines |
-| `src/app/stats/page.tsx` | Create — placeholder | ≤ 10 lines |
-| `src/lib/navigation/routes.ts` | Create — `Routes` object + `listWithFilter` | ≤ 30 lines |
-| `src/lib/navigation/index.ts` | Create — barrel | ≤ 10 lines |
-| `src/lib/navigation/__tests__/setupNextNavigation.ts` | Create — shared mock helper | ≤ 40 lines |
-| `src/lib/navigation/__tests__/routes.test.ts` | Create — unit tests | ≤ 50 lines |
-| `src/app/__tests__/diary-date-page.test.tsx` | Create — date guard test | ≤ 50 lines |
-| `src/app/__tests__/not-found.test.tsx` | Create (recommended) | ≤ 20 lines |
+| `src/app/page.tsx` | Replace | ≤ 8 |
+| `src/app/_components/CalendarScreen.tsx` | Create | ≤ 90 |
+| `src/app/_components/CalendarHeader.tsx` | Create | ≤ 70 |
+| `src/app/_components/CalendarGrid.tsx` | Create | ≤ 80 |
+| `src/app/_components/CalendarDayCell.tsx` | Create | ≤ 50 |
+| `src/lib/storage/useDiaries.ts` | Create | ≤ 35 |
+| `src/app/globals.css` | Additive | +1 line |
+| `playwright.config.ts` | Create | ≤ 40 |
+| `e2e/calendar.spec.ts` | Create | ≤ 50 |
+| `package.json` | Edit | +2 entries |
+| `src/app/__tests__/CalendarScreen.test.tsx` | Create | ≤ 80 |
+| `src/app/__tests__/CalendarGrid.test.tsx` | Create | ≤ 80 |
+| `src/app/__tests__/CalendarDayCell.test.tsx` | Create | ≤ 60 |
+| `src/app/__tests__/CalendarHeader.test.tsx` | Create | ≤ 50 |
+| `src/lib/storage/__tests__/useDiaries.test.ts` | Create | ≤ 50 |
 
 ---
 
-## Routes API (exact shape)
+## globals.css Additive Change
+
+In `@theme` block, after `--color-success: #B4E4B4;`:
+```css
+--color-cell-empty: #C8C8C8;
+```
+
+---
+
+## Inline SVG Path Data (3 icons)
+
+24×24, `stroke="currentColor"`, `strokeWidth="2"`, `fill="none"`, `strokeLinecap="round"`, `strokeLinejoin="round"`. Feather-style.
+
+**검색 (Search)**: `circle cx="11" cy="11" r="8"` + `line x1="21" y1="21" x2="16.65" y2="16.65"`
+
+**통계 (Stats)**: 3 rects — `(18,3,4,18)`, `(11,9,4,12)`, `(4,14,4,7)`
+
+**리스트 (List)**: 3 long lines (8→21 at y=6/12/18) + 3 dot lines (3→3.01 at y=6/12/18)
+
+Defined as JSX constants at top of `CalendarHeader.tsx`.
+
+---
+
+## useDiaries Hook
+
+`src/lib/storage/useDiaries.ts`:
 
 ```ts
-// src/lib/navigation/routes.ts
+// React hook — client-only. Direct import only;
+// NOT re-exported from @/lib/storage/index.ts (that barrel is SSR-safe).
+"use client";
 
-export const Routes = {
-  calendar: '/' as const,
-  diary: (date: string): string => `/diary/${date}`,
-  list: '/list' as const,
-  listWithFilter: (params: { month?: string; sort?: 'asc' | 'desc' }): string => {
-    const sp = new URLSearchParams();
-    if (params.month) sp.set('month', params.month);
-    if (params.sort) sp.set('sort', params.sort);
-    const qs = sp.toString();
-    return qs ? `/list?${qs}` : '/list';
+import { useEffect, useState } from 'react';
+import { readDiaries, type DiaryEntry } from '@/lib/storage';
+
+export function useDiaries(): { entries: DiaryEntry[]; isReady: boolean } {
+  const [entries, setEntries] = useState<DiaryEntry[]>([]);
+  const [isReady, setIsReady] = useState(false);
+
+  useEffect(() => {
+    setEntries(readDiaries());
+    setIsReady(true);
+  }, []);
+
+  return { entries, isReady };
+}
+```
+
+`isReady` lets caller suppress grid during first hydration frame.
+
+---
+
+## CalendarScreen Skeleton
+
+`src/app/_components/CalendarScreen.tsx`:
+
+State: `useState<Date>` for visible month, `useMemo` for today + diaryByDate, `useRouter`, `useCallback` for stable callbacks, `useRef` for pointer-start tracking.
+
+Layout: `<CalendarHeader>` + (when `isReady`) `<CalendarGrid>` + `<FAB icon={PenIcon} label="오늘 일기 쓰기" onClick={onFAB} />`.
+
+Swipe: pointer events on container `<div>`, threshold ±40px. `e.clientX` delta → `nextMonth()` or `prevMonth()`.
+
+Helper: `toDateKey(date: Date)` uses `date.toLocaleDateString('sv')` (Swedish locale yields YYYY-MM-DD natively).
+
+---
+
+## CalendarGrid Skeleton (with weekday row + date math)
+
+`src/app/_components/CalendarGrid.tsx`:
+
+Pure component, no `"use client"` needed (or include for safety; doesn't matter since rendered inside client tree).
+
+Props: `{ year: number; month: number; diaryByDate: Map<string, DiaryEntry>; today: string; onCellTap: (date: string) => void }`.
+
+`WEEKDAYS = ['일','월','화','수','목','금','토']` — 일요일 시작.
+
+Date math (no date-fns):
+- `firstDay = new Date(year, month, 1)`
+- `lastDay = new Date(year, month + 1, 0).getDate()` (last-of-month idiom)
+- `startOffset = firstDay.getDay()` (0=Sun…6=Sat)
+- Build 42-slot array: leading nulls (startOffset) + `[1..lastDay]` + trailing nulls to next multiple of 7
+
+Layout: `grid-cols-7` weekday header row + `grid-cols-7 gap-y-1` day cells. Empty slots = bare `<div>`. Real days = `<CalendarDayCell>`.
+
+dateKey: `${year}-${String(month + 1).padStart(2,'0')}-${String(day).padStart(2,'0')}`.
+
+---
+
+## CalendarDayCell Skeleton (with today highlight)
+
+`src/app/_components/CalendarDayCell.tsx`:
+
+`React.memo`-wrapped. Props: `{ date: string; entry?: DiaryEntry; isToday: boolean; onTap: (date: string) => void }`.
+
+`<button type="button" aria-label={`${date}${entry ? ' 일기 있음' : ''}`} onClick={() => onTap(date)} className="flex flex-col items-center justify-center py-2 min-h-[44px]">`
+
+Conditional:
+- `entry` present → `<MoodIcon id={entry.mood} size={32} />` + (if today) `<span className="mt-0.5 w-1.5 h-1.5 rounded-full bg-peach block" />`
+- `entry` absent → `<span className={isToday ? 'text-sm font-bold text-peach' : 'text-sm text-cell-empty'}>{day}</span>`
+
+`day = Number(date.slice(8))` extracts DD.
+
+Touch target ≥ 44 via `min-h-[44px]`.
+
+---
+
+## CalendarHeader Skeleton
+
+`src/app/_components/CalendarHeader.tsx`:
+
+Props: `{ year, month, onPrev, onNext, onSearch, onStats, onList }`.
+
+Layout: `<header className="flex items-center justify-between px-4 py-3">`:
+- Left: `<div className="flex items-center gap-2">` — ‹ button + `M월` label (`text-3xl font-bold text-charcoal`) + › button. Arrows use Unicode `‹` `›` characters on plain `<button>` (not IconButton — distinguishes from circular header icons).
+- Right: `<div className="flex items-center gap-2">` — 3 `<IconButton icon={SearchIcon|StatsIcon|ListIcon} label="검색"|"통계"|"리스트" onClick={...} />`
+
+Year NOT rendered in header (PRD shows only `M월`). Trivial future addition if needed for cross-year nav.
+
+---
+
+## Playwright Config
+
+`playwright.config.ts` (root):
+
+```ts
+import { defineConfig, devices } from '@playwright/test';
+
+export default defineConfig({
+  testDir: './e2e',
+  timeout: 30_000,
+  fullyParallel: false,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 1 : 0,
+  reporter: 'list',
+  use: {
+    baseURL: 'http://localhost:3000',
+    trace: 'on-first-retry',
   },
-  chat: '/chat' as const,
-  stats: '/stats' as const,
-} as const;
-```
-
-Rationale:
-- `as const` on string literals: preserves literal types for caller narrowing.
-- `diary` as plain function returning `string` — dynamic segment unknown at compile time.
-- `URLSearchParams` for query construction — correct percent-encoding, deterministic order.
-- No external path library — over-engineering for 5 routes.
-
----
-
-## `/diary/[date]` Page Skeleton
-
-```tsx
-// src/app/diary/[date]/page.tsx
-import { notFound } from 'next/navigation';
-
-interface PageProps {
-  params: Promise<{ date: string }>;
-}
-
-export default async function DiaryPage({ params }: PageProps) {
-  const { date } = await params;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) notFound();
-  return (
-    <main className="px-6 py-8 text-charcoal">
-      <h1 className="text-3xl">{date} 일기</h1>
-      <p className="mt-2 text-meta">REQ-009에서 채워집니다.</p>
-    </main>
-  );
-}
-```
-
-Next.js 15 types `params` as `Promise<{ date: string }>`. Sync read without `await` yields `undefined` in some build modes. Regex covers format only; semantic check (Feb 31) deferred to REQ-009.
-
----
-
-## `not-found.tsx` Skeleton
-
-```tsx
-// src/app/not-found.tsx
-export default function NotFound() {
-  return (
-    <main className="px-6 py-8 text-charcoal">
-      <h1 className="text-3xl">찾을 수 없는 페이지입니다.</h1>
-      <p className="mt-2 text-meta">
-        주소를 확인하거나{' '}
-        <a href="/" className="underline">
-          캘린더로 돌아가세요
-        </a>
-        .
-      </p>
-    </main>
-  );
-}
-```
-
-Bare `<a href="/">` rather than `next/link` — fallback screen, not a primary navigation surface. Server Component; no `"use client"`.
-
----
-
-## Shared `next/navigation` Mock Helper
-
-```ts
-// src/lib/navigation/__tests__/setupNextNavigation.ts
-import { vi } from 'vitest';
-
-export const mockRouter = {
-  push: vi.fn(),
-  replace: vi.fn(),
-  back: vi.fn(),
-  prefetch: vi.fn(),
-  refresh: vi.fn(),
-  forward: vi.fn(),
-};
-
-export const mockNotFound = vi.fn(() => {
-  throw new Error('NEXT_NOT_FOUND');
+  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  webServer: {
+    command: 'npm run dev',
+    url: 'http://localhost:3000',
+    reuseExistingServer: !process.env.CI,
+    timeout: 120_000,
+  },
 });
-
-export function mockUseRouter() { return mockRouter; }
-export function mockUseSearchParams() { return new URLSearchParams(); }
-export function mockUseParams(): Record<string, string> { return {}; }
-export function mockUsePathname(): string { return '/'; }
-
-export function resetNavigationMocks() {
-  mockRouter.push.mockReset();
-  mockRouter.replace.mockReset();
-  mockRouter.back.mockReset();
-  mockRouter.prefetch.mockReset();
-  mockNotFound.mockReset().mockImplementation(() => {
-    throw new Error('NEXT_NOT_FOUND');
-  });
-}
 ```
-
-Per-file usage:
-```ts
-vi.mock('next/navigation', () => ({
-  useRouter: () => mockUseRouter(),
-  useSearchParams: () => mockUseSearchParams(),
-  useParams: () => mockUseParams(),
-  usePathname: () => mockUsePathname(),
-  notFound: mockNotFound,
-}));
-beforeEach(() => resetNavigationMocks());
-```
-
-Opt-in per test file (not auto-loaded by Vitest `setupFiles`) — same model as the storage shim.
 
 ---
 
-## Test Design Sketch (handover to Phase 8)
+## E2E Spec
 
-**`routes.test.ts`** (node env, ≤ 50 lines):
-- Each static path constant equals expected literal.
-- `Routes.diary('2026-05-17')` → `'/diary/2026-05-17'`
-- `Routes.listWithFilter({ month: '2026-04', sort: 'desc' })` → `'/list?month=2026-04&sort=desc'`
-- `Routes.listWithFilter({})` → `'/list'` (no trailing `?`)
-- `Routes.listWithFilter({ sort: 'asc' })` → `'/list?sort=asc'`
+`e2e/calendar.spec.ts`:
 
-**`diary-date-page.test.tsx`** (happy-dom env, ≤ 50 lines):
-- Strategy: render async Server Component's returned JSX directly.
-- Valid date `'2026-05-17'`: heading contains the date.
-- Invalid `'not-a-date'`: `mockNotFound` called, error caught.
-- `'2026-13-01'`: passes regex, renders (semantic check is REQ-009's).
+```ts
+import { test, expect } from '@playwright/test';
 
-**`not-found.test.tsx`** (happy-dom env, ≤ 20 lines):
-- Renders Korean message.
-- Anchor points to `'/'`.
+test('캘린더 화면 진입 후 FAB 탭 시 오늘 일기 에디터로 이동', async ({ page }) => {
+  await page.goto('/');
+
+  const today = new Date();
+  const monthLabel = `${today.getMonth() + 1}월`;
+  await expect(page.getByText(monthLabel)).toBeVisible();
+  await expect(page.getByRole('main')).toBeVisible();
+
+  await page.getByRole('button', { name: '오늘 일기 쓰기' }).click();
+
+  const yyyy = today.getFullYear();
+  const mm = String(today.getMonth() + 1).padStart(2, '0');
+  const dd = String(today.getDate()).padStart(2, '0');
+  await expect(page).toHaveURL(`/diary/${yyyy}-${mm}-${dd}`);
+});
+```
+
+Role/name queries throughout. No `data-testid` in production code. FAB `aria-label="오늘 일기 쓰기"` is the selector anchor.
+
+---
+
+## package.json Changes
+
+devDeps: `"@playwright/test": "^1.44.0"`.
+
+Scripts: `"test:e2e": "playwright test"`, `"test:e2e:install": "playwright install chromium"`.
 
 ---
 
 ## Implementation Order
 
-1. `src/lib/navigation/routes.ts`
-2. `src/lib/navigation/index.ts` (barrel)
-3. `src/lib/navigation/__tests__/setupNextNavigation.ts`
-4. `src/lib/navigation/__tests__/routes.test.ts`
-5. `src/app/not-found.tsx`
-6. `src/app/diary/[date]/page.tsx`
-7. `src/app/{list,chat,stats}/page.tsx` (parallel)
-8. `src/app/__tests__/diary-date-page.test.tsx`
-9. `src/app/__tests__/not-found.test.tsx`
-10. `npm run typecheck && npm run lint && npm test && npm run build`
+1. `globals.css` — `--color-cell-empty` token.
+2. `src/lib/storage/useDiaries.ts` — hook.
+3. `src/app/_components/CalendarDayCell.tsx` — leaf component.
+4. `src/app/_components/CalendarGrid.tsx` — composes DayCell.
+5. `src/app/_components/CalendarHeader.tsx` — IconButton consumer.
+6. `src/app/_components/CalendarScreen.tsx` — state owner.
+7. `src/app/page.tsx` — thin client boundary.
+8. `package.json` — add Playwright dep + scripts. Run `npm install` + `npx playwright install chromium`.
+9. `playwright.config.ts`.
+10. `e2e/calendar.spec.ts`.
+11. Full gates: `typecheck` / `lint` / `npm test` / `npm run build` / `npm run test:e2e`.
 
 ---
 
-## Backend / Data / Infra Design
+## Test Design Sketch
 
-None.
+**useDiaries.test.ts** (happy-dom): isReady false initially → true after effect; entries populated from `readDiaries`; empty array case.
+
+**CalendarDayCell.test.tsx** (happy-dom): no-entry+not-today (grey numeral, no MoodIcon); has-entry+not-today (MoodIcon, no dot); no-entry+today (bold peach numeral); has-entry+today (MoodIcon + peach dot); click fires `onTap(date)`.
+
+**CalendarGrid.test.tsx** (happy-dom): May 2026 (month=4) — first day Friday (offset 5), 31 days; with `diaryByDate` for day 3 → MoodIcon on day 3 only; weekday row 일~토 visible.
+
+**CalendarHeader.test.tsx** (happy-dom): "5월" rendered for month=4; 3 IconButtons fire correct callbacks (by aria-label); arrows fire onPrev/onNext.
+
+**CalendarScreen.test.tsx** (happy-dom): mock `next/navigation` + `useDiaries`. Current month label visible; FAB click → router.push(Routes.diary(today)); ‹/› buttons change month; pointer swipe (clientX delta) changes month.
 
 ---
 
 ## Backward Compatibility
 
-`src/app/page.tsx` unchanged. No existing import paths move. All changes purely additive.
+- `src/app/page.tsx` swap is user-transparent — `/` continues to serve home.
+- `src/lib/storage/index.ts` unchanged. `useDiaries.ts` is new direct-import file.
+- `globals.css` gets one additive token; no rename/removal.
+- `package.json` gets devDep + scripts; no production bundle impact.
+- All navigation continues through `Routes.*`.
 
 ---
 
 ## Performance Considerations
 
-All page files are Server Components — produce static HTML, no client JS bundle growth. `routes.ts` is tiny and tree-shakes if unused.
+- `diaryByDate` Map via `useMemo([entries])` — rebuilds only on entries reference change (once on mount; REQ-009 writes will trigger).
+- `CalendarDayCell` `React.memo` + `useCallback`-stabilized `onCellTap` — zero unnecessary cell re-renders on month transitions for unchanged dates.
+- `useDiaries` synchronous localStorage read on mount (one read, ≤365 entries/year). Negligible.
+- Swipe via pointer events, no passive-listener conflicts, no `preventDefault`, vertical scroll unaffected.
+- E2E Chromium-only reduces CI time.
+
+---
+
+## Infra / Deployment Considerations
+
+- `playwright.config.ts` `reuseExistingServer: !process.env.CI`.
+- `test:e2e:install` is a one-time CI step. Downloads ~150MB; recommend browser path caching.
+- No server-side code, no env vars, no infrastructure changes.
 
 ---
 
 ## Risks and Tradeoffs
 
-| Risk | Mitigation |
-|---|---|
-| Next.js 15 `params` is `Promise`. Sync read silently yields `undefined`. | Typed as `Promise<...>` and `await`-ed. TypeScript catches if a future caller reads sync. |
-| `notFound()` throws internally; test without mock crashes. | Shared helper mocks it to a catchable `Error`. |
-| `happy-dom` env per-file directive easy to forget. | Test files carry `// @vitest-environment happy-dom`. Omitting is visible at run. |
-| `URLSearchParams` insertion order. | Params set in fixed order (`month` then `sort`) for deterministic test output. |
+1. **`MoodIcon` (RSC) inside `CalendarDayCell` (client).** Safe — `MoodIcon` has no hooks/browser APIs; executes on client without error. RSC caching benefits lost but no cacheable work to lose.
+2. **`toLocaleDateString('sv')` ISO trick.** Works in all modern browsers incl. Safari 15+. Alternative: manual `padStart` formatting. Both acceptable.
+3. **Swipe threshold 40px.** Too low = accidental month changes. Adjust to 50px if user testing reveals false positives.
+4. **`isReady` guard hides grid on first paint.** Brief blank frame on slow connections. Skeleton component would address but out of MVP scope.
+5. **Year not in month header.** PRD shows only `M월`. Cross-year nav makes year disappear briefly. Trivial to add `year` to label if needed; prop already received.
 
 ---
 
 ## Open Questions
 
-None blocking. All 3 architecture unknowns resolved.
+1. Skeleton during `!isReady` vs current full-suppress. Current: full-suppress (`{isReady && <CalendarGrid ... />}`).
+2. Pen icon SVG for FAB — same as inline SVG approach. Caller (`CalendarScreen`) supplies the JSX.
+3. Year display when navigating across year boundaries — trivial future addition.
 
 ---
 

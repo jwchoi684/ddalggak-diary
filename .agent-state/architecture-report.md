@@ -1,68 +1,74 @@
-# Architecture Report — REQ-006
+# Architecture Report — REQ-007
 
 ## Summary
 
-REQ-006 implements the routing shell for 딸깍일기: five App Router page files plus `not-found.tsx` and a type-safe `Routes` helper. Repository is Next.js 15.5.18 / React 19. No routing library beyond `next/navigation` is present or needed. The existing `src/app/page.tsx` placeholder is the direct model for all new placeholders. `src/lib/storage/` establishes the module-per-responsibility pattern that `src/lib/navigation/routes.ts` must follow. No blocking gaps.
+REQ-007 converts `src/app/page.tsx` from placeholder stub into the main calendar screen. All upstream dependencies (REQ-001~006) confirmed DONE. Stack: Next.js 15 App Router + React 19 + Tailwind 4 + TypeScript 5 strict + Vitest + RTL. No Playwright installed yet. Design-system has 5 reusable primitives. Storage layer is pure (no React). All navigation through `Routes`. Page is a 7-line placeholder with no state. Everything needed for REQ-007 is present and stable.
 
 ---
 
 ## Frontend Findings
 
-**Existing App Router structure:**
-- `src/app/layout.tsx` — root layout, Server Component. Wraps every route in `<div className="mx-auto min-h-dvh max-w-[420px] bg-cream">`. Single shared layout; no per-route layouts needed.
-- `src/app/page.tsx` — placeholder: `<main className="px-6 py-8 text-charcoal">` with `<h1>` and `<p className="mt-2 text-meta">`. Canonical tone for all new placeholders.
+**Existing route files:**
+- `src/app/page.tsx` — 7-line placeholder, no `"use client"`. Becomes thin client boundary.
+- `src/app/layout.tsx` — provides `mx-auto min-h-dvh max-w-[420px] bg-cream`. REQ-007 must not add a competing width.
+- `src/app/diary/[date]/page.tsx`, `chat/page.tsx`, `list/page.tsx`, `stats/page.tsx` — valid navigation targets.
 
-**Routes to create:**
-```
-src/app/
-  page.tsx                  ← exists; REQ-006 may keep as-is
-  not-found.tsx             ← new; Korean 404
-  diary/
-    [date]/
-      page.tsx              ← new; dynamic, async Server Component
-  list/
-    page.tsx                ← new; placeholder
-  chat/
-    page.tsx                ← new; placeholder
-  stats/
-    page.tsx                ← new; placeholder
-```
+**Design-system primitives available:**
+- `MoodIcon` Server Component, `{ id: MoodId, size: number, className? }`. Use `size={32}` in cells.
+- `IconButton` `"use client"`, `{ icon: ReactNode, label, onClick, disabled?, className? }`. 44×44 enforced. `bg-paper rounded-full` matches PRD §1.6.5.
+- `FAB` `"use client"`, `{ icon, label, onClick, className? }`. Fixed `bottom-6 right-6`, 56×56, `bg-charcoal`. No collision with calendar.
+- `Card`, `BottomSheet`, `Toast`, `EmptyState`, `ConfirmDialog`, `useDialogControl`, `useToast` — exist but none needed for REQ-007.
 
-**`/diary/[date]` dynamic segment:** Next.js 15 types `params` as `Promise<{ date: string }>` — must be `await`-ed in async Server Components. Page should: be `async`, await `params`, regex-check `^\d{4}-\d{2}-\d{2}$`, call `notFound()` on mismatch. Calendar-date semantic validation (Feb 31 etc.) deferred to REQ-009.
+**Component split (confirmed by intake):**
+- `src/app/page.tsx` — thin `"use client"` boundary
+- `src/app/_components/CalendarScreen.tsx` — `useState<Date>` for visible month, `useDiaries()`, swipe handlers, navigation callbacks
+- `src/app/_components/CalendarHeader.tsx` — 3 right-side IconButtons + month label + ‹/› arrows
+- `src/app/_components/CalendarGrid.tsx` — pure grid; `{ year, month, diaryByDate: Map<string, DiaryEntry>, today: string, onCellTap }`
+- `src/app/_components/CalendarDayCell.tsx` — single cell, `React.memo`-wrapped
 
-**Scroll restoration:** Next.js App Router uses browser native scroll restoration by default. No `experimental.scrollRestoration` flag in `next.config.ts` needed. Shell must NOT introduce `overflow: hidden` on body/container or `window.scrollTo` — would silently break native restoration for later REQs.
+**`_components` convention:** Next.js treats `_`-prefixed folders as private (non-routable). `src/app/_components/` correct for screen-local composites. Cross-screen composites graduate to `src/components/` when second consumer appears.
 
-**Modals not in history:** `BottomSheet`/`ConfirmDialog`/`PhotoViewer` driven by `useDialogControl` local state (REQ-005). No intercepting routes (`(.)`) or parallel slots (`@modal`).
+**Swipe handling:** Native pointer events (`onPointerDown`/`onPointerUp` delta). No new dep. Horizontal threshold ~40–50px. Vertical scroll unaffected (calendar doesn't scroll).
 
-**`next/link` / `router.push`:** Not needed in REQ-006 shell. Future REQs import `Routes.*`.
+**Icon SVGs for header:** `lucide-react` is in CLAUDE.md Option B notes but NOT in `package.json`. Recommend inline SVG — 3 simple shapes (search, bar-chart, list), zero deps, aligns with CLAUDE.md "no new frameworks" principle.
 
-**URL search-params discipline:** `/list?month=YYYY-MM&sort=asc|desc` agreed for REQ-013. REQ-006 confirms route exists; no `useSearchParams()` calls in shell.
+**Today's date emphasis:** When cell has MoodIcon, render small `bg-peach` dot beneath. When cell shows number, apply `font-bold text-peach`. `--color-peach: #F5C896` already in tokens.
+
+**Grey number for empty cells:** `#C8C8C8` from PRD §4.1.4. Not exactly an existing token (`--color-meta` is `#A8A8A8`). Add a new `--color-cell-empty: #C8C8C8` to `globals.css` for token discipline.
 
 ---
 
 ## Backend Findings
 
-Not applicable. localStorage-only MVP. `next.config.ts` intentionally empty; remain so for REQ-006.
+Not applicable. Pure frontend; reads localStorage via existing abstraction.
 
 ---
 
 ## Data Model Findings
 
-`DiaryEntry.date` is `string` `YYYY-MM-DD` matching `[date]` segment. Shell regex `^\d{4}-\d{2}-\d{2}$` consistent with storage type.
+**`DiaryEntry`** (from REQ-002): `id`, `date` (YYYY-MM-DD), `mood: MoodId`, `text`, `textAlign`, `photos[]`, `createdAt`, `updatedAt`. One per date enforced by `upsertDiary` dedup.
+
+**Calendar lookup index:** `useMemo` a `Map<string, DiaryEntry>` keyed by `entry.date`. O(1) per-cell lookup vs O(N) `find` across up to 31 cells per render.
+
+**`readDiaries()`** returns `[]` during SSR. Call inside `useEffect` after mount — correct pattern, confirmed by storage layer design.
+
+**`useDiaries()` hook location:** `src/lib/storage/useDiaries.ts`. Mild concern about mixing React into a pure-data folder. Mitigation: file has `"use client"` directive + comment "React hook — client-only, not re-exported from index.ts". Filename + directive provide clear separation.
+
+No schema changes, no migrations.
 
 ---
 
 ## Test Structure Findings
 
-**Vitest config**: default env `node`, global `setupFiles: src/lib/storage/__tests__/setup.ts`, alias `@` → `src/`.
+**Vitest config:** env `node` global, override per-file with `// @vitest-environment happy-dom`. `setupFiles` loads localStorage shim that installs on `globalThis` + `globalThis.window`, clears before each test.
 
-**React tests**: per-file `// @vitest-environment happy-dom`. Established pattern.
+**`next/navigation` mock helper:** at `src/lib/navigation/__tests__/setupNextNavigation.ts`. Pattern: `vi.mock('next/navigation', () => ({ ... }))` at top + `beforeEach(resetNavigationMocks)`. Used by `diary-date-page.test.tsx`.
 
-**Mocking `next/navigation`**: no existing mock helper. Any test for a Client Component or async Server Component that calls `useRouter`/`useParams`/`useSearchParams`/`usePathname`/`notFound` needs `vi.mock('next/navigation', ...)` in the test file. **REQ-006 should introduce a shared mock helper** to avoid per-file boilerplate when screens land.
+**Fixture factory:** `src/lib/storage/__tests__/fixtures.ts` — `makeDiary(overrides?)`. REQ-007 tests should use this.
 
-**`notFound()`**: throws a special Next.js error. Tests that exercise the `[date]` guard must mock to avoid uncaught throw.
+**Existing patterns:** `diary-date-page.test.tsx` for async Server Component + navigation mock; `IconButton.test.tsx` for client component render + fireEvent + source-guard.
 
-**Test locations**: design-system tests in `src/design-system/__tests__/`; storage in `src/lib/storage/__tests__/`. Navigation tests follow same pattern: `src/lib/navigation/__tests__/routes.test.ts`. Page-component tests may live in `src/app/__tests__/` (new convention) OR co-located in `__tests__/` adjacent to each page.tsx. Design phase decides.
+**Playwright:** Not installed. REQ-007 must add `@playwright/test` devDep, create `playwright.config.ts` at root, create `e2e/` folder, add `test:e2e` script. `webServer` config to start `next dev` on port 3000 with `reuseExistingServer: !process.env.CI`. Chromium-only for MVP.
 
 ---
 
@@ -70,24 +76,28 @@ Not applicable. localStorage-only MVP. `next.config.ts` intentionally empty; rem
 
 | Command | Purpose |
 |---|---|
-| `npm run dev` | Next dev server |
+| `npm run dev` | Next dev server (port 3000) |
 | `npm run build` | Production build |
+| `npm run lint` | ESLint |
 | `npm run typecheck` | `tsc --noEmit` |
-| `npm run lint` | `next lint` |
 | `npm test` | `vitest run` |
 | `npm run test:watch` | watch |
+| `npm run test:e2e` | TBA — `playwright test` |
 
-Next 15.5.18, React 19.0.0. No React Router / TanStack Router.
+Package manager: npm.
 
 ---
 
 ## Existing Patterns to Reuse
 
-1. **Placeholder shape** — copy `src/app/page.tsx`: `<main className="px-6 py-8 text-charcoal"><h1>...</h1><p className="mt-2 text-meta">REQ-XXX에서 채워집니다.</p></main>`.
-2. **Module structure** — `src/lib/navigation/` mirrors `src/lib/storage/`: `routes.ts` (responsibility file), `index.ts` (barrel), `__tests__/`.
-3. **`// @vitest-environment happy-dom`** on any test rendering React.
-4. **`"use client"` guard** — only on components using browser-only APIs. `routes.ts` is pure data + functions, no directive needed.
-5. **`notFound()` from `next/navigation`** — call directly inside the async `[date]` page.
+1. `"use client"` + `useEffect` for localStorage reads.
+2. `// @vitest-environment happy-dom` per-file directive.
+3. `vi.mock('next/navigation', () => ({ ... }))` + `resetNavigationMocks()`.
+4. `makeDiary(overrides?)` from fixtures.
+5. `IconButton` with `icon: ReactNode` — caller provides SVG.
+6. `Routes.*` for all navigation.
+7. CSS tokens from `globals.css` — no hardcoded hex.
+8. `React.memo` + `useCallback` pair for cell memoization.
 
 ---
 
@@ -95,34 +105,39 @@ Next 15.5.18, React 19.0.0. No React Router / TanStack Router.
 
 | File | Change |
 |---|---|
-| `src/app/page.tsx` | Likely no content change (REQ-001 placeholder already matches required tone). |
-| `src/app/not-found.tsx` | Create — Korean 404. |
-| `src/app/diary/[date]/page.tsx` | Create — async, await params, regex guard, `notFound()` on mismatch. |
-| `src/app/list/page.tsx` | Create — placeholder. |
-| `src/app/chat/page.tsx` | Create — placeholder. |
-| `src/app/stats/page.tsx` | Create — placeholder. |
-| `src/lib/navigation/routes.ts` | Create — `Routes` object, ≤ 30 lines. |
-| `src/lib/navigation/index.ts` | Create — barrel (if design decides). |
-| `src/lib/navigation/__tests__/routes.test.ts` | Create — unit tests for path generators. |
-| `vitest.config.ts` | Possibly update if shared `next/navigation` mock helper added. |
-| `next.config.ts` | No change. |
+| `src/app/page.tsx` | Replace placeholder with thin `"use client"` boundary |
+| `src/app/_components/CalendarScreen.tsx` | Create |
+| `src/app/_components/CalendarHeader.tsx` | Create |
+| `src/app/_components/CalendarGrid.tsx` | Create |
+| `src/app/_components/CalendarDayCell.tsx` | Create |
+| `src/lib/storage/useDiaries.ts` | Create |
+| `src/app/globals.css` | Add `--color-cell-empty: #C8C8C8` to `@theme` |
+| `package.json` | Add `@playwright/test` devDep + `test:e2e` script |
+| `playwright.config.ts` | Create (root) |
+| `e2e/calendar.spec.ts` | Create — golden path: app open → calendar → FAB → /diary/[today] |
+| `src/app/__tests__/CalendarScreen.test.tsx` (or per-component) | Create |
 
 ---
 
 ## Risks
 
-1. **Next.js 15 async `params`.** Sync read (`params.date`) returns `undefined` without TS error in some configs. Must `await params` before destructuring. Known v14→v15 breaking change.
-2. **`notFound()` in tests.** Throws internally. Without `vi.mock('next/navigation')`, test crashes with uncaught throw rather than clean assertion failure.
-3. **`happy-dom` vs `node` env split.** Easy to forget the per-file directive for page tests.
-4. **Tailwind token availability.** New page files under `src/` auto-picked by Tailwind content scan. No config change needed.
+1. **`MoodIcon` Server Component inside `CalendarDayCell` Client Component.** RSC can render inside client components if no client-only APIs used. `MoodIcon` has no hooks/browser APIs → safe to import. In fully-client subtree, executes on client without error.
+
+2. **Vitest env mismatch for new tests.** Global is `node`; calendar uses `useState`/`useEffect`/`useRouter`. Test files MUST include `// @vitest-environment happy-dom` + `vi.mock('next/navigation')`.
+
+3. **Swipe + pointer events in happy-dom.** happy-dom 20.x supports `PointerEvent`. `fireEvent.pointerDown`/`pointerUp` with `clientX` deltas should work. Fallback: mouse events.
+
+4. **`#C8C8C8` grey not existing token.** Add `--color-cell-empty` to `globals.css` `@theme` block. Keeps token discipline.
+
+5. **Playwright requires browser download.** `npx playwright install chromium` in CI. `playwright.config.ts` `webServer` block with `reuseExistingServer: !process.env.CI`.
 
 ---
 
 ## Unknowns
 
-1. Shared `vi.mock('next/navigation')` helper in REQ-006 or defer to REQ-007? Recommend introduce now to reduce future boilerplate.
-2. Whether `src/lib/navigation/index.ts` barrel is needed immediately. Convention from storage suggests yes; design phase decides.
-3. Page-component test file location: `src/app/__tests__/` (centralized) vs co-located. Design phase picks.
+1. **Icon SVG source for 3 header buttons**: lucide-react vs inline SVG. Recommend inline (no new dep).
+2. **`useDiaries` re-export from barrel**: recommend NO — keep `import { useDiaries } from '@/lib/storage/useDiaries'` (direct).
+3. **Weekday header row (일월화수목금토)**: implied by PRD §4.1 7-column grid but not in REQ-007 acceptance criteria. Belongs in `CalendarGrid` or `CalendarHeader`. Design phase decides location.
 
 ---
 
