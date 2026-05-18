@@ -1,302 +1,286 @@
-# Technical Design — REQ-007
+# Technical Design — REQ-008
 
 ## Goal
 
-Convert `src/app/page.tsx` from placeholder to main calendar screen: 7-column monthly mood grid, 3-icon header, horizontal swipe month nav, FAB → today's diary editor. Also bootstraps Playwright E2E.
+Deliver `MoodPickerSheet`, a single composite client component wrapping REQ-005's `BottomSheet`. User picks 1 of 10 fixed moods. Supports two entry modes (`initial` / `change`) sharing same UI, differing only in close-callback dispatch. No new libraries, no new primitives, no backend.
 
 ---
 
-## Resolved Unknowns
+## Resolved Unknowns + Risks
 
-**1 — Icon SVG source: inline SVG.** `lucide-react` is in CLAUDE.md notes but NOT in `package.json`. 3 small inline SVGs cost ~60 bytes each, tree-shaken. Aligns with "no new deps" principle.
+**Unknown 1 — Toast positioning inside `<dialog>`.** `Toast.tsx` uses `fixed bottom-24`. Inside `showModal()` top-layer, `fixed` is relative to dialog's containing block (not viewport). Pre-emptively pass `className="!bottom-6 left-1/2 -translate-x-1/2"` for in-sheet context. Test verifies text appears, not pixel position.
 
-**2 — `useDiaries` barrel re-export: NO.** Storage barrel is SSR-safe pure-data. Hook file has `"use client"` — must not be pulled into Server Component trees via barrel. Direct import: `import { useDiaries } from '@/lib/storage/useDiaries'`. File comment: `// React hook — client-only. Direct import only; NOT re-exported.`
+**Unknown 2 — Sub-component split.** Total file likely 100–130 lines. Extract `MoodPickerTabs` as PRIVATE (non-exported) function in same `MoodPickerSheet.tsx`. If file exceeds 110 lines, move to `src/design-system/MoodPickerTabs.tsx` named export. Inline-first; revisit only if hit.
 
-**3 — Weekday header row location: inside `CalendarGrid`.** Grid is self-contained layout unit. Keeps `CalendarHeader` focused on month + nav.
+**Risk 1 — Toast z-index inside dialog.** Addressed: `<Toast>` is last child inside BottomSheet `children` fragment. `z-50` in top-layer context is fine.
+
+**Risk 2 — MoodIcon (Server) in Client.** Legal in Next.js 15. No action.
+
+**Risk 3 — Date TZ.** Use `new Date(date + 'T00:00:00')` (local TZ) — never `new Date(date)` (UTC midnight).
+
+**Risk 4 — `handleCancel` double-call.** `useDialogControl` only fires `onClose` on `e.target === ref.current` (backdrop), not children. X click doesn't bubble to backdrop. No code change; test case locks behavior.
 
 ---
 
 ## File Layout
 
-| File | Type | Budget |
+| File | Role | Budget |
 |---|---|---|
-| `src/app/page.tsx` | Replace | ≤ 8 |
-| `src/app/_components/CalendarScreen.tsx` | Create | ≤ 90 |
-| `src/app/_components/CalendarHeader.tsx` | Create | ≤ 70 |
-| `src/app/_components/CalendarGrid.tsx` | Create | ≤ 80 |
-| `src/app/_components/CalendarDayCell.tsx` | Create | ≤ 50 |
-| `src/lib/storage/useDiaries.ts` | Create | ≤ 35 |
-| `src/app/globals.css` | Additive | +1 line |
-| `playwright.config.ts` | Create | ≤ 40 |
-| `e2e/calendar.spec.ts` | Create | ≤ 50 |
-| `package.json` | Edit | +2 entries |
-| `src/app/__tests__/CalendarScreen.test.tsx` | Create | ≤ 80 |
-| `src/app/__tests__/CalendarGrid.test.tsx` | Create | ≤ 80 |
-| `src/app/__tests__/CalendarDayCell.test.tsx` | Create | ≤ 60 |
-| `src/app/__tests__/CalendarHeader.test.tsx` | Create | ≤ 50 |
-| `src/lib/storage/__tests__/useDiaries.test.ts` | Create | ≤ 50 |
+| `src/design-system/MoodPickerSheet.tsx` | Component | target 95, cap 110 |
+| `src/design-system/__tests__/MoodPickerSheet.test.tsx` | Vitest | target 95, cap 110 |
+
+Conditional: `src/design-system/MoodPickerTabs.tsx` (only if hit 110-line cap).
+
+No existing files modified.
 
 ---
 
-## globals.css Additive Change
-
-In `@theme` block, after `--color-success: #B4E4B4;`:
-```css
---color-cell-empty: #C8C8C8;
-```
-
----
-
-## Inline SVG Path Data (3 icons)
-
-24×24, `stroke="currentColor"`, `strokeWidth="2"`, `fill="none"`, `strokeLinecap="round"`, `strokeLinejoin="round"`. Feather-style.
-
-**검색 (Search)**: `circle cx="11" cy="11" r="8"` + `line x1="21" y1="21" x2="16.65" y2="16.65"`
-
-**통계 (Stats)**: 3 rects — `(18,3,4,18)`, `(11,9,4,12)`, `(4,14,4,7)`
-
-**리스트 (List)**: 3 long lines (8→21 at y=6/12/18) + 3 dot lines (3→3.01 at y=6/12/18)
-
-Defined as JSX constants at top of `CalendarHeader.tsx`.
-
----
-
-## useDiaries Hook
-
-`src/lib/storage/useDiaries.ts`:
+## Props Signature
 
 ```ts
-// React hook — client-only. Direct import only;
-// NOT re-exported from @/lib/storage/index.ts (that barrel is SSR-safe).
-"use client";
+import type { MoodId } from '@/lib/storage';
 
-import { useEffect, useState } from 'react';
-import { readDiaries, type DiaryEntry } from '@/lib/storage';
-
-export function useDiaries(): { entries: DiaryEntry[]; isReady: boolean } {
-  const [entries, setEntries] = useState<DiaryEntry[]>([]);
-  const [isReady, setIsReady] = useState(false);
-
-  useEffect(() => {
-    setEntries(readDiaries());
-    setIsReady(true);
-  }, []);
-
-  return { entries, isReady };
+export interface MoodPickerSheetProps {
+  open: boolean;
+  date: string;                 // ISO 'YYYY-MM-DD', local TZ
+  selectedMoodId?: MoodId;      // undefined in 'initial'; set in 'change'
+  mode: 'initial' | 'change';
+  onSelect: (moodId: MoodId) => void;
+  onClose: () => void;
+  onCancelInitial?: () => void; // ONLY in mode='initial' AND closed without select
 }
 ```
 
-`isReady` lets caller suppress grid during first hydration frame.
-
 ---
 
-## CalendarScreen Skeleton
+## Component Skeleton
 
-`src/app/_components/CalendarScreen.tsx`:
+```tsx
+"use client";
 
-State: `useState<Date>` for visible month, `useMemo` for today + diaryByDate, `useRouter`, `useCallback` for stable callbacks, `useRef` for pointer-start tracking.
+import React from 'react';
+import type { MoodId } from '@/lib/storage';
+import { MOODS } from '@/design-system/moods';
+import { BottomSheet } from '@/design-system/BottomSheet';
+import { Toast } from '@/design-system/Toast';
+import { useToast } from '@/design-system/useToast';
+import { IconButton } from '@/design-system/IconButton';
+import { MoodIcon } from '@/design-system/MoodIcon';
 
-Layout: `<CalendarHeader>` + (when `isReady`) `<CalendarGrid>` + `<FAB icon={PenIcon} label="오늘 일기 쓰기" onClick={onFAB} />`.
+const WEEKDAY_FMT = new Intl.DateTimeFormat('ko-KR', { weekday: 'short' });
 
-Swipe: pointer events on container `<div>`, threshold ±40px. `e.clientX` delta → `nextMonth()` or `prevMonth()`.
+function formatSheetDate(date: string): string {
+  const d = new Date(date + 'T00:00:00');
+  return `${date.replace(/-/g, '.')} ${WEEKDAY_FMT.format(d)}`;
+}
 
-Helper: `toDateKey(date: Date)` uses `date.toLocaleDateString('sv')` (Swedish locale yields YYYY-MM-DD natively).
+const CloseIcon = (
+  <svg viewBox="0 0 24 24" width={20} height={20} fill="none"
+       stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+    <line x1="6" y1="6" x2="18" y2="18" />
+    <line x1="6" y1="18" x2="18" y2="6" />
+  </svg>
+);
 
----
+function MoodPickerTabs({ onInactiveTap }: { onInactiveTap: () => void }) {
+  return (
+    <div className="mb-4">
+      <div className="flex gap-4 mb-1">
+        <button type="button"
+          className="text-sm font-medium text-charcoal border-b-2 border-charcoal pb-1 min-h-[44px] px-2">
+          기본
+        </button>
+        <button type="button" onClick={onInactiveTap}
+          className="text-sm text-meta pb-1 min-h-[44px] px-2">
+          테마
+        </button>
+      </div>
+      <div className="flex gap-4">
+        <button type="button"
+          className="text-xs font-medium text-charcoal border-b-2 border-charcoal pb-1 min-h-[44px] px-2">
+          기분
+        </button>
+        <button type="button" onClick={onInactiveTap}
+          className="text-xs text-meta pb-1 min-h-[44px] px-2">
+          일상
+        </button>
+      </div>
+    </div>
+  );
+}
 
-## CalendarGrid Skeleton (with weekday row + date math)
+export interface MoodPickerSheetProps { /* as above */ }
 
-`src/app/_components/CalendarGrid.tsx`:
+export function MoodPickerSheet({
+  open, date, selectedMoodId, mode, onSelect, onClose, onCancelInitial,
+}: MoodPickerSheetProps) {
+  const toast = useToast();
 
-Pure component, no `"use client"` needed (or include for safety; doesn't matter since rendered inside client tree).
+  function handleCancel() {
+    if (mode === 'initial') onCancelInitial?.();
+    onClose();
+  }
 
-Props: `{ year: number; month: number; diaryByDate: Map<string, DiaryEntry>; today: string; onCellTap: (date: string) => void }`.
+  function handleSelect(moodId: MoodId) {
+    onSelect(moodId);
+    onClose();
+  }
 
-`WEEKDAYS = ['일','월','화','수','목','금','토']` — 일요일 시작.
+  return (
+    <BottomSheet open={open} onClose={handleCancel}>
+      <div className="flex items-start justify-between mb-2">
+        <div>
+          <p className="text-xs text-meta">{formatSheetDate(date)}</p>
+          <h2 className="text-lg font-medium text-charcoal">오늘은 어떤 하루였나요?</h2>
+        </div>
+        <IconButton icon={CloseIcon} label="닫기" onClick={handleCancel} />
+      </div>
 
-Date math (no date-fns):
-- `firstDay = new Date(year, month, 1)`
-- `lastDay = new Date(year, month + 1, 0).getDate()` (last-of-month idiom)
-- `startOffset = firstDay.getDay()` (0=Sun…6=Sat)
-- Build 42-slot array: leading nulls (startOffset) + `[1..lastDay]` + trailing nulls to next multiple of 7
+      <MoodPickerTabs onInactiveTap={() => toast.show('곧 만나요!')} />
 
-Layout: `grid-cols-7` weekday header row + `grid-cols-7 gap-y-1` day cells. Empty slots = bare `<div>`. Real days = `<CalendarDayCell>`.
+      <div className="grid grid-cols-3 gap-4">
+        {MOODS.map((mood) => (
+          <button
+            key={mood.id}
+            type="button"
+            aria-label={mood.label}
+            onClick={() => handleSelect(mood.id)}
+            className={`flex flex-col items-center gap-2 p-2 rounded-[var(--radius-card)] min-h-[44px]${
+              mood.id === selectedMoodId ? ' ring-2 ring-peach bg-peach-light/30' : ''
+            }`}
+          >
+            <MoodIcon id={mood.id} size={72} />
+            <span className="text-sm text-charcoal">{mood.label}</span>
+          </button>
+        ))}
+      </div>
 
-dateKey: `${year}-${String(month + 1).padStart(2,'0')}-${String(day).padStart(2,'0')}`.
-
----
-
-## CalendarDayCell Skeleton (with today highlight)
-
-`src/app/_components/CalendarDayCell.tsx`:
-
-`React.memo`-wrapped. Props: `{ date: string; entry?: DiaryEntry; isToday: boolean; onTap: (date: string) => void }`.
-
-`<button type="button" aria-label={`${date}${entry ? ' 일기 있음' : ''}`} onClick={() => onTap(date)} className="flex flex-col items-center justify-center py-2 min-h-[44px]">`
-
-Conditional:
-- `entry` present → `<MoodIcon id={entry.mood} size={32} />` + (if today) `<span className="mt-0.5 w-1.5 h-1.5 rounded-full bg-peach block" />`
-- `entry` absent → `<span className={isToday ? 'text-sm font-bold text-peach' : 'text-sm text-cell-empty'}>{day}</span>`
-
-`day = Number(date.slice(8))` extracts DD.
-
-Touch target ≥ 44 via `min-h-[44px]`.
-
----
-
-## CalendarHeader Skeleton
-
-`src/app/_components/CalendarHeader.tsx`:
-
-Props: `{ year, month, onPrev, onNext, onSearch, onStats, onList }`.
-
-Layout: `<header className="flex items-center justify-between px-4 py-3">`:
-- Left: `<div className="flex items-center gap-2">` — ‹ button + `M월` label (`text-3xl font-bold text-charcoal`) + › button. Arrows use Unicode `‹` `›` characters on plain `<button>` (not IconButton — distinguishes from circular header icons).
-- Right: `<div className="flex items-center gap-2">` — 3 `<IconButton icon={SearchIcon|StatsIcon|ListIcon} label="검색"|"통계"|"리스트" onClick={...} />`
-
-Year NOT rendered in header (PRD shows only `M월`). Trivial future addition if needed for cross-year nav.
-
----
-
-## Playwright Config
-
-`playwright.config.ts` (root):
-
-```ts
-import { defineConfig, devices } from '@playwright/test';
-
-export default defineConfig({
-  testDir: './e2e',
-  timeout: 30_000,
-  fullyParallel: false,
-  forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
-  reporter: 'list',
-  use: {
-    baseURL: 'http://localhost:3000',
-    trace: 'on-first-retry',
-  },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
-  webServer: {
-    command: 'npm run dev',
-    url: 'http://localhost:3000',
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
-});
+      <Toast
+        message={toast.message}
+        open={toast.open}
+        onClose={toast.hide}
+        className="!bottom-6 left-1/2 -translate-x-1/2"
+      />
+    </BottomSheet>
+  );
+}
 ```
 
 ---
 
-## E2E Spec
+## Date Formatter
 
-`e2e/calendar.spec.ts`:
+`formatSheetDate(date: string): string` — module-level private function, not exported. If REQ-009's editor needs the same format, promote to `src/lib/formatDate.ts` at that point.
 
-```ts
-import { test, expect } from '@playwright/test';
-
-test('캘린더 화면 진입 후 FAB 탭 시 오늘 일기 에디터로 이동', async ({ page }) => {
-  await page.goto('/');
-
-  const today = new Date();
-  const monthLabel = `${today.getMonth() + 1}월`;
-  await expect(page.getByText(monthLabel)).toBeVisible();
-  await expect(page.getByRole('main')).toBeVisible();
-
-  await page.getByRole('button', { name: '오늘 일기 쓰기' }).click();
-
-  const yyyy = today.getFullYear();
-  const mm = String(today.getMonth() + 1).padStart(2, '0');
-  const dd = String(today.getDate()).padStart(2, '0');
-  await expect(page).toHaveURL(`/diary/${yyyy}-${mm}-${dd}`);
-});
-```
-
-Role/name queries throughout. No `data-testid` in production code. FAB `aria-label="오늘 일기 쓰기"` is the selector anchor.
+Input: ISO `'YYYY-MM-DD'`. Output: `'2026.05.17 일'` (dot-separated + Korean single-char weekday). Local TZ guaranteed.
 
 ---
 
-## package.json Changes
+## CloseIcon SVG
 
-devDeps: `"@playwright/test": "^1.44.0"`.
+Inline feather-style X, module-level constant. Passed to `IconButton`'s `icon` prop.
 
-Scripts: `"test:e2e": "playwright test"`, `"test:e2e:install": "playwright install chromium"`.
+---
+
+## Tab Strip Structure
+
+Two rows of inline Tailwind tabs. No `Tabs` primitive (single usage).
+
+Active: `font-medium text-charcoal border-b-2 border-charcoal`. Inactive: `text-meta`.
+
+Critical:
+- Inactive tabs MUST NOT carry `disabled` — must receive pointer events for toast.
+- Stateless — only one tab per row ever active in v1. Active styling is static.
+- All 4 tab buttons `min-h-[44px] px-2`.
+
+---
+
+## Backend Design
+
+None. Purely compositional frontend.
+
+---
+
+## Data Model / Migration Design
+
+None. Existing types/data only.
+
+---
+
+## Test Design (handover to Phase 8)
+
+File: `src/design-system/__tests__/MoodPickerSheet.test.tsx`. `// @vitest-environment happy-dom`.
+
+Setup: `vi.fn()` stubs for `HTMLDialogElement.prototype.{showModal, close}` in `beforeEach`; `vi.useFakeTimers()`/`useRealTimers()`; `cleanup()` in `afterEach`.
+
+Helper:
+```ts
+const defaultProps: MoodPickerSheetProps = {
+  open: true, date: '2026-05-17', mode: 'change',
+  onSelect: vi.fn(), onClose: vi.fn(),
+};
+```
+
+10 cases:
+1. `open=true` → `showModal` called; `open=false` → `close` called.
+2. Header: `'2026.05.17 일'` + `'오늘은 어떤 하루였나요?'`.
+3. 10 mood buttons rendered (query by mood label).
+4. Mood tap → `onSelect(moodId)` then `onClose`; not `handleCancel`/`onCancelInitial`.
+5. X click → `onClose` exactly once.
+6. `mode='initial'` + X: `onCancelInitial` called once AND `onClose` once.
+7. `mode='change'` + X: `onCancelInitial` NOT called; `onClose` once.
+8. Inactive tab tap (테마 or 일상): `'곧 만나요!'` toast appears.
+9. `selectedMoodId='joy'`: joy button has `ring-2` + `ring-peach` classes; others don't.
+10. Source-guard: contains `"use client"` (`fs.readFileSync`).
 
 ---
 
 ## Implementation Order
 
-1. `globals.css` — `--color-cell-empty` token.
-2. `src/lib/storage/useDiaries.ts` — hook.
-3. `src/app/_components/CalendarDayCell.tsx` — leaf component.
-4. `src/app/_components/CalendarGrid.tsx` — composes DayCell.
-5. `src/app/_components/CalendarHeader.tsx` — IconButton consumer.
-6. `src/app/_components/CalendarScreen.tsx` — state owner.
-7. `src/app/page.tsx` — thin client boundary.
-8. `package.json` — add Playwright dep + scripts. Run `npm install` + `npx playwright install chromium`.
-9. `playwright.config.ts`.
-10. `e2e/calendar.spec.ts`.
-11. Full gates: `typecheck` / `lint` / `npm test` / `npm run build` / `npm run test:e2e`.
-
----
-
-## Test Design Sketch
-
-**useDiaries.test.ts** (happy-dom): isReady false initially → true after effect; entries populated from `readDiaries`; empty array case.
-
-**CalendarDayCell.test.tsx** (happy-dom): no-entry+not-today (grey numeral, no MoodIcon); has-entry+not-today (MoodIcon, no dot); no-entry+today (bold peach numeral); has-entry+today (MoodIcon + peach dot); click fires `onTap(date)`.
-
-**CalendarGrid.test.tsx** (happy-dom): May 2026 (month=4) — first day Friday (offset 5), 31 days; with `diaryByDate` for day 3 → MoodIcon on day 3 only; weekday row 일~토 visible.
-
-**CalendarHeader.test.tsx** (happy-dom): "5월" rendered for month=4; 3 IconButtons fire correct callbacks (by aria-label); arrows fire onPrev/onNext.
-
-**CalendarScreen.test.tsx** (happy-dom): mock `next/navigation` + `useDiaries`. Current month label visible; FAB click → router.push(Routes.diary(today)); ‹/› buttons change month; pointer swipe (clientX delta) changes month.
+1. `MoodPickerSheet.tsx` — imports, `formatSheetDate`, `CloseIcon`, `MoodPickerTabs`, `MoodPickerSheet`. Strict TS — no `any`.
+2. Verify dependencies resolve via existing `@/design-system/*` and `@/lib/storage`.
+3. `MoodPickerSheet.test.tsx` — 10 cases with mocks.
+4. `npm run typecheck` — must pass.
+5. `npm test` — all tests pass, no regressions.
+6. `npm run lint` + `npm run build` — clean.
 
 ---
 
 ## Backward Compatibility
 
-- `src/app/page.tsx` swap is user-transparent — `/` continues to serve home.
-- `src/lib/storage/index.ts` unchanged. `useDiaries.ts` is new direct-import file.
-- `globals.css` gets one additive token; no rename/removal.
-- `package.json` gets devDep + scripts; no production bundle impact.
-- All navigation continues through `Routes.*`.
+No existing file modified. Net-new export. REQ-009 will import it.
 
 ---
 
 ## Performance Considerations
 
-- `diaryByDate` Map via `useMemo([entries])` — rebuilds only on entries reference change (once on mount; REQ-009 writes will trigger).
-- `CalendarDayCell` `React.memo` + `useCallback`-stabilized `onCellTap` — zero unnecessary cell re-renders on month transitions for unchanged dates.
-- `useDiaries` synchronous localStorage read on mount (one read, ≤365 entries/year). Negligible.
-- Swipe via pointer events, no passive-listener conflicts, no `preventDefault`, vertical scroll unaffected.
-- E2E Chromium-only reduces CI time.
+- `MOODS`, `WEEKDAY_FMT`, `CloseIcon` module-level constants — zero per-render allocation.
+- `MoodIcon` (Server Component) imported into Client boundary — Next.js handles, no JS bundle bloat from MoodIcon internals.
+- BottomSheet always-mounted (REQ-005 invariant). 10 cells always rendered but hidden off-screen when `open=false`. Negligible cost.
 
 ---
 
 ## Infra / Deployment Considerations
 
-- `playwright.config.ts` `reuseExistingServer: !process.env.CI`.
-- `test:e2e:install` is a one-time CI step. Downloads ~150MB; recommend browser path caching.
-- No server-side code, no env vars, no infrastructure changes.
+None.
 
 ---
 
 ## Risks and Tradeoffs
 
-1. **`MoodIcon` (RSC) inside `CalendarDayCell` (client).** Safe — `MoodIcon` has no hooks/browser APIs; executes on client without error. RSC caching benefits lost but no cacheable work to lose.
-2. **`toLocaleDateString('sv')` ISO trick.** Works in all modern browsers incl. Safari 15+. Alternative: manual `padStart` formatting. Both acceptable.
-3. **Swipe threshold 40px.** Too low = accidental month changes. Adjust to 50px if user testing reveals false positives.
-4. **`isReady` guard hides grid on first paint.** Brief blank frame on slow connections. Skeleton component would address but out of MVP scope.
-5. **Year not in month header.** PRD shows only `M월`. Cross-year nav makes year disappear briefly. Trivial to add `year` to label if needed; prop already received.
+**Tab touch-target horizontal:** `text-sm` Korean text width may be ≤ 44px alone. Added `px-2` to widen tap area.
+
+**Static tabs vs `useState`:** Static correct for v1 (one tab per row ever active). v2 may swap to state without breaking external API.
+
+**Inline `MoodPickerTabs` vs separate file:** Inline-first; extract if line count exceeds 110.
+
+**`className` Toast positioning:** `!bottom-6` is assumption-based; refine if visual review finds clipping.
 
 ---
 
 ## Open Questions
 
-1. Skeleton during `!isReady` vs current full-suppress. Current: full-suppress (`{isReady && <CalendarGrid ... />}`).
-2. Pen icon SVG for FAB — same as inline SVG approach. Caller (`CalendarScreen`) supplies the JSX.
-3. Year display when navigating across year boundaries — trivial future addition.
+None blocking. All unknowns + risks addressed.
 
 ---
 

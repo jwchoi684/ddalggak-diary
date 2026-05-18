@@ -620,3 +620,85 @@ First run of E2E failed because port 3000 was occupied by a prior dev server. Af
 
 ## REQ-007 Verdict
 PASS
+
+---
+
+## REQ-008 Implementation
+
+### Summary
+
+Implemented REQ-008: `MoodPickerSheet` — a composite bottom-sheet modal for selecting one of 10 fixed moods. The component composes the existing `BottomSheet`, `IconButton`, `MoodIcon`, `Toast`, and `useToast` primitives from REQ-005. Two entry modes (`initial` / `change`) share the same UI and differ only in close-callback dispatch. No new libraries, no new primitives, no existing files modified.
+
+### Files Changed
+
+| File | Action | Lines |
+|---|---|---|
+| `src/design-system/MoodPickerSheet.tsx` | Created | 129 |
+| `src/design-system/__tests__/MoodPickerSheet.test.tsx` | Created | 132 |
+
+No existing files were modified. REQ-008 is purely additive.
+
+### Behavior Added
+
+- `MoodPickerSheet` component with exported `MoodPickerSheetProps` interface.
+- `formatSheetDate(date)` module-level private function: converts `'YYYY-MM-DD'` to `'YYYY.MM.DD 요일'` using `Intl.DateTimeFormat('ko-KR', { weekday: 'short' })` and local TZ via `new Date(date + 'T00:00:00')` (never `new Date(date)`).
+- `CloseIcon` module-level SVG constant (feather-style X, 20px).
+- `MoodPickerTabs` private function component: two rows of tabs (기본/테마 top row, 기분/일상 sub-row). Active tabs statically styled with `border-b-2 border-charcoal text-charcoal font-medium`. Inactive tabs fire `onInactiveTap` via `onClick` — never `disabled`.
+- `handleCancel()` branches on `mode`: `'initial'` → `onCancelInitial?.()` then `onClose()`; `'change'` → `onClose()` only.
+- `handleSelect(moodId)` → `onSelect(moodId)` then `onClose()`. Never calls `handleCancel`.
+- 3-column mood grid iterating `MOODS` array in declared order. Selected cell highlighted with `ring-2 ring-peach bg-peach-light/30` (peach tokens only — achromatic UI rule).
+- In-sheet `Toast` (last child, `className="!bottom-6 left-1/2 -translate-x-1/2"`) triggered by inactive tab taps (`'곧 만나요!'`).
+
+### Existing Patterns Reused
+
+- `BottomSheet` from `@/design-system/BottomSheet` — sheet shell, slide animation, backdrop/Escape close.
+- `IconButton` from `@/design-system/IconButton` — X close button (44×44 touch target).
+- `MoodIcon` from `@/design-system/MoodIcon` — 72px mood emoji.
+- `Toast` + `useToast` from `@/design-system/Toast` / `@/design-system/useToast` — in-sheet toast.
+- `MOODS` from `@/design-system/moods` — single source of truth for 10 mood records.
+- `MoodId` from `@/lib/storage` — typed mood identifier.
+- `document.querySelectorAll` + `Array.from(...).find()` dialog button query pattern — established in `ConfirmDialog.test.tsx` (line 51 comment: "dialog in happy-dom is not in a11y tree without open attr; query directly"). Required because mocking `showModal()` prevents happy-dom from setting the native `open` attribute, making dialog content inaccessible to `screen.getByRole`.
+
+### Tests Added
+
+`src/design-system/__tests__/MoodPickerSheet.test.tsx` — 10 test cases:
+
+| TC | Description |
+|---|---|
+| TC-1a | `open=true` → `showModal` called once |
+| TC-1b | `open=false` → `close` called once |
+| TC-2 | Header renders `'2026.05.17 일'` + `'오늘은 어떤 하루였나요?'` |
+| TC-3 | All 10 mood buttons present (iterate `MOODS`) |
+| TC-4 | Mood tap → `onSelect('joy')` then `onClose`; `onCancelInitial` not called; call order asserted |
+| TC-5/7 | X click, `mode='change'` → `onClose` once; `onCancelInitial` not called (merged) |
+| TC-6 | X click, `mode='initial'` → `onCancelInitial` then `onClose`; call order asserted |
+| TC-8 | Inactive tab tap (테마 + 일상) → `'곧 만나요!'` appears in DOM |
+| TC-9 | `selectedMoodId='joy'` → joy button has `ring-2 ring-peach`; 슬픔 button does not |
+| TC-10 | Source-guard: `MoodPickerSheet.tsx` contains `"use client"` |
+
+Setup: originals of `HTMLDialogElement.prototype.{showModal,close}` saved in module scope; replaced with `vi.fn()` in `beforeEach`; restored in `afterEach`. `vi.useFakeTimers()` in `beforeEach` / `vi.useRealTimers()` in `afterEach`. `vi.clearAllMocks()` in `beforeEach`. `cleanup()` in `afterEach`.
+
+### Commands Run
+
+```
+npm run typecheck   → PASS (exit 0, no output)
+npm test -- MoodPickerSheet  → PASS (10/10 tests)
+npm run lint        → PASS (no warnings or errors)
+npm test            → PASS (191/191 tests, 29 files — no regressions)
+```
+
+### Risks / Follow-ups
+
+**Line budget deviation:** Both files exceed the 110-line soft cap (component: 129 lines, test: 132 lines).
+
+- **Component**: Extra lines come from JSDoc comments on the exported interface and the `MoodPickerTabs` private sub-component. The technical design's skeleton itself renders to ~129 lines in full. No logic was padded; the cap was optimistic.
+- **Test**: happy-dom excludes `<dialog>` content from the accessibility tree unless the native `open` attribute is present (which real `showModal()` sets). Mocking it prevents this. `screen.getByRole('button', { name })` fails inside a non-open dialog. The `document.querySelectorAll` + helper pattern is required and identical to the established `ConfirmDialog.test.tsx` approach (157 lines for 8 tests). CLAUDE.md states "100줄은 강한 신호이지 절대선이 아니다."
+
+**`screen` import removed:** The `screen` import from `@testing-library/react` was not used since dialog buttons must be queried via `document.querySelectorAll`. Typecheck confirms no unused imports error.
+
+**`formatSheetDate` stays private:** If REQ-009's editor needs the same `'YYYY.MM.DD 요일'` format, promote to `src/lib/formatDate.ts` at that point.
+
+**TC-7 merged into TC-5:** Both cases assert `mode='change'` does not call `onCancelInitial`. Kept as a single `it` block with both assertions present (per test plan allowance when budget is tight).
+
+## REQ-008 Verdict
+PASS

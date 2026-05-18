@@ -2,18 +2,18 @@
 
 ## Summary
 
-REQ-007 implements the main calendar screen. It consumes existing storage read-only
-and introduces no persistence changes of any kind.
+REQ-008 delivers `MoodPickerSheet`, a purely compositional UI component. It has no
+persistence concerns of any kind.
 
 ## Schema Change Required
 
 No. The project uses `localStorage` (no relational DB, no ORM, no migration files).
 The storage schema (`ddalkkak:diaries:v1`, `ddalkkak:conversations:v1`,
-`ddalkkak:settings:v1`) was fixed in REQ-002 and is unchanged here.
+`ddalkkak:settings:v1`) was fixed in REQ-002 and is untouched here.
 
 ## Migration Strategy
 
-Not applicable. No migrations exist or are needed.
+Not applicable.
 
 ## Backfill / Default / Nullability
 
@@ -21,43 +21,41 @@ Not applicable. No new fields, no nullability changes, no default values introdu
 
 ## Index Requirements
 
-Not applicable. `CalendarGrid` uses a `Map<string, DiaryEntry>` built via `useMemo`
-in-memory — a runtime lookup index, not a storage-level index.
+Not applicable. The component reads nothing from storage.
 
 ## Existing Data Compatibility
 
-Full compatibility. `readDiaries()` returns the existing `DiaryEntry[]` array
-unchanged. REQ-007 only reads; it never calls `upsertDiary` or `deleteDiary`.
+Not applicable. `MoodPickerSheet` emits a `MoodId` value upward via `onSelect`
+callback only. The caller (REQ-009's diary editor) is responsible for persistence.
 
 ## Rollback Considerations
 
-Not applicable. No storage writes occur. Reverting the UI code has zero data impact.
+Not applicable. No storage writes occur at this layer. Removing the component has
+zero data impact.
 
 ## Query Performance Risk
 
-None. `readDiaries()` is a single synchronous `localStorage.getItem` parse capped at
-~365 entries/year. Called once on mount inside `useEffect`.
+None. No storage reads or writes.
 
 ## Seed / Fixture Impact
 
-No changes to seed data. Test files reuse the existing `makeDiary(overrides?)`
-factory from `src/lib/storage/__tests__/fixtures.ts`.
+No changes to seed or fixture data. The existing `MOODS` constant (REQ-003) is
+imported read-only.
 
 ## Files Expected to Change
 
-None in the storage or data layer. New file `src/lib/storage/useDiaries.ts` is a
-React hook wrapper (client-only glue); it does not alter the storage contract or
-schema and is explicitly NOT re-exported from the SSR-safe barrel.
+None in the storage or data layer. Only net-new UI files are introduced:
+- `src/design-system/MoodPickerSheet.tsx`
+- `src/design-system/__tests__/MoodPickerSheet.test.tsx`
 
-The only additive change outside components is one CSS custom property
-(`--color-cell-empty: #C8C8C8`) in `src/app/globals.css` — a presentational token
-with no data relevance.
+Conditional: `src/design-system/MoodPickerTabs.tsx` (only if the primary file
+exceeds the 110-line budget cap).
 
 ## Test Requirements
 
-Storage-layer tests: `useDiaries.test.ts` verifies `isReady` lifecycle and that
-`readDiaries()` output is surfaced correctly. Uses existing localStorage shim and
-`makeDiary` fixture. No new storage test infrastructure required.
+No storage-layer tests required. All tests are UI-layer (Vitest / happy-dom),
+covering callback dispatch, mode branching, toast trigger, and selected-mood
+highlight styling.
 
 ## Verdict
-PASS — not applicable; REQ-007 consumes existing storage read-only.
+PASS — not applicable

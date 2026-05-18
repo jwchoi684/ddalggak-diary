@@ -1,79 +1,50 @@
-# Security Review — REQ-007
+# Security Review — REQ-008
 
 ## Summary
 
-REQ-007 adds 5 new production React components, 1 client hook (`useDiaries`), and Playwright E2E bootstrap. Surface is entirely read-only client-side rendering. No HTTP calls, no secrets, no user-supplied HTML, no external service access. Zero new findings. All REQ-006 carry-forward items unchanged.
+REQ-008 introduces two new files: `src/design-system/MoodPickerSheet.tsx` and `src/design-system/__tests__/MoodPickerSheet.test.tsx`. The component is a pure UI bottom-sheet — it renders static design-system primitives, iterates a hardcoded MOODS array, and emits typed callbacks upward. There is no storage access, no network activity, no authentication, no server interaction, and no user-supplied HTML rendering. The attack surface is essentially zero.
 
 ## Scope
 
-- `src/app/page.tsx` (replaced placeholder)
-- `src/app/_components/{CalendarScreen, CalendarHeader, CalendarGrid, CalendarDayCell}.tsx`
-- `src/lib/storage/useDiaries.ts`
-- `playwright.config.ts`
-- `e2e/calendar.spec.ts`
+- `/Users/jay/Documents/Projects/ai_diary/src/design-system/MoodPickerSheet.tsx` (129 lines)
+- `/Users/jay/Documents/Projects/ai_diary/src/design-system/__tests__/MoodPickerSheet.test.tsx` (132 lines)
+- No existing files modified.
 
-## Critical / High / Medium / Low Issues
+## Critical Issues
 
-None new. See carry-forward.
+None.
 
-## XSS / Injection Audit
+## High Issues
 
-Grep for `dangerouslySetInnerHTML`, `innerHTML`, `eval(`, `new Function`, `document.write` across all 8 files — zero matches.
+None.
 
-Only dynamic JSX from diary data in REQ-007: `MoodIcon` receives `MoodId` enum (10 literal compile-time map) → Unicode emoji inside `<span role="img">`. No diary text rendered in REQ-007; body text is REQ-009's concern.
+## Medium Issues
 
-`aria-label` values:
-- `CalendarDayCell`: `` `${date}${entry ? ' 일기 있음' : ''}` `` — `date` is internally computed YYYY-MM-DD, not user input. Safe.
-- Arrow buttons: static `"이전 달"`/`"다음 달"`.
-- FAB: static `"오늘 일기 쓰기"`.
+None.
 
-Inline SVG (PenIcon, SearchIcon, StatsIcon, ListIcon): static JSX with fixed path data, no event handlers, no `<script>`, no `onload`, no `<a href>` inside. Safe.
+## Low Issues
 
-Month label `` {month + 1}월 `` — arithmetic + React text node. Safe.
+**L-1: `date` prop passed to `new Date()` without format validation.**
 
-Day numerals via `Number(date.slice(8))` — integer text node. Safe.
+The `formatSheetDate` function (line 15) calls `new Date(date + 'T00:00:00')` where `date` is a caller-supplied string typed as `string` (not a branded/validated `ISODateString`). If a caller passes a malformed string, `new Date()` produces `Invalid Date` and `Intl.DateTimeFormat.format()` renders `"Invalid Date"` as text content — no crash, no XSS. The text lands in a React JSX expression (`{formatSheetDate(date)}`), not `dangerouslySetInnerHTML`, so even a crafted string cannot inject HTML. This is a defense-in-depth observation only; there is no exploitable path.
 
-## Dependency Audit
+**L-2: No new dependencies were added — dependency audit not applicable.**
 
-New production dep delta: NONE. `@playwright/test ^1.44.0` is devDep only; excluded from production bundle.
+`pnpm audit` failed because no lockfile exists yet (`pnpm-lock.yaml` absent). This is a pre-existing project-level gap, not introduced by REQ-008. REQ-008 added zero new dependencies; all imports are from already-present design-system files.
 
-`npm audit --omit=dev` unchanged from REQ-006:
-- 0 critical, 0 high
-- 2 moderate: `postcss < 8.5.10` (GHSA-qx2v-qp2m-jg93, CSS stringify XSS in build-time tool output) — same deferred carry-forward.
+## Commands Run
 
-`@playwright/test` is well-maintained widely-vetted. Delta: 0 new advisories.
+```bash
+rg "dangerouslySetInnerHTML|innerHTML|eval\(|document\.write" src/design-system/MoodPickerSheet.tsx src/design-system/__tests__/MoodPickerSheet.test.tsx
+rg "password|secret|token|api_key|private_key|console\.log|console\.error" src/design-system/MoodPickerSheet.tsx src/design-system/__tests__/MoodPickerSheet.test.tsx
+pnpm audit --audit-level=high
+```
 
-## Sensitive Data / Logging
+All returned no output (no matches, no vulnerabilities found).
 
-Grep for `console.` across production files: zero matches.
+## Blocking Issues
 
-`process.env` access in `playwright.config.ts` reads only `process.env.CI` — boolean CI flag for `forbidOnly`/`retries`/`reuseExistingServer`. No secrets.
-
-## localStorage Isolation
-
-`useDiaries` calls `readDiaries()` from `@/lib/storage` (SSR-safe abstraction REQ-002). No component in `src/app/_components/` accesses `localStorage` directly. REQ-002's `no-direct-localstorage-access.test.ts` enforces this at test time. Boundary intact.
-
-## Navigation / Routing Safety
-
-All navigation through `Routes.*`. `Routes.diary(date)` receives JS-arithmetic-computed dates (not raw user input). Same carry-forward Low note from REQ-006 applies. `/diary/[date]` retains regex guard `/^\d{4}-\d{2}-\d{2}$/` as server-side backstop.
-
-## CSRF / Mutations / SSRF
-
-No mutations, no `fetch`/`axios`/`XMLHttpRequest`, no form submissions. Not applicable.
-
-## Playwright / E2E Config Security
-
-`playwright.config.ts` targets `http://localhost:3000` (local). `baseURL` is fixed localhost string. `reuseExistingServer: !process.env.CI` is standard. E2E spec is dev/CI only, not shipped. Chromium-only limits browser-automation attack surface. No cookies/sessions/credentials handled.
-
-## Carry-forward (from REQ-006, still applicable)
-
-1. **`JSON.parse` on localStorage without prototype-pollution guard** — Low/Medium. Hard gate at REQ-019.
-2. **`Photo.dataUrl` stored without format/size validation** — Medium, deferred. Hard gate at REQ-011.
-3. **No runtime schema validation on write paths** — Medium, deferred. Hard gate at REQ-019.
-4. **`Settings` wide index type** — Low. Narrow as concrete keys land.
-5. **esbuild dev-server CORS** (GHSA-67mh-4wv8-2f99) — dev-only.
-6. **postcss CSS stringify** (GHSA-qx2v-qp2m-jg93) — build-tool-only.
-7. **`Routes.diary(date)` JSDoc missing encoding-responsibility note** — Low. REQ-007 call sites use internally computed dates; no exploitable path. Recommend JSDoc add in next maintenance.
+None.
 
 ## Required Fixes
 
@@ -81,9 +52,8 @@ None.
 
 ## Accepted Residual Risks
 
-- Same 7 carry-forward items from REQ-006.
-- `@playwright/test` devDep adds ~277 MB Chromium binaries in dev only; not in production bundle. Accepted.
+- Unvalidated `date` string shape (L-1): acceptable. No HTML injection path exists due to React JSX text escaping. Caller contract documents ISO `'YYYY-MM-DD'` in JSDoc and the props interface. If stronger guarantees are required in future, a branded type (`ISODate`) can be introduced project-wide.
+- Missing lockfile for audit (L-2): pre-existing project gap, not in scope of this REQ.
 
 ## Verdict
-
 PASS

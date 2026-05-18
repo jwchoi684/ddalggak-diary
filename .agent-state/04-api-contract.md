@@ -1,280 +1,389 @@
-# API Contract — REQ-007
+# API / Interface Contract — REQ-008
 
-## Scope
+## Summary
 
-Internal TypeScript module contracts for the main calendar screen. No HTTP endpoints, RPC, queues, or external integrations. Covers:
-- Route `/` — behavior change from placeholder to live screen
-- `src/lib/storage/useDiaries.ts` — new React hook
-- `src/app/_components/CalendarScreen.tsx` — new composite screen (no props)
-- `src/app/_components/CalendarHeader.tsx` — new sub-component
-- `src/app/_components/CalendarGrid.tsx` — new sub-component
-- `src/app/_components/CalendarDayCell.tsx` — new leaf component
+REQ-008 introduces `MoodPickerSheet`, a single composite React client component that presents a bottom-sheet modal for selecting one of the 10 fixed moods. The component is purely a UI boundary: it emits callbacks upward and has no side effects on storage, routing, or navigation. Its public API is a TypeScript props interface. There are no HTTP endpoints, RPC methods, GraphQL operations, queue messages, or WebSocket events involved. The contract is entirely an internal function/component signature contract.
 
 ---
 
-## Route Contract for `/`
+## Contract Type
 
-| Property | Value |
-|---|---|
-| Path | `/` |
-| Method | GET (page navigation) |
-| Auth | None (localStorage only) |
-| SSR behavior | Server returns empty calendar shell (no MoodIcons). MoodIcons appear after first client effect. |
-| Previously | 7-line placeholder stub |
-| Now | Full calendar screen with 7-column grid, header, FAB |
+**Internal component props interface** — React component exported from `src/design-system/MoodPickerSheet.tsx`.
 
-`src/app/page.tsx` becomes thin `"use client"` boundary that renders `<CalendarScreen />`.
+Relevant boundary types from the checklist:
+- Internal function signature (React component + `MoodPickerSheetProps`)
+- Shared type/schema (`MoodPickerSheetProps` consumed by REQ-009 editor)
+- Frontend API client (the import path callers must use)
 
 ---
 
-## Public Exports per File
+## Request / Input
 
-| File | Export | Kind |
-|---|---|---|
-| `src/lib/storage/useDiaries.ts` | `useDiaries` | named function (hook) |
-| `src/app/_components/CalendarScreen.tsx` | `CalendarScreen` | named function component |
-| `src/app/_components/CalendarHeader.tsx` | `CalendarHeader` | named function component |
-| `src/app/_components/CalendarGrid.tsx` | `CalendarGrid` | named function component |
-| `src/app/_components/CalendarDayCell.tsx` | `CalendarDayCell` | named const (`React.memo`-wrapped) |
+### 1. Public Exports
 
-No barrel file is created or modified.
-
----
-
-## Per-Module Detail
-
-### `useDiaries` hook
-
+**Import path (canonical, mandatory):**
 ```ts
-// React hook — client-only. Direct import only;
-// NOT re-exported from @/lib/storage/index.ts (that barrel is SSR-safe).
-"use client";
-
-import { useEffect, useState } from 'react';
-import { readDiaries, type DiaryEntry } from '@/lib/storage';
-
-/**
- * Reads all diary entries from localStorage once on mount.
- *
- * Returns `isReady: false` on initial SSR/hydration render so callers can
- * suppress hydration-mismatch content. Transitions to `isReady: true`
- * synchronously after first effect.
- *
- * Never throws. If localStorage unavailable, `readDiaries()` returns [] and
- * `isReady` still becomes true.
- *
- * Always import via: import { useDiaries } from '@/lib/storage/useDiaries'
- */
-export function useDiaries(): { entries: DiaryEntry[]; isReady: boolean }
+import { MoodPickerSheet, type MoodPickerSheetProps } from '@/design-system/MoodPickerSheet';
 ```
 
-**Caller invariants:**
-- `entries` is stable array reference after `isReady=true`. Doesn't change between renders unless a write triggers re-read (REQ-009+).
-- `isReady` transitions exactly once: `false → true`. Never reverts.
-- Empty dependency `[]` — fires once per mount.
-- Callers must gate MoodIcon rendering on `isReady`.
-
----
-
-### `CalendarScreen` component
-
+`MoodId` required at the call site comes from the storage barrel, not from this module:
 ```ts
-"use client";
-
-/**
- * Root screen component for `/`.
- * Owns: visible-month state, today, diary loading, swipe, navigation callbacks.
- * Renders: CalendarHeader + (when isReady) CalendarGrid + FAB.
- * Consumed only by src/app/page.tsx.
- */
-export function CalendarScreen(): JSX.Element
+import type { MoodId } from '@/lib/storage';
 ```
 
-**Behavior contract:**
-- Visible month initialized to user's local current month.
-- `today` derived per render via `new Date().toLocaleDateString('sv')` → YYYY-MM-DD.
-- Calls `useDiaries()`; builds `Map<string, DiaryEntry>` via `useMemo([entries])`.
-- Suppresses `CalendarGrid` while `!isReady` (hydration safety).
-- `onCellTap(date)` → `router.push(Routes.diary(date))`. No distinction empty/filled — editor handles auto-open (REQ-008/009).
-- `onFAB()` → `router.push(Routes.diary(today))`.
-- Month nav: `prevMonth` / `nextMonth` use `new Date(year, month ± 1, 1)`.
-- Swipe: pointer events on container; horizontal delta > 40px → month ±1. Vertical scroll unaffected.
-- Stabilizes `onCellTap` + `onFAB` with `useCallback` for `React.memo` effectiveness.
-- No props; no ref forward.
+**Exported identifiers:**
+- `MoodPickerSheet` — named function export (React component), `'use client'` boundary
+- `MoodPickerSheetProps` — named type export (interface)
+
+**Not exported** (private to the file):
+- `formatSheetDate` — module-level date formatter
+- `CloseIcon` — module-level SVG constant
+- `MoodPickerTabs` — inner tab-strip function (may be extracted to `src/design-system/MoodPickerTabs.tsx` if file exceeds 110 lines, but remains non-exported from the public barrel unless a second consumer appears)
 
 ---
 
-### `CalendarHeader` component
+### 2. Props Interface (Exact TypeScript Signature)
 
 ```ts
-"use client";
+import type { MoodId } from '@/lib/storage';
 
-export interface CalendarHeaderProps {
-  /** Full year of visible month (e.g. 2026). Received but not rendered in MVP. */
-  year: number;
-  /** 0-based month (0=January…11=December). Rendered as `{month+1}월`. */
-  month: number;
-  /** ‹ button handler. */
-  onPrev: () => void;
-  /** › button handler. */
-  onNext: () => void;
-  /** 검색 IconButton handler. */
-  onSearch: () => void;
-  /** 통계 IconButton handler. */
-  onStats: () => void;
-  /** 리스트 IconButton handler. */
-  onList: () => void;
-}
+export interface MoodPickerSheetProps {
+  /** Controlled open state. When false the sheet slides down; component stays mounted. */
+  open: boolean;
 
-/**
- * Header bar for calendar screen.
- * Left: ‹ + "{month+1}월" (text-3xl font-bold) + ›
- * Right: 3 IconButtons (검색, 통계, 리스트).
- * Arrows are plain <button> (not IconButton — distinguishes from circular icons).
- * Icon SVGs inline at top of file. All targets ≥ 44px.
- */
-export function CalendarHeader(props: CalendarHeaderProps): JSX.Element
-```
-
-**Invariants:** `month` 0–11 (caller validates); component is pure (no useRouter); all callbacks no-arg, return ignored.
-
----
-
-### `CalendarGrid` component
-
-```ts
-import type { DiaryEntry } from '@/lib/storage';
-
-export interface CalendarGridProps {
-  /** Full year (e.g. 2026). Used for date math, not displayed. */
-  year: number;
-  /** 0-based month (0=January…11=December). */
-  month: number;
   /**
-   * Lookup map of diary entries keyed by "YYYY-MM-DD".
-   * Built by caller via useMemo for O(1) per-cell lookup.
-   * May be empty.
+   * Calendar date for the entry being acted on.
+   * Format: ISO 8601 'YYYY-MM-DD' (e.g. '2026-05-17').
+   * Parsed in local timezone via `new Date(date + 'T00:00:00')`.
+   * Rendered in the sheet header as 'YYYY.MM.DD 요일' (Korean single-char weekday).
    */
-  diaryByDate: Map<string, DiaryEntry>;
-  /** Today's date "YYYY-MM-DD" (local TZ). */
-  today: string;
-  /** Called when any in-month cell tapped. */
-  onCellTap: (date: string) => void;
-}
-
-/**
- * Pure 7-column monthly grid.
- * Renders 일·월·화·수·목·금·토 weekday header (Sunday-first) + 7×N day grid.
- * Out-of-month leading/trailing slots are non-interactive empty <div>.
- *
- * Date math (no external library):
- *   firstDay = new Date(year, month, 1)
- *   startOffset = firstDay.getDay()  // 0=Sun…6=Sat
- *   lastDate = new Date(year, month + 1, 0).getDate()
- * Cells: [null × startOffset] + [1..lastDate] + trailing nulls to multiple of 7.
- *
- * dateKey: `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`
- *
- * No "use client" needed — rendered inside client subtree.
- */
-export function CalendarGrid(props: CalendarGridProps): JSX.Element
-```
-
-**Invariants:** `diaryByDate` keys YYYY-MM-DD; out-of-month entries ignored silently; `onCellTap` never called for null slots; component is stateless.
-
----
-
-### `CalendarDayCell` component
-
-```ts
-import type { DiaryEntry } from '@/lib/storage';
-
-export interface CalendarDayCellProps {
-  /** YYYY-MM-DD. Passed verbatim to onTap. Used as aria-label base. */
   date: string;
-  /**
-   * Entry for this date if exists.
-   * Present: render MoodIcon(id=entry.mood, size=32).
-   * Absent: render grey numeral extracted from date.
-   */
-  entry?: DiaryEntry;
-  /**
-   * Today emphasis:
-   * - entry present: 4px peach dot below MoodIcon
-   * - entry absent: font-bold text-peach numeral instead of text-cell-empty
-   */
-  isToday: boolean;
-  /** Called when tapped. Fires regardless of entry presence. */
-  onTap: (date: string) => void;
-}
 
-/**
- * Single day cell. React.memo-wrapped — re-renders only when props change.
- * Requires callers to stabilize onTap with useCallback for memo effectiveness.
- * Hot path: up to 31 cells per month change.
- *
- * Touch target: <button> with min-h-[44px].
- * aria-label: "{date}" or "{date} 일기 있음" based on entry.
- */
-export const CalendarDayCell: React.MemoExoticComponent<
-  (props: CalendarDayCellProps) => JSX.Element
->
+  /**
+   * The currently selected mood to highlight.
+   * Required when mode === 'change'; omitted (undefined) when mode === 'initial'.
+   * When provided, the matching mood cell receives a peach ring + peach-tint background.
+   */
+  selectedMoodId?: MoodId;
+
+  /**
+   * Entry mode controlling close-callback dispatch.
+   * 'initial' — sheet was auto-opened because the entry has no mood yet;
+   *             closing without selecting must signal the editor to step back.
+   * 'change'  — user re-tapped the mood icon to swap an existing mood;
+   *             closing without selecting simply dismisses the sheet.
+   */
+  mode: 'initial' | 'change';
+
+  /**
+   * Called when the user taps any mood cell.
+   * Argument: the MoodId literal of the tapped cell (one of the 10 fixed values).
+   * The component also calls onClose() immediately after this callback.
+   * onCancelInitial is NEVER called on a mood tap, even in mode='initial'.
+   */
+  onSelect: (moodId: MoodId) => void;
+
+  /**
+   * Called whenever the sheet closes — via X button, backdrop click, or Escape key.
+   * Always fires as the LAST callback in the close sequence.
+   * Also fires after onSelect (mood commit path).
+   */
+  onClose: () => void;
+
+  /**
+   * Called when mode === 'initial' AND the sheet is closed WITHOUT a mood selection.
+   * Fires BEFORE onClose() in the close sequence.
+   * Optional: safe to omit when mode === 'change' (the component treats it as a no-op).
+   * Must NOT be called on a mood tap.
+   */
+  onCancelInitial?: () => void;
+}
 ```
 
-**Invariants:** `date` must be valid YYYY-MM-DD; `onTap` called with verbatim `date` prop; `React.memo` comparison shallow — callers must not construct new `entry` object per render; `isToday` derived in parent.
-
 ---
 
-## Caller Invariants (Cross-Cutting)
+## Response / Output
 
-1. **No direct localStorage access.** Only via `useDiaries() → readDiaries()`.
-2. **All navigation via `Routes.*`.** Raw path strings forbidden.
-3. **Token discipline.** Grey empty cell = `text-cell-empty` (→ `--color-cell-empty: #C8C8C8`). Today = `text-peach`/`bg-peach`. No hardcoded hex.
-4. **No competing width constraint.** No `max-w-*` or `w-full` override of layout 420px.
-5. **Korean labels.** Weekdays, month, aria-label, FAB label all Korean.
-6. **Callback stabilization.** `CalendarScreen` must `useCallback` `onCellTap`/`onFAB` so `React.memo` works.
+`MoodPickerSheet` renders no return value beyond JSX. Its observable outputs are exclusively callback invocations and rendered DOM state.
 
----
+### Rendered DOM Structure (Logical)
 
-## Error Contract Summary
+```
+<dialog>                        ← BottomSheet's <dialog> (showModal/close controlled)
+  [grip handle]                 ← BottomSheet internal; always present
+  <div>                         ← BottomSheet's inner content wrapper
+    <div>                       ← Header row
+      <div>                     ← Date + title column
+        <p>YYYY.MM.DD 요일</p>
+        <h2>오늘은 어떤 하루였나요?</h2>
+      </div>
+      <IconButton label="닫기"/> ← X close button (44×44)
+    </div>
+    <MoodPickerTabs/>           ← Two-row tab strip
+    <div class="grid-cols-3">  ← 10 mood cells
+      <button aria-label={mood.label}> × 10
+        <MoodIcon size={72}/>
+        <span>{mood.label}</span>
+      </button>
+    </div>
+    <Toast/>                    ← In-sheet toast, last child
+  </div>
+</dialog>
+```
 
-| Scenario | Behavior |
+### Callback Dispatch Table
+
+| User action | Callbacks fired (in order) |
 |---|---|
-| `readDiaries()` returns `[]` | `useDiaries` returns `{ entries: [], isReady: true }`. Grid empty. No error. |
-| `useDiaries` effect exception | Propagates to React error boundary. No special handling. |
-| Cell tapped no entry | `onTap(date)` fires. Routing proceeds. Editor/picker is REQ-009 concern. |
-| `Routes.diary(date)` valid YYYY-MM-DD | Always returns valid path. |
-| `router.push` failure | Next.js internal. |
-| `month` outside 0–11 | Undefined; JS Date wraps. Caller must validate. |
+| Tap mood cell | `onSelect(moodId)` → `onClose()` |
+| Tap X button, `mode='initial'` | `onCancelInitial?.()` → `onClose()` |
+| Tap X button, `mode='change'` | `onClose()` |
+| Backdrop click, `mode='initial'` | `onCancelInitial?.()` → `onClose()` |
+| Backdrop click, `mode='change'` | `onClose()` |
+| Escape key, `mode='initial'` | `onCancelInitial?.()` → `onClose()` |
+| Escape key, `mode='change'` | `onClose()` |
+| Tap inactive tab ("테마" or "일상") | In-sheet `Toast('곧 만나요!')` shown; no prop callbacks |
+
+All close paths (X, backdrop, Escape) funnel through a single internal `handleCancel()` that branches on `mode`. The mood-tap path calls `onSelect` then `onClose` directly and never reaches `handleCancel`.
 
 ---
 
-## Import Path Discipline
+## Validation Rules
 
-| What | Correct path | Forbidden |
-|---|---|---|
-| `useDiaries` hook | `'@/lib/storage/useDiaries'` | barrel (`'@/lib/storage'`) |
-| Types (`DiaryEntry`, `MoodId`) | `'@/lib/storage'` | sub-modules |
-| `Routes` | `'@/lib/navigation'` | hardcoded strings |
-| `IconButton`, `FAB` | `'@/design-system/IconButton'` etc. (per-file, no barrel) | inline reimplementation |
-| `MoodIcon` | `'@/design-system/MoodIcon'` | inline emoji |
-| Sub-components | direct `'./CalendarHeader'` etc. | re-exported |
+### Date Format
+
+- `date` MUST be an ISO 8601 date string in the form `'YYYY-MM-DD'`.
+- `date` MUST be a valid calendar date (e.g. `'2026-05-17'`, not `'2026-13-01'`).
+- `date` MUST NOT include a time component or timezone suffix (e.g. `'2026-05-17T00:00:00Z'` is invalid input).
+- The component does not throw on invalid dates but renders a malformed header string — callers are responsible for passing valid ISO dates.
+
+**Date rendering example:**
+
+Input `date = '2026-05-17'` (Sunday) renders header label:
+```
+2026.05.17 일
+```
+
+Input `date = '2026-05-18'` (Monday) renders:
+```
+2026.05.18 월
+```
+
+The dot-separated date is derived by `date.replace(/-/g, '.')`. The weekday is derived via `Intl.DateTimeFormat('ko-KR', { weekday: 'short' }).format(new Date(date + 'T00:00:00'))` — local timezone.
+
+### MoodId Values
+
+Valid `MoodId` literals (the complete set — no other values are accepted by TypeScript):
+```
+'joy' | 'love' | 'excited' | 'calm' | 'grateful' |
+'sad' | 'angry' | 'anxious' | 'tired' | 'embarrassed'
+```
+
+`selectedMoodId`, when provided, must be one of these 10 literals.
+
+### Mode Constraints
+
+- `mode` accepts only `'initial'` or `'change'`. TypeScript enforces this.
+- `selectedMoodId` should be `undefined` when `mode === 'initial'` (no existing mood to highlight).
+- `selectedMoodId` should be a valid `MoodId` when `mode === 'change'` (existing mood to indicate).
 
 ---
 
-## Out of Scope
+## Error Handling
 
-| Item | Owner |
+There are no runtime error states defined for this component. The component has no async operations, no network calls, and no storage access. TypeScript strict mode catches invalid prop types at compile time.
+
+**Edge cases handled silently:**
+- `selectedMoodId` provided with `mode === 'initial'` — component renders the highlight without error; this is a caller mistake but not guarded at runtime.
+- `onCancelInitial` omitted with `mode === 'initial'` — the optional chaining `onCancelInitial?.()` makes this a no-op; no error thrown.
+- `open` toggled rapidly — `BottomSheet` handles `showModal`/`close` sequencing internally via `useDialogControl`.
+
+---
+
+## Auth / Permission Rules
+
+None. `MoodPickerSheet` is a pure UI component with no authentication, authorization, or permission checks.
+
+---
+
+## Backward Compatibility
+
+`MoodPickerSheet` is a **net-new export**. No existing file is modified by REQ-008. There are no existing callers; REQ-009 will be the first consumer.
+
+Future compatibility notes:
+- The `mode` prop is an extensible string union — a future `'view'` mode (read-only past entry) would be additive and backward-compatible.
+- The `onCancelInitial` callback is optional by design so that callers in `'change'` mode are not forced to supply a no-op.
+- `MoodPickerTabs` (if eventually extracted) must remain unexported until a second consumer emerges; promoting it to a public design-system primitive is a non-breaking addition.
+- The `date` prop format (`'YYYY-MM-DD'`) matches `DiaryEntry.date` — callers pass the entry's date directly without transformation.
+
+---
+
+## Examples
+
+### Example 1 — `mode='initial'` (new entry, auto-opened by editor)
+
+```tsx
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { MoodPickerSheet } from '@/design-system/MoodPickerSheet';
+import type { MoodId } from '@/lib/storage';
+
+export function NewEntryEditor({ date }: { date: string }) {
+  const router = useRouter();
+  const [moodSheetOpen, setMoodSheetOpen] = useState(true); // auto-open
+  const [selectedMood, setSelectedMood] = useState<MoodId | undefined>();
+
+  function handleMoodSelect(moodId: MoodId) {
+    setSelectedMood(moodId);
+    // onClose fires immediately after; editor now shows body input
+  }
+
+  function handleMoodSheetClose() {
+    setMoodSheetOpen(false);
+  }
+
+  function handleCancelInitial() {
+    // No mood chosen — navigate back to calendar
+    router.back();
+  }
+
+  return (
+    <>
+      {/* Editor body (rendered behind sheet when open) */}
+      <MoodPickerSheet
+        open={moodSheetOpen}
+        date={date}
+        mode="initial"
+        onSelect={handleMoodSelect}
+        onClose={handleMoodSheetClose}
+        onCancelInitial={handleCancelInitial}
+      />
+    </>
+  );
+}
+```
+
+### Example 2 — `mode='change'` (user re-taps mood to change it)
+
+```tsx
+import { MoodPickerSheet } from '@/design-system/MoodPickerSheet';
+import type { MoodId } from '@/lib/storage';
+
+interface EditorMoodChangeProps {
+  date: string;
+  currentMood: MoodId;
+  open: boolean;
+  onClose: () => void;
+  onMoodChanged: (moodId: MoodId) => void;
+}
+
+export function EditorMoodChange({
+  date, currentMood, open, onClose, onMoodChanged,
+}: EditorMoodChangeProps) {
+  return (
+    <MoodPickerSheet
+      open={open}
+      date={date}
+      mode="change"
+      selectedMoodId={currentMood}
+      onSelect={onMoodChanged}
+      onClose={onClose}
+      // onCancelInitial omitted — not needed in 'change' mode
+    />
+  );
+}
+```
+
+---
+
+## Caller Invariants
+
+Callers (REQ-009's editor and any future consumer) must observe all of the following:
+
+1. **Single component, not two.** Both trigger paths (auto-open on new entry, re-tap on existing entry) must use the same `MoodPickerSheet` component and differ only in props. Splitting into two separate components violates PRD §4.2.1.
+
+2. **`selectedMoodId` is meaningful only in `mode='change'`.** When `mode='initial'` callers must omit `selectedMoodId` (pass `undefined` or omit the prop). Passing a value in `'initial'` mode produces no runtime error but is semantically incorrect.
+
+3. **`onCancelInitial` must be provided in `mode='initial'`** when the caller needs to navigate back or revert state on cancel. Omitting it with `mode='initial'` is syntactically allowed (optional prop) but results in a silent no-op cancel — the caller's UI may be left in an inconsistent state.
+
+4. **`onCancelInitial` must be omitted (or `undefined`) in `mode='change'`.** The prop is optional; callers in `'change'` mode should not pass it to avoid confusing code reading. Passing it does not cause a bug (the component never calls it in `'change'` mode) but signals intent incorrectly.
+
+5. **`onClose` must always be provided.** It is not optional. The caller is responsible for setting `open` to `false` (or unmounting) inside its `onClose` implementation; the component itself does not manage `open` state.
+
+6. **Do not call `router.back()` inside `onSelect`.** Mood selection is a commit, not a cancel. Navigation belongs in `onCancelInitial` (for the no-mood cancel path) and is REQ-009's responsibility, not this component's.
+
+7. **`date` must be a valid ISO `'YYYY-MM-DD'` string.** Do not pass a `Date` object, a display string (e.g. `'2026.05.17'`), or a datetime string with time or timezone components. Pass the `DiaryEntry.date` field directly.
+
+8. **Do not add `disabled` to inactive tab buttons.** The contract requires inactive tabs to remain pointer-event-capable so that the "곧 만나요!" Toast fires. This constraint is internal to the component but callers must not attempt to override tab state via prop (no such prop is defined).
+
+9. **Do not pass non-`MoodId` strings as `selectedMoodId`.** TypeScript enforces this, but callers using type assertions (`as MoodId`) must ensure the value is one of the 10 literal members. An unrecognized ID causes no highlight to render and no error — the behavior is silently incorrect.
+
+10. **`open` is controlled state managed by the caller.** The component does not manage its own open state. The caller must set `open={false}` in its `onClose` handler; failing to do so leaves the sheet permanently visible.
+
+11. **`onSelect` must not block or throw.** The component calls `onClose()` synchronously after `onSelect(moodId)`. If `onSelect` throws, `onClose()` is not reached and the sheet stays open. Callers should handle errors internally.
+
+12. **Do not destructure `MoodPickerSheetProps` into two separate prop objects.** The component's props are a single interface; spread-merging two objects to produce props is fragile when `mode` and `onCancelInitial` are in different object literals.
+
+---
+
+## Implementation Notes for Backend
+
+None. There is no backend involvement. No API routes, server actions, database reads/writes, or external service calls are associated with `MoodPickerSheet`.
+
+---
+
+## Implementation Notes for Frontend
+
+### File location
+
+`src/design-system/MoodPickerSheet.tsx` — registered in the design system on first appearance per CLAUDE.md's reuse rules, even though REQ-009 is the only known caller today.
+
+### Dependency resolution
+
+All imports are already in place from prior REQs:
+
+| Import | Source |
 |---|---|
-| Mood picker auto-open on empty cell | REQ-008 / REQ-009 |
-| Editor form, save, field rendering | REQ-009 |
-| Bottom photo strip | v2 |
-| Month/year picker modal | P1 |
-| Left-side header icons (settings, archive) | v2 |
-| Search/list/stats/chat screen content | REQ-013~018 |
-| Skeleton during `!isReady` | Not MVP |
-| Re-read entries after write (reactive store) | REQ-009+ |
-| Landscape mode | MVP-out |
+| `type MoodId` | `@/lib/storage` (barrel re-exports from `src/lib/storage/types.ts`) |
+| `MOODS` | `@/design-system/moods` |
+| `BottomSheet` | `@/design-system/BottomSheet` |
+| `Toast` | `@/design-system/Toast` |
+| `useToast` | `@/design-system/useToast` |
+| `IconButton` | `@/design-system/IconButton` |
+| `MoodIcon` | `@/design-system/MoodIcon` |
+
+### Critical implementation details
+
+- **`"use client"` directive** — first line of file. Required; component uses `useState` (via `useToast`), `onClick` handlers, and `useDialogControl` chain.
+- **`new Date(date + 'T00:00:00')`** — always append local-time sentinel; never `new Date(date)` (UTC midnight bug).
+- **Toast placement** — `<Toast>` must be the last child in the fragment passed to `<BottomSheet>`. Being inside the `<dialog>` DOM subtree ensures it appears above the sheet in the top-layer stacking context. Pass `className="!bottom-6 left-1/2 -translate-x-1/2"` to override the component's default `fixed bottom-24` positioning for in-sheet use.
+- **Inactive tab pointer events** — do NOT set `disabled` or `pointer-events-none` on "테마" / "일상" buttons. They must fire `onClick` to trigger the toast.
+- **Selected mood highlight** — `ring-2 ring-peach bg-peach-light/30` on the matching cell. Use only peach tokens, never the mood's own `color` field (achromatic UI rule).
+- **MOODS iteration** — render cells via `MOODS.map(mood => ...)` in array order (joy → embarrassed). Never hardcode emoji, labels, or IDs locally in this file.
+- **Tab strip** — both rows are stateless in v1. Active styling is static CSS. No `useState` for tab selection. This is intentional; v2 will add state when "테마" and "일상" become active.
+- **`handleCancel`** — single internal function; all three close paths (X button `onClick`, backdrop via `BottomSheet.onClose`, Escape via `BottomSheet.onClose`) must invoke it. Mood tap must bypass it entirely.
+
+### Test file
+
+`src/design-system/__tests__/MoodPickerSheet.test.tsx`
+
+Required test setup:
+```ts
+// @vitest-environment happy-dom
+
+beforeEach(() => {
+  HTMLDialogElement.prototype.showModal = vi.fn();
+  HTMLDialogElement.prototype.close = vi.fn();
+  vi.useFakeTimers();
+});
+
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
+```
+
+Minimum 10 test cases as specified in the technical design (open/close, header text, mood grid count, mood tap callbacks, X-button callbacks for both modes, inactive tab toast, selected mood highlight classes, source-guard `"use client"`).
 
 ---
 

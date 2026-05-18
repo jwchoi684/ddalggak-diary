@@ -1,142 +1,105 @@
-# E2E Report — REQ-007
+# E2E Report — REQ-008: 무드 선택 바텀시트 모달
 
 ## Summary
 
-1 spec, 1 test case. Independently re-run against the live dev server. 1/1 PASS (2.9s, Chromium). The spec covers the REQ-007 acceptance criterion "E2E: 권장 — 앱 열기 → 오늘 일기 쓰기 시작" using FAB as the trigger entry point.
+REQ-008 delivers `MoodPickerSheet`, a reusable client component. The component has no route, no page mount, and no caller in the current app. There is no user-reachable journey that surfaces the sheet today. Accordingly, REQ-008-specific E2E coverage is not applicable for this phase.
+
+The existing E2E baseline (`e2e/calendar.spec.ts`, established in REQ-007) was re-run to confirm it remains green. Result: 1/1 PASS (3.1s, Chromium).
 
 ---
 
-## Scenario Tested
+## Why E2E Is Not Applicable for REQ-008
 
-**Golden path: app open → calendar visible → FAB tap → `/diary/[today]`**
+`MoodPickerSheet` is a composite design-system component. It can only be reached through a screen that mounts it with a controlling `open` state. The first and only planned caller is the diary editor (REQ-009), which is not yet implemented.
 
-User opens the app at `/`, sees the current month label, confirms the `<main>` landmark is rendered, clicks the FAB labeled `오늘 일기 쓰기`, and lands on the today diary editor route (`/diary/YYYY-MM-DD`).
+The REQ-008 requirement card explicitly states the relevant E2E scenario as:
+
+> "캘린더 빈 셀 → 에디터 → 모달 자동 → 무드 선택 → 본문 작성으로 이어지는 흐름의 일부"
+
+This flow requires:
+
+1. A calendar cell tap that navigates to `/diary/[date]` — this works today (covered by the FAB test in `calendar.spec.ts`).
+2. The `/diary/[date]` editor screen to mount `MoodPickerSheet` and open it automatically — REQ-009 is not yet implemented, so the route renders a stub page that does not render the sheet.
+3. The user selecting a mood and being returned to the editor body — depends on step 2.
+
+Steps 2 and 3 are blocked by the absence of REQ-009. No browser automation can reach the sheet by clicking through the app as a real user. A Playwright test written today would immediately fail because `role=dialog` with mood buttons is never present in the DOM.
+
+Unit tests fully cover the component in isolation: all 10 specified test cases pass across 191/191 tests in the Vitest suite. The unit surface covers both `mode='initial'` and `mode='change'` close paths, all 10 mood tap callbacks, inactive-tab toast, selected-mood highlight, and the `"use client"` source guard.
 
 ---
 
-## Steps
+## Existing E2E Baseline Status
 
-1. Navigate to `http://localhost:3000/` (webServer boots via `npm run dev`).
-2. Assert `{month}월` text is visible (e.g. `5월` for May).
-3. Assert `role=main` is visible.
-4. Click `role=button, name="오늘 일기 쓰기"` (the FAB).
-5. Assert URL equals `/diary/2026-05-18` (today in YYYY-MM-DD local format).
+File: `e2e/calendar.spec.ts`
+Test: `캘린더 화면 진입 후 FAB 탭 시 오늘 일기 에디터로 이동`
+
+Command run:
+
+```
+npx playwright test --reporter=list
+```
+
+Output:
+
+```
+Running 1 test using 1 worker
+
+  ✓  1 [chromium] › e2e/calendar.spec.ts:3:5 › 캘린더 화면 진입 후 FAB 탭 시 오늘 일기 에디터로 이동 (3.1s)
+
+  1 passed (14.5s)
+```
+
+Exit code: 0. No regressions. The REQ-007 calendar baseline is unaffected by REQ-008 (which added only two new files with no modifications to existing source).
+
+The webServer (`npm run dev` on `http://localhost:3000`) started automatically via Playwright's `webServer` config (`reuseExistingServer: true`). Chromium binaries were already installed.
+
+---
+
+## Deferred E2E Coverage (handed to REQ-009)
+
+The following E2E case must be authored by REQ-009 once the editor screen and its `MoodPickerSheet` integration exist:
+
+**Scenario: 빈 날짜 셀 탭 → 무드 선택 → 에디터 본문 입력 대기**
+
+Steps:
+1. Navigate to `/` (calendar screen).
+2. Tap an empty calendar cell (a date without a diary entry).
+3. Assert navigation to `/diary/[date]`.
+4. Assert `role=dialog` is visible (mood picker sheet auto-opened).
+5. Assert 10 mood buttons are present (query by Korean mood labels, e.g. `기쁨`, `슬픔`).
+6. Click a mood button (e.g. `기쁨`).
+7. Assert the dialog is dismissed (no longer visible).
+8. Assert focus returns to the editor and the body textarea is available.
+
+Suggested file: `e2e/editor.spec.ts`
+
+Additional coverage to layer in with REQ-009:
+- `mode='change'` path: tap the mood icon in the editor header → sheet opens → select different mood → sheet closes, editor retains original mood until new one saved.
+- Dismiss-without-select: X button in `mode='initial'` → sheet closes → navigate back to calendar (editor leaves without saving).
 
 ---
 
 ## Test Files Added / Updated
 
-| File | Status | Cases |
-|---|---|---|
-| `e2e/calendar.spec.ts` | Added in REQ-007 | 1 |
-
-No changes were made during this E2E validation pass. The file is confirmed correct as-is.
+None. No E2E files were added or modified for REQ-008. `e2e/calendar.spec.ts` is unchanged.
 
 ---
 
 ## Commands Run
 
 ```
-npm run test:e2e
+npx playwright test --reporter=list
 ```
-
-Exit code: 0. Output: `1 passed (9.7s)`.
 
 ---
 
-## Spec Quality Verification
+## Results
 
-### Query strategy — no `data-testid`
-
-The spec uses exclusively role/text/aria-label queries:
-- `page.getByText(monthLabel)` — visible text match on `{month}월`
-- `page.getByRole('main')` — semantic landmark
-- `page.getByRole('button', { name: '오늘 일기 쓰기' })` — button ARIA name
-
-No `data-testid`, CSS selectors, or fragile XPath used. Aligns with Playwright best-practice accessible queries.
-
-### Date computation alignment
-
-The spec computes today using `new Date()` with plain JS:
-```ts
-const yyyy = today.getFullYear();
-const mm = String(today.getMonth() + 1).padStart(2, '0');
-const dd = String(today.getDate()).padStart(2, '0');
-// → `/diary/2026-05-18`
-```
-
-The production `CalendarScreen` derives `today` via:
-```ts
-new Date().toLocaleDateString('sv')  // → "YYYY-MM-DD" in local TZ
-```
-
-Both use the same local timezone. Both produce `YYYY-MM-DD` zero-padded format. The computed strings are identical as long as test runner and Next.js server share the same TZ — which they do (same machine process). No TZ skew risk.
-
-The month label comparison `${today.getMonth() + 1}월` in the spec matches what `CalendarHeader` renders from its 0-based `month` prop `(month + 1)월`. Consistent.
-
----
-
-## Acceptance Criterion Mapping
-
-| REQ-007 Criterion | Covered by E2E | Method |
+| Test | Status | Duration |
 |---|---|---|
-| 헤더 우측 3개 아이콘 렌더 | No (unit-covered in `CalendarHeader.test.tsx`) | — |
-| 월 표시 "{M}월" | Yes | `getByText(monthLabel)` |
-| `<main>` landmark visible | Yes | `getByRole('main')` |
-| FAB 탭 → 오늘 에디터 | Yes | click + `toHaveURL` |
-| 빈 날짜 탭 → 에디터 + 모달 자동 열림 | No (REQ-008/009 scope) | — |
-| 일기 있는 날짜 탭 → 에디터 (모달 없음) | No (REQ-009 scope) | — |
-| MoodIcon vs 숫자 셀 렌더 | No (unit-covered in `CalendarDayCell.test.tsx`, `CalendarGrid.test.tsx`) | — |
+| `캘린더 화면 진입 후 FAB 탭 시 오늘 일기 에디터로 이동` | PASS | 3.1s |
 
-The FAB trigger is a valid substitute for "오늘 셀 탭" (both call `onFAB`/`onCellTap(today)` → same route). FAB is the more reliable selector because it is always present at fixed position regardless of mood state on today's cell.
-
----
-
-## Not Covered in REQ-007 E2E (deferred)
-
-The following are intentionally excluded from this first E2E spec. Each has unit-test coverage and is tracked for future E2E expansion per REQ scope.
-
-| Journey | Deferred To | Unit Coverage |
-|---|---|---|
-| Cell tap on empty date → editor + mood picker modal auto-open | REQ-008 / REQ-009 | `CalendarScreen.test.tsx` FAB routing; modal flag in REQ-009 |
-| Cell tap on filled date → editor (no modal) | REQ-009 | `CalendarDayCell.test.tsx` onTap case |
-| Month nav prev/next arrows | REQ-007 unit | `CalendarScreen.test.tsx` prevMonth/nextMonth |
-| Month nav left/right swipe | REQ-007 unit | `CalendarScreen.test.tsx` pointer events |
-| Header icon routing to /list /stats /chat | REQ-013 / REQ-014 / REQ-015 | `CalendarHeader.test.tsx` (callback presence) |
-| Back-navigation state preservation (scroll, month, sort) | REQ-013+ | Deferred to those REQs |
-
----
-
-## E2E Test Bootstrap Health
-
-| Property | Value |
-|---|---|
-| Playwright version | `^1.44.0` (devDependencies) |
-| `testDir` | `./e2e` |
-| Browsers | Chromium only (Desktop Chrome) |
-| `webServer.command` | `npm run dev` |
-| `webServer.url` | `http://localhost:3000` |
-| `webServer.reuseExistingServer` | `true` (local), `false` (CI) |
-| `webServer.timeout` | 120 000ms |
-| Test timeout | 30 000ms |
-| CI retries | 1 |
-| Local retries | 0 |
-| `vitest.config.ts` excludes `e2e/**` | Confirmed (line 9) |
-| Chromium binaries installed | Confirmed (test ran without install step) |
-
----
-
-## Hand-off to Future REQs
-
-| Future REQ | Suggested E2E case to add |
-|---|---|
-| REQ-008 (mood picker) | `빈 날짜 셀 탭 → 무드 선택 모달 자동 열림` — assert `role=dialog` with mood buttons visible |
-| REQ-009 (editor) | `무드 선택 → 텍스트 입력 → 저장 → 캘린더 복귀 후 셀에 MoodIcon` — full write flow |
-| REQ-013 (list) | `헤더 리스트 아이콘 탭 → /list 화면 → 일기 카드 탭 → 에디터 → 뒤로 가기 → /list 스크롤 복원` |
-| REQ-014 (stats) | `헤더 통계 아이콘 탭 → /stats 화면` — chart visible |
-| REQ-015/018 (chat) | `AI chat 페르소나 선택 → 메시지 → cited diary chip 탭 → /diary/[date]` |
-
-All new specs should be added to `e2e/` alongside `calendar.spec.ts`. Filename convention: `{feature}.spec.ts`.
+Total: 1/1 passed (14.5s wall time including webServer startup).
 
 ---
 
@@ -148,9 +111,26 @@ None.
 
 ## Screenshots / Artifacts
 
-No screenshots captured. `trace: 'on-first-retry'` is configured — traces are generated automatically on CI failure. No failures occurred, so no traces were produced.
+No screenshots captured. `trace: 'on-first-retry'` is configured in `playwright.config.ts`; no failures occurred so no traces were produced.
+
+---
+
+## Not Tested
+
+| Journey | Reason | Deferred To |
+|---|---|---|
+| 빈 날짜 셀 → 에디터 → MoodPickerSheet 자동 열림 | REQ-009 (editor screen) not yet implemented | REQ-009 |
+| 무드 탭 → sheet 닫힘 → 에디터 복귀 | Same — requires editor caller | REQ-009 |
+| X 버튼 (initial mode) → sheet 닫힘 → 에디터 뒤로 이동 | Same | REQ-009 |
+| 기분 변경 경로 (change mode) | Same | REQ-009 |
+| 비활성 탭 탭 → "곧 만나요!" 토스트 표시 | Toast inside dialog; requires editor mount | REQ-009 |
+
+All of the above are covered at the unit level by `MoodPickerSheet.test.tsx` (191/191 tests pass).
 
 ---
 
 ## Verdict
-PASS
+
+PASS — not applicable
+
+REQ-008 E2E coverage is deferred to REQ-009 by design. The component has no reachable user journey today. The existing E2E baseline (`e2e/calendar.spec.ts`) passes without regressions.

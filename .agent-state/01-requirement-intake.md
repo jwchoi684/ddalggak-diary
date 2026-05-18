@@ -1,129 +1,92 @@
-# Requirement Intake — REQ-007
+# Requirement Intake — REQ-008
 
 ## Restatement
 
-REQ-007 converts the app entry screen (`src/app/page.tsx`) from a placeholder into the **main calendar screen**: a 7-column monthly grid showing `MoodIcon` (32px) on days that have entries and grey (`#C8C8C8`) numerals on days that do not. The header exposes three right-side `IconButton`s (검색→`/chat`, 통계→`/stats`, 리스트→`/list`); a charcoal `FAB` (✏) sits bottom-right and routes to today's editor. Tapping any in-month cell routes to `/diary/[date]`. Month navigation works via arrow controls and horizontal swipe. This is the **first interactive screen** in the codebase and therefore the first real consumer of REQ-002 storage reads, REQ-003 MoodIcon, REQ-005 primitives, and REQ-006 `Routes`.
+REQ-008 delivers `MoodPickerSheet`, a reusable bottom-sheet modal that lets the user pick one of the 10 fixed moods (PRD §3.4) for a given diary date. It is composed on top of REQ-005's `BottomSheet` primitive — not a new dialog implementation. The sheet has **two entry modes** that share the **same UI** and differ only in close behavior: `initial` (auto-opened by the editor on an empty entry — cancel must propagate up so the editor steps back to its previous screen) and `change` (user re-tapped the mood icon to swap — cancel just dismisses the sheet, keeping the existing mood). MVP exposes only the "기본 > 기분" category; the inactive top tab ("테마") and inactive sub-tab ("일상") render but show a "곧 만나요!" Toast on tap (v2 preview). REQ-008 is also the **first real consumer** of the REQ-005 `BottomSheet` primitive, so its build doubles as a smoke test for that primitive's API surface.
 
 ## In Scope
 
-- Convert `/` into a Client Component (`"use client"`) that owns the visible month and the loaded diary list.
-- Read entries via `readDiaries()` (REQ-002) inside `useEffect` so SSR returns the empty calendar shell with no hydration mismatch.
-- Render a 7×6 (max 42) grid for the visible month using **only days that fall inside the current month** (out-of-month cells render empty placeholders or are omitted — PRD §4.1.4 "이번 달 외 날짜는 미표시").
-- Render today's date with subtle emphasis (text-only, no background — PRD §4.1.4).
-- Render a header row with right-aligned IconButtons (🔍 검색, 📊 통계, 📋 리스트) wired through `Routes.chat / stats / list`.
-- Render a large "M월 ›" month label (left-aligned, 32–40pt) with adjacent ‹ › arrow affordances for prev/next month.
-- Implement horizontal swipe (touch) → month ±1.
-- Render an `FAB` (✏ pen icon) fixed bottom-right that routes to `Routes.diary(today)` where `today = "YYYY-MM-DD"` from the user's local timezone.
-- Tap on any in-month cell → `router.push(Routes.diary(cellDate))`. Empty vs filled cells route identically; the mood-picker auto-open is a downstream concern (REQ-008/009).
-- Bootstrap **Playwright** at the project level (config + first golden spec: open app → calendar visible → FAB → `/diary/[today]`).
-- Hook extracted: `useDiaries()` at `src/lib/storage/useDiaries.ts` that wraps `readDiaries` + `useState` + `useEffect` (justified below in Q5).
+- One new file: `MoodPickerSheet.tsx` exposing a single React component.
+- Composition over `BottomSheet` from REQ-005 (grip handle, slide-up, dim backdrop, Escape/backdrop close are all delegated — no re-implementation).
+- Header inside the sheet: date label "YYYY.MM.DD 요일" (Korean weekday) + title "오늘은 어떤 하루였나요?".
+- Two-level tab strip: top "기본 / 테마" + sub "기분 / 일상". Only "기본" + "기분" active; inactive tabs are visually muted and, when tapped, trigger a "곧 만나요!" Toast.
+- 3-column grid of all 10 moods from REQ-003 `MOODS` (in array order). Each cell = `MoodIcon size={72}` + Korean label below. Cell-to-cell gap 16–24px.
+- `mode: 'initial' | 'change'` prop branching the close-callback dispatch.
+- Caller-supplied callbacks: `onSelect(mood: MoodId)` (always), `onClose()` (always, fires for the `change`-mode cancel paths), `onCancelInitial()` (only fires for the `initial`-mode cancel paths).
+- Optional `selectedMoodId?: MoodId` to visually highlight the current pick when the sheet is opened in `change` mode.
+- Korean copy throughout; touch targets ≥ 44×44 (mood cells and tab buttons).
 
 ## Out of Scope (deferred to owner REQ)
 
-| Item | Deferred to | PRD reference |
-|---|---|---|
-| Mood picker bottom sheet | REQ-008 | §4.2 |
-| Editor content (form, save, fields) | REQ-009 | §4.3 |
-| Auto-opening the picker on empty cell tap | REQ-009 (editor owns its modal lifecycle) | §4.1.7 + §4.2.1 |
-| Bottom photo strip | v2 (not an MVP REQ) | §4.1.6 |
-| Month / year picker modal | P1 (not an MVP REQ) | §4.1.3 |
-| Landscape mode handling | MVP-out | §10.4 |
-| Left-side header icons (⚙ settings, 📦 archive) | v2 | §4.1.2 |
-| Dark mode / theme switching | v2 | §13.2 |
-| Multi-month preloading / virtualization | Not needed at MVP scale | — |
-| Search / list / stats / chat screen *content* | REQ-013 / REQ-014 / REQ-015–018 | — |
+- Editor integration / the auto-open-on-empty-entry trigger — REQ-009.
+- "테마" category content (seasonal mood packs) — v2, see PRD §3.4.1.
+- "일상" sub-category (activity/state stickers) — v2.
+- User-defined custom moods — not in PRD.
+- Mood-selection-driven LLM context, statistics, or chart wiring — owned by REQ-014/017.
+- Persistence of the picked mood into a `DiaryEntry` — REQ-009 owns the save flow; this REQ only emits `onSelect(mood)` upward.
+- Routing / `router.back()` calls — REQ-009 owns navigation; this REQ only emits `onCancelInitial()`.
+- New shared primitives in `src/design-system/` — REQ-005 already supplies BottomSheet, Toast, MoodIcon, useToast, useDialogControl.
 
 ## Invariants
 
-1. **Data access**: the calendar reads diaries **only** via `readDiaries()` from `@/lib/storage`. No direct `localStorage` access, no new storage abstraction.
-2. **Design-system reuse**: all interactive chrome composes existing primitives — `IconButton` and `FAB` (REQ-005), `MoodIcon` (REQ-003). No new SVG paths, no hardcoded emoji outside `MOODS`, no inline circular-button markup.
-3. **Routing**: every navigation goes through `Routes.*` (REQ-006). Raw string literals like `'/diary/...'` are forbidden in the calendar code.
-4. **Layout context**: the 420px max-width container is already provided by `layout.tsx` (REQ-001/006). The calendar must not introduce a competing width constraint.
-5. **SSR safety**: storage reads happen inside `useEffect`. The initial render must produce the empty-grid shell (no MoodIcons) so server HTML and first client paint match.
-6. **Out-of-month cells**: cells before the 1st of the month and after the last day are not displayed as numbers or mood icons (per §4.1.4). They occupy grid slots silently to preserve weekday alignment.
-7. **One screen per file → 100-line guideline**: the calendar is decomposed into `page.tsx` (thin boundary), `CalendarScreen`, `CalendarHeader`, `CalendarGrid`, and `CalendarDayCell` so no single file exceeds the soft cap.
-8. **Visual tokens**: today's emphasis, grey number color, cream background, header icon container — all sourced from existing CSS tokens (`text-charcoal`, `text-meta`, brand peach `#F5C896`, etc.). No new design tokens.
-9. **Locale**: month label, weekday header (일·월·화·수·목·금·토), and aria-labels are Korean.
-10. **Today determination**: derive `today` once per render using local timezone (`new Date()` formatted to `YYYY-MM-DD`), not UTC.
+1. **Composes REQ-005's `BottomSheet`** — no new `<dialog>`, no new slide animation, no new backdrop. `MoodPickerSheet` body is rendered inside `<BottomSheet>{...}</BottomSheet>`.
+2. **Single component, not two.** PRD §4.2.1 explicitly mandates the same modal for both trigger paths. The `mode` prop is the only differentiator; do not fork into `InitialMoodPickerSheet` + `ChangeMoodPickerSheet`.
+3. **Mood source of truth is REQ-003's `MOODS` array.** Do not hardcode emoji/label/color/ids locally; iterate `MOODS` to render the 10 cells in declared order.
+4. **Date header format**: `YYYY.MM.DD 요일` where 요일 ∈ {월, 화, 수, 목, 금, 토, 일}. Local timezone applies.
+5. **Title text**: "오늘은 어떤 하루였나요?" (no truncation, no variants).
+6. **Inactive tabs are tappable**: tapping "테마" or "일상" fires `Toast("곧 만나요!")` and does NOT change the active tab. Do not disable the element — it must still receive pointer events so the toast can fire.
+7. **Close-behavior dispatch**: every close path (grip drag down — handled by BottomSheet, backdrop click — handled by BottomSheet, explicit X — owned here) must funnel through a single internal `handleCancel()` that branches on `mode`. `initial` → calls `onCancelInitial?.()` then `onClose()`. `change` → calls `onClose()` only.
+8. **Item tap = commit + close**: tapping a mood cell calls `onSelect(moodId)` and then `onClose()`. It must NOT call `onCancelInitial()` even in `initial` mode (selection is not a cancel).
+9. **Toast must render inside the dialog DOM subtree**, per REQ-005's note that `<div>` cannot exceed `showModal()`'s top layer.
+10. **Touch targets ≥ 44×44**: each mood cell (including label region) and each tab pill meets this.
+11. **Achromatic UI; mood color from icons only.** Selected-cell highlight, if any, must come from peach (`#F5C896`) ring/background — never a custom mood-color background that would clash with the icon.
+12. **All user-facing text is Korean.**
 
 ## Open Questions and Recommended Defaults
 
-### Q1. Component file layout — monolithic or split?
+1. **Component file location** — `src/design-system/MoodPickerSheet.tsx` vs `src/app/_components/MoodPickerSheet.tsx`?
+   - **Recommend** `src/design-system/MoodPickerSheet.tsx`. It is a reusable composite consumed by the editor (REQ-009) and a likely candidate for re-use in any future "change mood in past entry" flow. Aligns with CLAUDE.md's "UI 컴포넌트 재사용 규칙" — register in design system on first appearance even when only one caller exists today.
 
-**Recommendation: split.** A single `page.tsx` will trivially exceed 100 lines once header + grid + swipe handler + state + effects coexist. Proposed split:
+2. **Props signature shape** — one `onCancel(mode)` callback vs explicit `onClose` + `onCancelInitial`?
+   - **Recommend** explicit two callbacks. Contract reads:
+     ```ts
+     interface MoodPickerSheetProps {
+       open: boolean;
+       date: string;                       // ISO 'YYYY-MM-DD'
+       mode: 'initial' | 'change';
+       selectedMoodId?: MoodId;            // highlight in 'change' mode
+       onSelect: (moodId: MoodId) => void;
+       onClose: () => void;                // always fires on close
+       onCancelInitial?: () => void;       // only fires when mode === 'initial' AND closed without selecting
+     }
+     ```
+     Explicit names make the call-site contract self-documenting and remove the caller's need to branch on a `mode` argument inside its handler.
 
-- `src/app/page.tsx` — thin `"use client"` boundary that renders `<CalendarScreen />`.
-- `src/app/_components/CalendarScreen.tsx` — owns visible-month state, today's date, diary load, swipe handler, navigation callbacks.
-- `src/app/_components/CalendarHeader.tsx` — right-side IconButton row + "M월 ›" label + prev/next arrows.
-- `src/app/_components/CalendarGrid.tsx` — pure grid renderer; accepts `{ year, month, diaryByDate, today, onCellTap }`.
-- `src/app/_components/CalendarDayCell.tsx` — single cell; wrapped in `React.memo`.
+3. **Toast scoping** — global vs per-instance?
+   - **Recommend** per-instance. Use REQ-005's `useToast()` inside `MoodPickerSheet`; render `<Toast>` as a child of the sheet body (which lives inside `<dialog>`), satisfying the z-index note in REQ-005. No new global toast queue.
 
-Total: 5 files, each comfortably under 100 lines.
+4. **Date-string formatting** — pull in `date-fns`/`dayjs` or hand-roll?
+   - **Recommend** hand-roll a 5-line helper using `Intl.DateTimeFormat('ko-KR', { weekday: 'short' })` for the Korean weekday and string slicing of the ISO `'YYYY-MM-DD'` input for the date portion. No new dependency; the formatter is local to MoodPickerSheet and can graduate to a shared util when REQ-009's editor needs the same format.
 
-### Q2. Where do `_components` live?
+5. **Tab styling** — new `Tabs` primitive in design system or inline Tailwind?
+   - **Recommend** inline Tailwind only. The tab pattern (charcoal underline on active, meta gray on inactive) is small and currently used in just one place. Promote to a `Tabs` primitive when a second consumer appears (per CLAUDE.md "UI 컴포넌트 재사용 규칙" step 3). No primitive in REQ-008.
 
-**Recommendation: `src/app/_components/`** (Next.js convention — the leading underscore tells the App Router this folder is *not* a route segment). This keeps screen-specific composites colocated with the route that owns them. Cross-screen composites that emerge later (e.g. a shared `Toolbar` once the list screen also wants header icons) graduate to `src/components/`.
+6. **Selected-mood highlight in `change` mode** — what visual?
+   - **Recommend** optional 2px peach (`#F5C896`) ring + subtle peach-tint background on the selected cell. PRD does not specify, but a visible "current pick" cue is necessary for the change path to feel correct. Falls back to plain rendering when `selectedMoodId` is undefined (i.e. always in `initial` mode).
 
-### Q3. Month state location — `useState` or URL search params?
-
-**Recommendation: `useState`** inside `CalendarScreen`. Month is transient navigation state with no deep-link, share, or refresh-stability requirement at MVP. URL search params (`?month=YYYY-MM`) add a `useSearchParams` dependency, force the route to be dynamic, and complicate the back-stack semantics already covered by REQ-006. If a "share this month" use case appears in v2, migrate then.
-
-### Q4. Swipe vs arrows for month navigation?
-
-**Recommendation: both.** Arrows (‹ ›) are keyboard- and mouse-accessible (desktop, screen readers) and serve as the visible affordance for the "›" call-out in PRD §4.1.3. Swipe is required on mobile per §4.1.7 ("좌우 스와이프"). Implement swipe with native `pointerdown`/`pointerup` deltas (no library); a horizontal delta > ~40px commits month ±1. No vertical scroll lock — the page itself does not scroll meaningfully at this point.
-
-### Q5. Extract a `useDiaries()` hook?
-
-**Recommendation: yes, create it now in REQ-007.** Justification:
-
-- Pattern (`useState<DiaryEntry[]>([]) + useEffect(() => setEntries(readDiaries()))`) is reused identically by REQ-009 (editor preload), REQ-013 (list), REQ-014 (stats). Deferring duplicates the boilerplate in four places and risks divergence on SSR-guard logic.
-- It is the cheapest possible hook: ~10 lines, zero external dependencies, returns `DiaryEntry[]`.
-- Location: `src/lib/storage/useDiaries.ts`. Re-exported from `@/lib/storage` only if downstream REQs prefer that import path — REQ-007 imports it directly.
-
-**Counter-argument considered**: defer to REQ-013 to avoid speculative generalization. Rejected because (a) the hook is so small that "generalize later" creates more churn than "extract now," and (b) the pattern is already concrete: REQ-009/013/014 each name diary loading as a known step. This is YAGNI-compliant — the second caller is in the next REQ.
-
-### Q6. FAB position conflict with calendar?
-
-**Recommendation: no change.** REQ-005's `FAB` defaults to `fixed bottom-6 right-6`. The calendar bottom area is intentionally empty (photo strip is v2). No layout collision, no className override needed.
-
-### Q7. Header layout — left side?
-
-**Recommendation: render only the right-side group (3 IconButtons) for MVP.** PRD §4.1.2 explicitly defers ⚙ settings and 📦 archive ("MVP는 좌측 아이콘 생략하거나 1개만"). Leaving the left empty matches the v0 build-order and avoids placeholder buttons that route nowhere.
-
-### Q8. Today's date highlight when an entry exists?
-
-**Recommendation: emphasize today identically in both cases, applied to whichever element occupies the cell.** If the cell shows a number, apply `font-bold text-peach` (`#F5C896` brand accent — already in CSS tokens). If the cell shows a MoodIcon, render a small 4px `bg-peach` dot beneath the icon (PRD §4.1.4 explicitly allows "작은 점"). This keeps the affordance "this is today" visible even when the mood occupies the number slot. Single brand color usage matches §1.6.2 ("primary `#F5C896` used only for selected/active emphasis").
-
-### Q9. MoodIcon size in cells?
-
-**Recommendation: 32.** PRD §4.1.4 specifies "~32px"; REQ-003's `MoodIcon` accepts arbitrary `size`. Pass `size={32}` literal. No new token needed (a single call site does not warrant a constant).
-
-### Q10. Playwright bootstrap scope?
-
-**Recommendation: bootstrap in REQ-007.** REQ-005 and REQ-006 forward-designated this REQ as the E2E entry point. Concrete scope:
-
-- Install `@playwright/test` as a devDependency.
-- Add `playwright.config.ts` at repo root with `testDir: 'e2e'`, base URL pointing at `http://localhost:3000`, Chromium-only for MVP.
-- Add an npm script `test:e2e` and (optionally) `test:e2e:ui`.
-- Write **one** golden spec at `e2e/calendar.spec.ts`: navigate to `/`, assert header IconButtons + month label visible, click FAB, assert URL becomes `/diary/<today>`. Subsequent REQs add their own specs to the same `e2e/` folder.
-
-Anything beyond this single spec (mocked diary fixture, swipe gesture coverage, header-icon routing matrix) belongs to REQ-007's own test plan (Phase 8), not its intake.
-
-### Q11. `React.memo` on `CalendarDayCell`?
-
-**Recommendation: yes.** A month renders up to 31 visible cells, and `CalendarScreen` re-renders on every month change. Cells take a stable date string + an optional `MoodId` + an `onTap` callback; if the callback is stabilized via `useCallback`, memoization is essentially free and prevents N re-renders on month transitions. Add a brief code comment naming the hot-path so future readers understand the wrapping is deliberate.
+7. **Explicit close (X) button** — present or rely on backdrop/grip?
+   - PRD §4.2.3 explicitly lists "명시적 닫기 X 버튼" as one of three close affordances. **Recommend** including a small `IconButton` (X) in the top-right of the sheet body. All three close paths (X tap, backdrop click, Escape key) funnel through the same `handleCancel()`.
 
 ## Dependency Check
 
-| Dep | Status (per `index.md`) | What REQ-007 consumes |
+| Dep | Status | Used for |
 |---|---|---|
-| REQ-002 | DONE | `readDiaries()`, `DiaryEntry`, `MoodId` types from `@/lib/storage` |
-| REQ-003 | DONE | `MoodIcon` component, `MOOD_MAP` (transitively via MoodIcon) |
-| REQ-005 | DONE | `IconButton`, `FAB` primitives from `@/design-system` |
-| REQ-006 | DONE | `Routes.calendar / diary / list / chat / stats` from `@/lib/navigation` |
-| REQ-001 | DONE | Next.js App Router scaffold, Tailwind tokens, 420px container, `src/app/layout.tsx` |
+| REQ-002 (`MoodId`, types) | DONE | Type import from `@/lib/storage` for the `onSelect` payload and `selectedMoodId` prop. |
+| REQ-003 (`MOODS`, `MoodIcon`) | DONE | Grid iteration source + 72px icon renderer. |
+| REQ-005 (`BottomSheet`, `Toast`, `useToast`, `useDialogControl`, `IconButton`) | DONE | `BottomSheet` for sheet shell, `Toast` + `useToast` for inactive-tab feedback, `IconButton` for the X close. |
+| REQ-001 (Option B scaffold: Next.js / Tailwind / `'use client'`) | DONE | Required for any new client component. |
 
-All upstream dependencies are merged. No blocking gaps. Out-of-scope screens (`/list`, `/stats`, `/chat`, `/diary/[date]`) exist as REQ-006 placeholder routes — they are valid navigation targets even though their content lands in later REQs.
+No forward dependency on REQ-009 (the editor); REQ-008 ships as a stand-alone reusable component with its props as the only integration surface.
 
 ## Verdict
 PASS

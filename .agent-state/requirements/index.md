@@ -26,7 +26,7 @@ PRD §8.3의 P2 항목(임베딩 RAG / PWA / 클라우드 동기화 / 알림 / s
 | REQ-005 | 디자인 시스템 프리미티브 | DONE | REQ-001 | Medium |
 | REQ-006 | history-stack 기반 네비게이션 셸 | DONE | REQ-001 | Medium |
 | REQ-007 | 메인 캘린더 화면 | DONE | REQ-002, REQ-003, REQ-005, REQ-006 | Medium |
-| REQ-008 | 무드 선택 바텀시트 모달 | TODO | REQ-002, REQ-003, REQ-005 | Low |
+| REQ-008 | 무드 선택 바텀시트 모달 | IN_PROGRESS | REQ-002, REQ-003, REQ-005 | Low |
 | REQ-009 | 일기 에디터 (단일 화면, 신규+편집 통합) | TODO | REQ-002, REQ-003, REQ-005, REQ-006, REQ-008 | High |
 | REQ-010 | 에디터 내 가로 캘린더 인라인 드롭다운 | TODO | REQ-002, REQ-003, REQ-005, REQ-009 | Medium |
 | REQ-011 | 사진 추가 / 카로젤 / 길게 누름 삭제 | TODO | REQ-002, REQ-009 | Medium-High |
