@@ -1,16 +1,9 @@
-# Test Report — REQ-015
+# Test Report — REQ-016
 
-## Commands Run
-- `npx vitest run` — 346/346 PASS (50 files), 24 new cases for REQ-015
-- `npx tsc --noEmit` — 0 errors
-- `npm run lint` — 0 warnings, 0 errors
-- `npm run test:e2e` — 8/8 PASS, no regression
-
-## New Test Coverage
-- `formatRelativeTime.test.ts` — 10 cases
-- `useConversations.test.ts` — 2 cases
-- `ConversationCard.test.tsx` — 6 cases
-- `page.test.tsx` — 6 cases
+- vitest: 350/350 pass (51 files)
+- tsc: 0 errors
+- lint: 0 errors
+- (E2E not re-run — no production code outside this new route; covered when REQ-017 lands)
 
 ## Verdict
 PASS

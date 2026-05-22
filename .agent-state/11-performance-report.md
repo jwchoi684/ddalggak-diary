@@ -1,6 +1,4 @@
-# Performance Review — REQ-015
-
-Bounded list of conversations. Sort O(n log n) over small n. `formatRelativeTime` pure function. No virtualization needed.
-
+# Performance — REQ-016
+14 cells, static grid. Trivial.
 ## Verdict
 PASS

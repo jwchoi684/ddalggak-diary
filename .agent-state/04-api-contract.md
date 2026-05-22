@@ -1,62 +1,33 @@
-# API Contract — REQ-015
-
-## Summary
-
-Internal client-side TypeScript interfaces. No HTTP, no new storage keys.
+# API Contract — REQ-016
 
 ## Interfaces
 
-### `formatRelativeTime(iso: string, now?: Date): string`
-Returns Korean relative time per thresholds (방금/X분 전/X시간 전/어제/X일 전/YYYY.M.D).
-
-### `useConversations(): { conversations: SearchConversation[]; isReady: boolean }`
-SSR-safe hook mirroring `useDiaries`. Read-only.
-
-### `ConversationCard` props
+### `PersonaCard` props
 ```ts
-{ conversation: SearchConversation; onTap: () => void; }
+{ persona: Persona; onSelect: (id: PersonaId) => void; }
 ```
 
-### `NewChatButton` props
-```ts
-{ onClick: () => void; }
-```
+### `page.tsx`
+- Route: `/chat/new`.
+- Reads: `PERSONAS` from `@/design-system/personas`.
+- Routing: `router.push('/chat/session?personaId=' + id)`, `router.back()`.
 
-### `ChatListHeader` props
-```ts
-{ onBack: () => void; }
-```
-
-## Storage Reads
-- `readConversations()` (read-only, no new keys).
-
-## Routing
-- `Routes.chat = '/chat'`.
-- Card tap → `/chat/${id}` (hardcoded; REQ-018 will own route).
-- New chat → `/chat/new` (hardcoded; REQ-016 will own route).
+## Storage
+Zero reads, zero writes.
 
 ## Korean Strings
-| Key | Text |
-|---|---|
-| Header title | `대화 기록` |
-| Back | `뒤로 가기` |
-| New chat | `➕  새 대화 시작` |
-| Empty | `아직 대화가 없어요. AI에게 일기에 대해 물어보세요` |
-| Loading | `불러오는 중…` |
-| Empty msg fallback | `(빈 대화)` |
+- Title: `어떤 톤으로 대화할까요?`
+- Close aria-label: `닫기`
+- Card aria-label: `{label} 페르소나로 시작`
 
 ## Caller Invariants
-1. `useConversations` called inside `"use client"`.
-2. Card tap uses `router.push('/chat/' + id)`.
-3. New chat button uses `router.push('/chat/new')`.
-4. `getPersona` from `@/design-system/personas`.
-5. Sort: ISO 8601 `localeCompare` DESC.
-6. First user message extraction (not stored `title`).
+1. All 14 personas rendered, no filtering.
+2. Selection routes to `/chat/session?personaId=` (REQ-017 owns).
+3. Close: `router.back()` (returns to /chat).
 
 ## Backward Compatibility
-- `Routes.chat` unchanged.
-- Stub at `/chat` replaced.
-- No localStorage schema change.
+- `/chat/new` placeholder route (404 previously) now resolves.
+- REQ-015's NewChatButton already routes here.
 
 ## Verdict
 PASS

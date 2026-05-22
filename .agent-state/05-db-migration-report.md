@@ -1,6 +1,6 @@
-# Data Model / Migration Report — REQ-015
+# DB / Migration — REQ-016
 
-Read-only screen. Zero writes, zero new keys. `SearchConversation` schema unchanged.
+Read-only persona master data. No storage changes.
 
 ## Verdict
 PASS — N/A

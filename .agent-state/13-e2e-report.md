@@ -1,6 +1,4 @@
-# E2E Report — REQ-015
-
-No E2E spec added (display-only screen; all paths covered by unit tests). 8/8 existing E2E specs still pass without regression.
-
+# E2E — REQ-016
+E2E deferred to REQ-017 (combined "새 대화 → 페르소나 → 세션" flow per spec).
 ## Verdict
 PASS

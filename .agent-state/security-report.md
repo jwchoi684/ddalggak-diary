@@ -1,6 +1,4 @@
-# Security Review — REQ-015
-
-Pure client-side read-only list screen. No dangerouslySetInnerHTML, no eval, no secrets, no new deps. Text rendered through React safely.
-
+# Security Review — REQ-016
+Display-only picker. No storage writes, no eval, no new deps.
 ## Verdict
 PASS

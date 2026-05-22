@@ -1,11 +1,3 @@
-# Git Safety — REQ-015
+# Git Safety — REQ-016
 
-## Branch
-`master`
-
-## Working Tree
-
-Only orchestrator status flips. Safe to proceed.
-
-## Verdict
-PASS
+Status flips only. PASS.

@@ -1,51 +1,33 @@
-# Requirement Intake — REQ-015
+# Requirement Intake — REQ-016
 
 ## Restatement
-REQ-015 builds the **AI 채팅 — 대화 리스트** screen (Mode A), the default landing view for the AI search feature. It shows a fixed "➕ 새 대화 시작" button at the top, followed by past `SearchConversation` cards sorted by `lastMessageAt` DESC. Each card displays persona emoji + label, a Korean relative time, and the first user message truncated to ~30 chars. An empty state replaces the list when no conversations exist. Route: `/chat`.
+Persona picker modal opened from REQ-015's "새 대화 시작" button. 2-column grid showing all 14 personas with emoji + label + description. Tap selects persona and routes to REQ-017 chat session. ✕ closes back to /chat.
 
 ## Scope IN
-- New `src/app/chat/page.tsx` (replaces current stub).
-- New `ConversationCard` and `NewChatButton` subcomponents under `src/app/chat/_components/`.
-- New shared util `src/lib/utils/formatRelativeTime.ts` (Korean relative time formatter).
-- A `useConversations()` client hook mirroring `useDiaries()` SSR-safe pattern.
-- Back chevron in header → `router.back()`.
-- Unit tests.
+- New page route `/chat/new` (replaces the placeholder).
+- `PersonaPickerModal` using `useDialogControl` + native `<dialog>` (consistent with MoodPickerSheet/PhotoViewer).
+- 2x7 grid of all 14 PERSONAS from `@/design-system/personas`.
+- Selection → router.push to /chat/session?personaId=X (REQ-017 will own that route).
+- ✕ → router.back to /chat.
 
 ## Scope OUT
-- Persona picker modal (REQ-016) — `NewChatButton.onClick` calls `router.push('/chat/new')` (placeholder).
-- Past-conversation reading view (REQ-018) — card tap calls `router.push('/chat/' + id)`.
-- Conversation deletion, search, filters.
-- LLM calls or writes to storage (REQ-017).
-- E2E (optional per spec).
+- Persona favorites/sorting (v2)
+- Custom personas (out of scope)
 
 ## Invariants
-1. Fixed "➕ 새 대화 시작" button rendered above the list, also visible in empty state.
-2. Sort: cards strictly descending by `lastMessageAt` (ISO 8601 lexicographic compare).
-3. Card top row: `<persona emoji> <persona label> · <relative time>`; body: first user message truncated to 30 chars + "…" if longer.
-4. Empty state: "아직 대화가 없어요. AI에게 일기에 대해 물어보세요" + "새 대화 시작" button.
-5. Read-only screen — no localStorage mutation.
-6. SSR safety via `useConversations()` `isReady` gate.
-7. No 0-message cards (per REQ-017 conversations without messages are not persisted).
-8. Route: `/chat` (existing `Routes.chat`).
-9. Korean strings only.
-10. CLAUDE.md reuse: Card, EmptyState, IconButton.
+- All 14 personas from `PERSONAS` master rendered, no filtering.
+- Korean: title "어떤 톤으로 대화할까요?", close aria "닫기".
+- Card per persona: bg-paper, p-4, 16px radius, emoji 40-48px + label + description.
+- Tap target ≥ 44×44 per cell.
+- No persona favorites order — render in master array order.
 
-## Settled Open Questions
-| Question | Default |
-|---|---|
-| Relative-time thresholds | `<60s` "방금", `<60min` "X분 전", `<24h` "X시간 전", calendar yesterday "어제", `<7d` "X일 전", else "YYYY.M.D" (no zero-pad per PRD example "2026.5.12") |
-| First message | `messages.find(m => m.role === 'user')?.content ?? ''`; fallback "(빈 대화)" |
-| 30-char truncation | `content.length > 30 ? content.slice(0, 30) + '…' : content` |
-| Card click | `router.push('/chat/' + id)` |
-| New chat button | `router.push('/chat/new')` placeholder (REQ-016 owns this route) |
-| Header back | `router.back()` |
-| Type naming | Storage type is `SearchConversation`, not `Conversation`. Keep storage name; UI component named `ConversationCard` |
+## Open Questions Settled
+- Modal vs page: page route `/chat/new` rendered as fullscreen dialog (matches PhotoViewer pattern, history-stack consistent).
+- Routing on select: `router.push('/chat/session?personaId=' + id)` placeholder (REQ-017 owns).
+- Description text: each Persona already has `.description` field (verify in architecture).
 
-## Dependency Check
-- REQ-002 DONE
-- REQ-004 DONE
-- REQ-005 DONE
-- REQ-006 DONE
+## Dependencies
+REQ-004, REQ-005, REQ-015 all DONE.
 
 ## Verdict
 PASS
