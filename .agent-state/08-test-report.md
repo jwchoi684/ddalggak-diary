@@ -2,94 +2,52 @@
 
 ## Summary
 
-REQ-013 (목록 화면 — List Screen) full suite is green. All 301 unit tests pass, TypeScript and ESLint are clean, and all 8 Playwright specs pass including the new `list.spec.ts`.
+REQ-014 (통계 화면 — Stats Screen) full suite is green. All 322 unit tests pass across 46 files, TypeScript is clean (0 errors), ESLint is clean (0 warnings/errors), and all 8 pre-existing Playwright specs pass with no regressions introduced by REQ-014.
 
 ---
 
 ## Tests Added / Updated
 
-### New unit test files (REQ-013)
+### New unit test files (REQ-014)
 
 | File | Cases |
 |---|---|
-| `src/lib/utils/__tests__/formatListDate.test.ts` | 4 (FLD1–FLD4) |
-| `src/app/list/__tests__/ListScreen.test.tsx` | 12 (LS1–LS12) |
+| `src/lib/utils/__tests__/addMonths.test.ts` | 6 (AM1–AM6) |
+| `src/app/stats/_components/__tests__/useMoodStats.test.ts` | 5 (UMS1–UMS5) |
+| `src/app/stats/__tests__/StatsScreen.test.tsx` | 10 (SS1–SS10) |
 
 ### Pre-existing unit tests (unchanged)
 
-285 tests across 41 files — all continue to pass.
+301 tests across 43 files — all continue to pass.
 
-### New E2E file
+### E2E
 
-| File | Cases |
-|---|---|
-| `e2e/list.spec.ts` | 1 (LE1) |
-
-### Total unit count: 301 (285 pre-existing + 16 new)
+No new E2E spec for REQ-014 (stats screen has no multi-step flow; covered by component tests). All 8 pre-existing specs pass unchanged.
 
 ---
 
 ## Commands Run
 
 ```
-npx vitest run --reporter=basic    →  43 test files, 301/301 PASS  (9.96s)
+npx vitest run --reporter=basic    →  46 files, 322/322 PASS  (10.87s)
 npx tsc --noEmit                   →  clean (no output)
 npm run lint                       →  no ESLint warnings or errors
-npm run test:e2e                   →  8/8 PASS (24.8s)
+npm run test:e2e                   →  8/8 PASS (27.3s)
 ```
 
 ---
 
 ## Results
 
-### Vitest — per-file pass counts
+### Vitest — REQ-014 new files
 
-| File | Tests |
-|---|---|
-| `src/lib/utils/__tests__/formatListDate.test.ts` | 4 |
-| `src/app/list/__tests__/ListScreen.test.tsx` | 12 |
-| `src/lib/storage/__tests__/photoBase64.test.ts` | 7 |
-| `src/lib/hooks/__tests__/useSwipe.test.ts` | 7 |
-| `src/lib/hooks/__tests__/useLongPress.test.ts` | 6 |
-| `src/lib/hooks/__tests__/useEditorState.test.ts` | 8 |
-| `src/lib/hooks/__tests__/useHorizontalDatePicker.test.ts` | 7 |
-| `src/lib/hooks/__tests__/usePhotoViewer.test.ts` | 4 |
-| `src/lib/hooks/__tests__/useAutosave.test.ts` | 5 |
-| `src/app/__tests__/CalendarDayCell.test.tsx` | 7 |
-| `src/app/__tests__/CalendarScreen.test.tsx` | 8 |
-| `src/app/__tests__/CalendarHeader.test.tsx` | 6 |
-| `src/app/__tests__/CalendarGrid.test.tsx` | 5 |
-| `src/app/__tests__/diary-date-page.test.tsx` | 4 |
-| `src/app/__tests__/not-found.test.tsx` | 3 |
-| `src/app/diary/[date]/__tests__/PhotoViewer.test.tsx` | 7 |
-| `src/app/diary/[date]/__tests__/PhotoCarousel.test.tsx` | 8 |
-| `src/app/diary/[date]/__tests__/Editor.test.tsx` | 21 |
-| `src/app/diary/[date]/_components/__tests__/DateCell.test.tsx` | 8 |
-| `src/app/diary/[date]/_components/__tests__/HorizontalDatePicker.test.tsx` | 4 |
-| `src/design-system/__tests__/useDialogControl.test.ts` | 7 |
-| `src/design-system/__tests__/ConfirmDialog.test.tsx` | 8 |
-| `src/design-system/__tests__/MoodPickerSheet.test.tsx` | 10 |
-| `src/design-system/__tests__/BottomSheet.test.tsx` | 6 |
-| `src/design-system/__tests__/MoodIcon.test.tsx` | 9 |
-| `src/design-system/__tests__/useToast.test.ts` | 5 |
-| `src/design-system/__tests__/EmptyState.test.tsx` | 7 |
-| `src/design-system/__tests__/IconButton.test.tsx` | 6 |
-| `src/design-system/__tests__/FAB.test.tsx` | 5 |
-| `src/design-system/__tests__/Card.test.tsx` | 5 |
-| `src/design-system/__tests__/personas.test.ts` | 17 |
-| `src/design-system/__tests__/moods.test.ts` | 12 |
-| `src/design-system/__tests__/Toast.test.tsx` | 5 |
-| `src/lib/storage/__tests__/diaries.test.ts` | 13 |
-| `src/lib/storage/__tests__/conversations.test.ts` | 9 |
-| `src/lib/storage/__tests__/useDiaries.test.ts` | 4 |
-| `src/lib/storage/__tests__/settings.test.ts` | 8 |
-| `src/lib/storage/__tests__/limits.test.ts` | 3 |
-| `src/lib/storage/__tests__/uuid.test.ts` | 3 |
-| `src/lib/storage/__tests__/ssr.test.ts` | 4 |
-| `src/lib/storage/__tests__/no-direct-localstorage-access.test.ts` | 1 |
-| `src/lib/navigation/__tests__/routes.test.ts` | 10 |
-| `src/lib/navigation/__tests__/setupNextNavigation.test.ts` | 3 |
-| **Total** | **301** |
+| File | Tests | Result |
+|---|---|---|
+| `src/lib/utils/__tests__/addMonths.test.ts` | 6 | PASS |
+| `src/app/stats/_components/__tests__/useMoodStats.test.ts` | 5 | PASS |
+| `src/app/stats/__tests__/StatsScreen.test.tsx` | 10 | PASS |
+| All other pre-existing files (43) | 301 | PASS |
+| **Total** | **322** | **322/322 PASS** |
 
 ### Playwright E2E — per-spec pass counts
 
@@ -113,18 +71,18 @@ None.
 
 ## Coverage Notes
 
-- `formatListDate` — 4 cases cover same-year, prior-year, today, and yesterday formatting branches.
-- `ListScreen` — 12 cases cover: empty-state render, entry count, sort order (newest first), mood emoji display, date formatting, body text truncation, tap-to-navigate, FAB presence and navigation, and header icon layout.
-- E2E `list.spec.ts` (LE1) seeds 2 localStorage entries, navigates to `/list`, confirms both cards render, taps the first card, and asserts the URL transitions to `/diary/<date>`.
-- All 285 pre-existing tests pass unchanged — no regression.
+- `addMonths` — 6 cases cover forward, backward, year-rollover (both directions), identity (delta=0), and full-year advance.
+- `useMoodStats` — 5 cases cover empty entries, wrong-month filtering, count aggregation with sort, tiebreak by MOODS master-array index, and all 10 moods.
+- `StatsScreen` — 10 cases cover: empty state render, bar chart with joy/sad distribution (width percentages), all-10-moods render, prev-month nav (year rollover), next-month nav, close button calls `router.back()`, `?month=` param display, tiebreak ordering, loading state, and partial mood set.
+- No regressions: all 301 pre-existing tests pass unchanged after `addMonths` was extracted from `ListHeader.tsx` into a shared utility.
 
 ---
 
 ## Remaining Risks
 
-1. Sort-toggle (if added in a future REQ) is not covered; current tests assume newest-first only.
+1. Stats screen month navigation resets to current month on browser refresh (no URL push); acceptable per architecture decision — caller passes `?month=` if needed.
 2. E2E covers Chromium only; no Safari/Firefox run in CI.
-3. Scroll preservation when returning from editor to list is not E2E-covered (unit-level only via ListScreen state tests).
+3. `StatsHeader.tsx` is 96 lines (slightly over the 100-line soft limit); excess is inline SVGs — deferred as low priority.
 
 ---
 

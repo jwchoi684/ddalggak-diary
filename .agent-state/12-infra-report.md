@@ -1,40 +1,32 @@
-# Infra Review Report — REQ-013
+# Infra Review Report — REQ-014
 
 ## Summary
 
-REQ-013 is a pure client-side diary list screen. No infrastructure-relevant files were modified.
+Pure client-side stats screen. No infra changes.
 
 ## Scope
 
-Changed files relevant to this review:
-
-- `src/lib/utils/formatListDate.ts` — new utility
-- `src/app/list/_components/` — new UI components (3 files)
-- `src/app/list/page.tsx` — replaced stub
-- Unit test and E2E spec files under `src/` and `e2e/`
-- `.agent-state/` docs only
+- New: `src/app/stats/_components/{StatsHeader,MoodBarChart,useMoodStats}`, `src/app/stats/page.tsx` (replaced stub), `src/lib/utils/addMonths.ts`
+- Modified: `src/app/list/_components/ListHeader.tsx` (one-line import refactor)
+- Tests only otherwise
 
 ## Environment / Config Changes
 
-None. `package.json`, `package-lock.json`, and all `.env*` files are untouched. No new runtime environment variables introduced or consumed. No new dependencies added.
+None. `package.json` untouched. No `.env*` changes.
 
 ## Deployment Impact
 
-None. All new code is statically bundled with the existing Next.js build. No new routes beyond the pre-existing `/list` stub, no API endpoints, no server actions, no server components. Feature renders entirely in the browser using `localStorage`-sourced diary data.
+None. Static client bundle. No new routes/APIs/workers/env vars.
 
 ## Rollback Plan
 
-Not required. No deployment artifact changes. Reverting is a standard source revert with no data migration needed.
+Standard `git revert`.
 
 ## Observability Notes
 
-No changes to logging, metrics, or tracing. The feature has no network I/O.
+No new logging, metrics, or tracing.
 
 ## Blocking Issues
-
-None.
-
-## Non-Blocking Suggestions
 
 None.
 

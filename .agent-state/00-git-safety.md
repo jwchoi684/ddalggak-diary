@@ -1,4 +1,4 @@
-# Git Safety — REQ-013
+# Git Safety — REQ-014
 
 ## Branch
 `master`
@@ -6,7 +6,7 @@
 ## Working Tree Snapshot
 
 ```
- M .agent-state/requirements/REQ-013.md
+ M .agent-state/requirements/REQ-014.md
  M .agent-state/requirements/index.md
 ```
 

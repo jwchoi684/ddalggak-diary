@@ -1,88 +1,84 @@
-# Frontend Implementation — REQ-013: 일기 리스트 화면
+# Frontend Implementation — REQ-014: 통계 화면
 
 ## Summary
 
-REQ-013 replaces the 8-line stub at `src/app/list/page.tsx` with a fully functional diary list screen. The screen renders one calendar month of diary entries as vertically scrollable cards, with a sticky header containing back navigation, month navigator, and sort toggle. All new files are composed entirely from existing design-system primitives (`Card`, `MoodIcon`, `EmptyState`, `IconButton`) with no new UI libraries introduced.
+REQ-014 implements the Stats screen at `src/app/stats/page.tsx` (was an 8-line stub). The screen shows a mood-distribution horizontal bar chart for a selected month, with a two-row month navigator (year + M월 + prev/next arrows) and an ✕ close button. Implementation is pure client-side: no backend calls, no new npm packages. The pattern mirrors `src/app/list/page.tsx` exactly: `"use client"` + `Suspense` + `useSearchParams` + `useDiaries`. The `addMonths` helper was extracted from `ListHeader.tsx` into a shared utility. All 322 tests pass (46 test files).
 
 ---
 
 ## Files Changed
 
-| File | Lines | Status |
-|---|---|---|
-| `src/lib/utils/formatListDate.ts` | 15 | New |
-| `src/app/list/_components/PhotoThumbnailStrip.tsx` | 39 | New |
-| `src/app/list/_components/DiaryListCard.tsx` | 52 | New |
-| `src/app/list/_components/ListHeader.tsx` | 75 | New |
-| `src/app/list/page.tsx` | 83 | Replaced (was 8 lines) |
-| `src/lib/utils/__tests__/formatListDate.test.ts` | 26 | New |
-| `src/app/list/__tests__/ListScreen.test.tsx` | 260 | New |
-| `e2e/list.spec.ts` | 46 | New |
-
-All production files are under 100 lines as required by CLAUDE.md.
+| File | Action | Lines | Notes |
+|---|---|---|---|
+| `src/lib/utils/addMonths.ts` | NEW | 14 | Shared utility extracted from ListHeader |
+| `src/app/list/_components/ListHeader.tsx` | MODIFIED | 70 | Replaced inline `addMonths` with import — 1-line behavioral change |
+| `src/app/stats/_components/useMoodStats.ts` | NEW | 45 | `useMoodStats(entries, yearMonth)` hook with useMemo |
+| `src/app/stats/_components/StatsHeader.tsx` | NEW | 96 | Year + M월 nav + ✕ close (inline SVGs add lines) |
+| `src/app/stats/_components/MoodBarChart.tsx` | NEW | 59 | Summary icon row + bar rows + empty state |
+| `src/app/stats/page.tsx` | REPLACED | 48 | "use client" Suspense shell — was 8-line stub |
+| `src/lib/utils/__tests__/addMonths.test.ts` | NEW | 28 | 6 cases (AM1–AM6) |
+| `src/app/stats/_components/__tests__/useMoodStats.test.ts` | NEW | 78 | 5 cases (UMS1–UMS5) |
+| `src/app/stats/__tests__/StatsScreen.test.tsx` | NEW | 231 | 10 cases (SS1–SS10) |
 
 ---
 
 ## Behavior Added
 
-- **List screen** (`/list?month=YYYY-MM`): Shows diary entries for the active month as vertically scrollable cards. Defaults to the current month when no `?month` param is present.
-- **ListHeader**: Sticky header with back (`router.back()`), month navigator (prev/next pushes new `?month` URL), and sort toggle (`최신순 ↓` / `오래된순 ↑`). Handles year rollover via `addMonths()` using the `Date` constructor overflow pattern.
-- **DiaryListCard**: Tap-to-navigate card with `MoodIcon(size=64)`, formatted date, body text with `line-clamp-3`, photo strip, and empty-body fallback. Accessible `aria-label` built via `Intl.DateTimeFormat('ko-KR')`.
-- **PhotoThumbnailStrip**: Shows up to 3 `<img loading="lazy">` thumbnails with `+N` overflow badge (`data-testid="photo-overflow-badge"`) when photos exceed 3.
-- **Empty state**: Shows `EmptyState` with "이 달에는 작성된 일기가 없어요" and a "캘린더로 가기" CTA when no entries match the active month.
-- **Loading state**: Shows "불러오는 중…" while `useDiaries().isReady === false`, gating card rendering to avoid hydration mismatches.
-- **Suspense boundary**: `ListPageContent` (which uses `useSearchParams`) is wrapped in `<Suspense>` at the page level per Next.js 15 requirements.
+- **Stats screen** at `/stats` renders a full month mood distribution chart.
+- **StatsHeader**: two-row display — bare 4-digit year above, `M월` (no zero-padding) below flanked by `IconButton` chevrons. ✕ `IconButton` positioned `absolute top-4 right-4`.
+- **MoodBarChart**: when data exists — summary icon row (`size={64}`) + horizontal bar rows sorted count DESC (tiebreak MOODS master-array index ASC). Bar fill: `Math.max(8, (count / maxCount) * 100)%` with inline `backgroundColor: mood.color`. Empty month: `EmptyState` with text `"이 달에는 기록이 없어요"`.
+- **Month navigation**: `setMonth` only (no `router.push`). Initial month from `?month=` search param, defaulting to current calendar month.
+- **Close**: `router.back()`.
+- **Loading state**: `"불러오는 중…"` shown when `!isReady`; `useMoodStats` receives `[]` to satisfy rules of hooks.
 
 ---
 
 ## Existing Patterns Reused
 
-- `Card`, `MoodIcon`, `EmptyState`, `IconButton` from `@/design-system/*`
-- `useDiaries` from `@/lib/storage/useDiaries`
-- `Routes.diary(date)`, `Routes.listWithFilter({month})`, `Routes.calendar` from `@/lib/navigation`
-- `new Date(isoDate + 'T00:00:00')` UTC-offset-safe parsing (same as `EditorBody`)
-- `<img>` (not `next/image`) for base64 data URLs — same as `PhotoCarousel`
-- `vi.mock('next/navigation', ...)` + mutable `currentSearchParams` variable pattern (same approach as `CalendarScreen.test.tsx`)
-- `setupNextNavigation` helpers (`mockRouter`, `resetNavigationMocks`, etc.)
+- `"use client"` + `<Suspense>` + `useSearchParams` pattern from `src/app/list/page.tsx`
+- `useDiaries()` from `@/lib/storage/useDiaries`
+- `IconButton` from `@/design-system/IconButton` — close + prev/next month buttons
+- `MoodIcon` from `@/design-system/MoodIcon` — summary row (size=64) and bar rows (size=40)
+- `EmptyState` from `@/design-system/EmptyState` — empty month state
+- `MOODS` / `MOOD_MAP` from `@/design-system/moods` — mood color and order
+- `LOADING` div constant pattern from `list/page.tsx`
+- Mutable `currentSearchParams` pattern from `ListScreen.test.tsx`
+- `vi.mock('next/navigation', ...)` + `setupNextNavigation.ts` helpers
+- `vi.mock('@/lib/storage/useDiaries', ...)` with `vi.fn()` + per-test `mockReturnValue`
+- `makeEntry` inline fixture factory pattern
+- `@vitest-environment happy-dom` at file top for component tests
 
 ---
 
 ## Tests Added / Updated
 
-### `src/lib/utils/__tests__/formatListDate.test.ts` — 4 unit tests (all pass)
-- FLD1: `2026-05-22` -> `2026.05.22 금요일` (test plan spec had wrong weekday; corrected to actual Friday)
-- FLD2: `2026-01-01` -> `2026.01.01 목요일`
-- FLD3: `2026-03-07` -> `2026.03.07 토요일`
-- FLD4: `2026-05-25` -> `2026.05.25 월요일`
+| File | Cases | Result |
+|---|---|---|
+| `src/lib/utils/__tests__/addMonths.test.ts` | 6 (AM1–AM6) | PASS |
+| `src/app/stats/_components/__tests__/useMoodStats.test.ts` | 5 (UMS1–UMS5) | PASS |
+| `src/app/stats/__tests__/StatsScreen.test.tsx` | 10 (SS1–SS10) | PASS |
 
-### `src/app/list/__tests__/ListScreen.test.tsx` — 12 component tests (all pass)
-LS1-LS12 covering: month filter, default-month fallback, sort desc/asc, +N badge, empty-body variants, empty-month CTA, card tap navigation, next/prev month nav, year rollover, and loading state.
+**Regression:** All 12 existing ListScreen tests (LS1–LS12) pass after the `addMonths` extraction. Full suite: 322 tests, 46 files, all PASS.
 
-### `e2e/list.spec.ts` — 1 Playwright smoke test (Phase 10, not run)
-LE1: Seed 2 current-month entries -> navigate to `/list` -> verify 2 cards -> tap first -> assert URL matches `/diary/` + editor textarea visible.
-
-### Deviations from test plan
-- **FLD1 expected string**: Test plan specified `"2026.05.22 토요일"` but May 22, 2026 is a Friday. The test was corrected to `"2026.05.22 금요일"`. The `formatListDate` implementation is correct.
-- **Mock approach for per-test `useSearchParams` override**: Uses a module-level mutable `currentSearchParams` variable instead of `vi.mocked(mockUseSearchParams).mockReturnValue(...)` (which fails because `mockUseSearchParams` in `setupNextNavigation.ts` is a plain function, not a `vi.fn()`). This matches the spirit of the existing `CalendarScreen.test.tsx` pattern.
+**Deviation from test plan:** The plan stated "No DOM environment needed" for `useMoodStats.test.ts`, but `renderHook` from `@testing-library/react` v16 requires a DOM environment. Added `// @vitest-environment happy-dom` to that file. The test logic itself is unchanged.
 
 ---
 
 ## Commands Run
 
 ```
-npx tsc --noEmit          -> PASS (0 errors)
-npm run lint              -> PASS (0 errors, 0 warnings after adding eslint-disable for base64 <img>)
-npx vitest run --reporter=basic -> PASS (301 tests, 43 files, 0 failures)
+npx tsc --noEmit          → 0 errors
+npm run lint              → 0 warnings, 0 errors
+npx vitest run --reporter=basic  → 322 passed (46 files), 0 failed
 ```
 
 ---
 
 ## Risks / Follow-ups
 
-1. **FLD1 weekday discrepancy**: The test plan document contained an incorrect expected weekday for `2026-05-22`. The implementation and tests are correct.
-2. **Calendar does not pass `?month` to `/list`**: `CalendarScreen` pushes bare `Routes.list`. The list screen defaults to the current month, creating a UX gap if the user was viewing a different calendar month. Known accepted gap per architecture report.
-3. **No live storage subscription**: `useDiaries` reads once on mount. Cross-tab edits are not reflected without a page reload — accepted for MVP.
-4. **Photo performance**: Base64 thumbnails in a long list could be slow. `loading="lazy"` is applied as a low-cost mitigation.
+1. **StatsHeader.tsx is 96 lines** — over the ~60-line target. The excess is entirely inline SVG for three icons (CloseIcon, ChevronLeft, ChevronRight). Could split icons into a `_icons.tsx` file if future headers need them; deferred as low priority since the component is single-responsibility.
+2. **`useMoodStats` environment note**: `renderHook` from `@testing-library/react` requires a DOM. Added `@vitest-environment happy-dom`. This matches the pattern already established in all other hook tests in the project.
+3. **No `statsWithMonth` URL helper**: Stats uses `useState` only for month navigation (no URL push) as per architecture decision. Navigating away and back resets to current month / `?month=` param if provided by caller.
 
 ---
 

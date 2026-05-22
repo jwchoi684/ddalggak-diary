@@ -1,61 +1,18 @@
-# E2E Report
+# E2E Report — REQ-014: 통계 화면
 
 ## Summary
 
-REQ-013 (List Screen) E2E journey is verified. Spec `e2e/list.spec.ts` (LE1) was added during Phase 10 and passed alongside all 7 pre-existing Playwright specs. Total: 8/8 PASS.
+REQ-014 has no E2E spec; coverage is provided by unit tests (10 SS cases + 5 UMS cases + 6 AM cases = 21 cases). Pre-existing 8 E2E specs (calendar, editor, horizontal-date-picker × 2, list, photo-viewer, photos × 2) all pass without regression after REQ-014 changes.
 
-## Scenario Tested
+## Rationale for No New E2E
 
-LE1 — List screen entry navigation. Seed 2 diary entries into localStorage → navigate to `/list` → assert 2 cards visible → tap the first card (newest-first order) → assert URL transitions to `/diary/<date>` and the editor textarea is visible.
-
-## Steps
-
-1. `page.addInitScript(seedDiariesScript([e1, e2]))` injects two `DiaryEntry` objects (`e1` on day 10, `e2` on day 20, current month) into localStorage before navigation.
-2. `page.goto('/list')` opens the list screen.
-3. Query all buttons with accessible name `/일기 보기/` — assert count is 2.
-4. Click `cards.first()` (newest-first order = `e2` on day 20).
-5. Assert `page.url()` matches `/diary/`.
-6. Assert `getByPlaceholder('오늘 어떤 하루였나요?')` is visible.
-
-## Test Files Added / Updated
-
-| File | Case | Status |
-|---|---|---|
-| `e2e/list.spec.ts` | LE1 | Added (Phase 10) |
-
-## Commands Run
-
-```
-npm run test:e2e   →  8/8 PASS (24.8 s, Chromium)
-```
-
-Dev server starts automatically on port 3001 via Playwright `webServer` config.
+- Display-only screen with no form submission, no async side effects beyond `router.back()` (covered by unit SS6).
+- All flow paths (empty/populated month, month nav, sort, close) are deterministic in unit tests with mocked navigation.
+- E2E budget reserved for higher-risk REQs (AI chat in REQ-017).
 
 ## Results
 
-| Spec | Tests | Result |
-|---|---|---|
-| `e2e/calendar.spec.ts` | 1 | PASS |
-| `e2e/editor.spec.ts` | 1 | PASS |
-| `e2e/horizontal-date-picker.spec.ts` | 2 | PASS |
-| `e2e/list.spec.ts` | 1 | PASS |
-| `e2e/photo-viewer.spec.ts` | 1 | PASS |
-| `e2e/photos.spec.ts` | 2 | PASS |
-| **Total** | **8** | **8/8 PASS** |
-
-## Failures
-
-None.
-
-## Screenshots / Artifacts
-
-No failures occurred. `trace: 'on-first-retry'` is configured; no traces were produced.
-
-## Not Tested
-
-- Safari / Firefox browsers — Chromium only in CI; deferred for MVP.
-- Sort-order toggle — not implemented in REQ-013.
-- Scroll-position restoration when returning from editor to list — covered at unit level via `ListScreen` state tests.
+Phase 10 verification: 322/322 unit + 8/8 E2E pass.
 
 ## Verdict
 PASS

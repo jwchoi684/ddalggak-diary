@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { IconButton } from '@/design-system/IconButton';
+import { addMonths } from '@/lib/utils/addMonths';
 
 export interface ListHeaderProps {
   month: string;          // "YYYY-MM"
@@ -9,12 +10,6 @@ export interface ListHeaderProps {
   onBack: () => void;
   onMonthChange: (month: string) => void;
   onSortToggle: () => void;
-}
-
-function addMonths(yearMonth: string, delta: number): string {
-  const [y, m] = yearMonth.split('-').map(Number);
-  const d = new Date(y, m - 1 + delta, 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
 const ChevronLeft = () => (

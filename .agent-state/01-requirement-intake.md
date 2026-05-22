@@ -1,93 +1,87 @@
-# Requirement Intake — REQ-013
+# Requirement Intake — REQ-014
 
 ## Restatement
 
-REQ-013 adds a "diary list" screen reachable at `/list`. It displays all diary entries for a selected calendar month as vertically scrollable cards. The header provides: a back button (left), a month navigator showing "YYYY년 M월" with previous/next chevrons (center), and a sort toggle switching between "↓ 최신순" and "↑ 오래된 순" (right). Each card shows, top to bottom: a 64px MoodIcon centered at the top, a date label in "YYYY.MM.DD 요일" format in gray, up to 3 lines of body text (ellipsis on overflow), and a horizontal photo thumbnail strip (max 3 thumbnails plus a "+N" overflow cell). Tapping a card navigates to the editor screen (`/diary/[date]`); browser back returns to the list with the same month and sort state intact.
+REQ-014 adds a Stats screen reachable from the bottom nav. The screen shows the emotional distribution for a selected month: a year/month navigator at the top (small year label above, large "M월" with ‹ › chevrons below), a compact row of mood icons for moods that appeared at least once that month, and a horizontal bar chart below it listing each mood's count in descending order. Each chart row contains a 40 px MoodIcon, a rounded color bar whose width is proportional to the maximum count in that month, and a right-aligned count. An ✕ button (white circle, top-right) closes via `router.back()`. An empty month hides the mood row and chart and shows "이 달에는 기록이 없어요" while keeping month navigation live.
 
 ## In Scope
 
-- List screen implementation at `src/app/list/page.tsx` (replacing the stub from REQ-006).
-- Month navigator state: default month, prev/next controls, year rollover.
-- Filtering: show only entries whose `date.slice(0, 7)` matches the selected `YYYY-MM`.
-- Sort toggle: newest-first (default) / oldest-first, toggled in-memory via `useState`.
-- Card layout: MoodIcon 64px + date label + body text (3-line clamp) + photo strip (max 3 + "+N").
-- Empty body text fallback: "(내용 없음)".
-- Empty month state: centered message "이 달에는 작성된 일기가 없어요" + CTA link to calendar (`/`). Month nav remains visible and functional.
-- Card tap routing: `router.push('/diary/[date]')`.
-- Back button: `router.back()` (REQ-006 history-stack).
-- File decomposition: `ListScreen.tsx` (orchestration), `DiaryListCard.tsx` (single card), `useDiaryList.ts` (filtering + sorting logic).
-- Reuse of `Card` from `src/design-system/Card.tsx` and `MoodIcon` from REQ-003.
+- Stats page at the existing stub route `src/app/stats/page.tsx` (REQ-006).
+- Year/month header navigator: two-row layout (year line above, "M월" + chevrons below), defaulting to the current calendar month at entry.
+- Year rollover on month navigation (e.g., Jan → Dec of prior year).
+- Mood-icon summary row: only moods with count ≥ 1, ~64 px icons, centered, no card/background.
+- Horizontal bar chart: MoodIcon (40 px) + rounded bar (radius = height/2) + right-aligned count, sorted count DESC.
+- Bar width: proportional to max count in month (max = 100 % of available width). Minimum visible width for any present bar.
+- Bar color: `mood.color` from `MOODS` master, no separate mapping.
+- Empty-month state: message + hide mood row and chart, keep month nav.
+- ✕ close button (white circle, top-right) → `router.back()`.
+- Optional gray track behind color bar (PRD §4.7.4 notes this as an acceptable style).
+- All UI copy in Korean.
 
 ## Out of Scope (with pointer to owner REQ if known)
 
-- Mood filter ("😢만 모아보기") — v2, §4.5.7.
-- Text search within month — v2, §4.5.7.
-- Multi-month infinite scroll — v2, §4.5.7.
-- Sort state persistence to localStorage — v2, §4.5.7.
-- Full-screen photo viewer from list card — REQ-012 (already done; linking from card not required by this REQ).
-- AI chat citation back-link chip — REQ-017.
-- Statistics screen — REQ-014 (parallel, independent).
+- Weekly trend line chart, year-over-year comparison, streak counter, total-days summary card — deferred to v2 (§4.7.6, no REQ assigned yet).
+- Download / share — v2 (§4.7.6).
+- Mid-session persona switching or AI features — REQ-015–018.
+- URL search-param persistence of selected month — see Open Questions; treated as implementation detail, not a PRD requirement.
 
 ## Invariants
 
-- `Card` component from `src/design-system/Card.tsx` must be used as the card surface. No new card style may be created.
-- `MoodIcon` from the design system (REQ-003) must be the sole rendering boundary for mood visuals; the 64px size must be passed as a prop/size, not inlined as a new component.
-- `readDiaries()` (or `useDiaries`) from `src/lib/storage/` is the only read path. No direct `localStorage` access in the screen component.
-- One entry per day is enforced by the storage layer (REQ-002/REQ-009); the list screen must not handle or anticipate duplicates.
-- Sort is `useState` only — never written to `ddalkkak:settings:v1` or any localStorage key.
-- Filtering is by `entry.date.slice(0, 7) === selectedYearMonth` (e.g., `"2026-05"`) — exact string prefix match on the "YYYY-MM-DD" date field.
-- Sort is a lexicographic comparison on `entry.date` (ISO "YYYY-MM-DD" strings sort correctly with plain string comparison).
-- Visual tokens: background `#FAF6EE` (cream / `bg-cream`), card background `#FFFFFF` (`bg-paper`), gray meta text `#A8A8A8` (`text-meta`), body text `#2A2A2A` (`text-charcoal`). No raw hex in component files.
-- All UI strings are Korean.
-- Touch targets must be 44×44px minimum (header buttons, card tap area).
-- File size rule: any file approaching 100 lines must be split at a natural boundary.
+1. Close button is ✕ (not a back-arrow chevron). Uses the white circular 44 px container / 24 px icon pattern from CLAUDE.md §1.6 (same as PhotoViewer).
+2. `router.back()` is the close target — same convention as other secondary screens.
+3. `MOODS` array from `src/design-system/moods.ts` is the single source of mood colors and order. No new color mapping.
+4. Mood count sort is descending by count; chart and icon row use the same order.
+5. Bar radius equals `height / 2` (fully rounded pill ends), per PRD §4.7.4 and §1.6.6.
+6. Only moods with at least one entry in the selected month appear in the icon row and chart. Moods with zero count are completely absent.
+7. Empty month: "이 달에는 기록이 없어요" shown; mood row and chart are hidden; month navigator remains interactive.
+8. No third-party chart library. Bars implemented as plain `div` elements with inline/CSS width percentages.
+9. File size rule: if `StatsPage` exceeds 100 lines, extract `MoodBarChart` (and `MonthNav` if warranted) as separate files in `src/app/stats/_components/`.
+10. UI component reuse rule: check for existing `IconButton`, `MoodIcon`, `EmptyState` before creating new components.
+11. Default month is the current calendar month at screen entry — not the month last viewed in the calendar or list (unless `?month=` is passed).
+12. `useDiaries()` from `@/lib/storage/useDiaries` is the data source; no backend calls.
 
 ## Open Questions and Recommended Defaults
 
-**Q1. Default month when navigating from calendar vs. other routes.**
-The PRD says: if entering from the calendar, use the calendar's currently-displayed month; otherwise use current month. REQ-006 does not currently pass calendar month context through the URL or router state.
-Recommended default: use the current calendar month (today's year+month) as the initial `selectedMonth` for all entry paths in this REQ. If REQ-006 is later extended to pass `?month=YYYY-MM` as a query param, the list screen can read `searchParams.get('month')` as an override.
+**Q1: Year/month header layout — single line or two-row?**
+PRD §4.7.1 shows two rows: small gray year ("2026") on its own line, then large "‹ 5월 ›" below. Default: two-row layout. Year: "YYYY" (4-digit, no "년" suffix per the PRD diagram). Month: "M월" (no zero-padding).
 
-**Q2. Month navigation bounds.**
-The PRD says "미래 달도 이동 가능" (future months are reachable). It does not specify a lower bound.
-Recommended default: no bounds. Users can navigate to any month (past or future). Empty months display the empty-state UI.
+**Q2: Mood-icon row sort — count descending, master order, or appearance order?**
+Default: count descending. Tiebreak: stable secondary by `MOODS` master array index.
 
-**Q3. Photo thumbnail size.**
-The PRD says "64~72px" for photo thumbnails inside the card.
-Recommended default: 64px square to align with the MoodIcon size given in the same section.
+**Q3: Bar height — what px value?**
+Default: 28 px (pill radius 14 px).
 
-**Q4. "+N" overflow cell rendering.**
-The PRD shows a `+N` label after 3 thumbnails but does not specify the cell's appearance.
-Recommended default: same 64px square as thumbnail cells, gray background (`bg-[#A8A8A8]/20` or equivalent design token), centered `+N` text in `text-charcoal`. N = `photos.length - 3`.
+**Q4: Bar color — full `mood.color` or alpha?**
+Default: full `mood.color` (no alpha).
 
-**Q5. Date format in card.**
-The PRD shows "YYYY.MM.DD 요일" (e.g., "2026.05.16 토요일") in the wireframe (§4.5.1) and §4.5.4.
-Recommended default: use this exact format — dot-separated date, space, Korean weekday. Use `Intl.DateTimeFormat('ko-KR', { weekday: 'short' })` for the weekday string.
+**Q5: Gray track behind color bar — required or optional?**
+Default: include gray track (`bg-[#EBEBEB]`) for legibility on low-count bars.
 
-**Q6. Month transition animation.**
-§4.5.6 says "부드러운 전환 (페이드 또는 슬라이드)."
-Recommended default: CSS opacity fade via a key-based re-render (`key={selectedMonth}` on the list container triggers React's unmount/mount, Tailwind's `animate-fade-in` or a simple `transition-opacity`). Slide animation is deferred unless the design system already ships a slide primitive.
+**Q6: Minimum bar width for low counts?**
+Default: minimum rendered bar width of 6 px regardless of proportion (so count=1 in a max=20 month is still visible).
 
-**Q7. Empty-body card rendering.**
-§4.5.4 says "(내용 없음)" OR "그냥 사진/기분만 표시." This is ambiguous.
-Recommended default: if `entry.text` is empty or whitespace-only and `entry.photos.length === 0`, render the italic gray string "(내용 없음)" in the body area. If photos exist but text is empty, omit the body text area entirely. If text is empty but mood is the only content, show "(내용 없음)".
+**Q7: URL search param vs local `useState` for selected month?**
+Default: read `?month=YYYY-MM` if present (consistent with REQ-013), else local default to current month. Use a single `useState` initialized from `useSearchParams`. Month nav can push to URL via `Routes.statsWithMonth` (architecture phase will confirm if this route helper exists; if not, just `useState`).
 
-**Q8. `useDiaries` hook vs. direct `readDiaries()` call.**
-`src/lib/storage/useDiaries.ts` already exists (from REQ-002).
-Recommended default: use the existing `useDiaries` hook inside `useDiaryList.ts` rather than calling `readDiaries()` directly. This keeps re-render reactivity consistent with how the editor uses storage.
+**Q8: Default month — current real-world month, or last-viewed?**
+Default: current real-world month if `?month=` absent. Calendar/list can pass `?month=` in the future to convey "last viewed."
+
+**Q9: Mood-icon sizes — summary row vs chart row?**
+Default: `size={64}` summary row (matches calendar size scaled up for emphasis), `size={40}` chart row (per PRD §4.7.4).
+
+**Q10: Tied counts in chart — sort stability?**
+Default: count DESC primary, `MOODS` master index ASC secondary tiebreak.
 
 ## Dependency Check
 
-| REQ | Required Status | Actual Status (index.md) |
-|-----|----------------|--------------------------|
-| REQ-002 | DONE | DONE |
-| REQ-003 | DONE | DONE |
-| REQ-005 | DONE | DONE |
-| REQ-006 | DONE | DONE |
+| Dependency | Required Status | Actual Status |
+|---|---|---|
+| REQ-002 (data model / localStorage) | DONE | DONE |
+| REQ-003 (MOODS master + MoodIcon) | DONE | DONE |
+| REQ-005 (design system primitives) | DONE | DONE |
+| REQ-006 (routing shell / stats stub route) | DONE | DONE |
 
-All four dependencies are confirmed DONE. The route stub at `src/app/list/page.tsx` from REQ-006 is present and safe to replace.
-
-Note: REQ-009 (editor) is also DONE and reachable at `/diary/[date]`, which is the navigation target for card taps. Although REQ-009 is not listed as a formal dependency of REQ-013, its existence is a precondition for the card-tap flow to function end-to-end.
+All four declared dependencies are DONE.
 
 ## Verdict
 PASS

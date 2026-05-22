@@ -1,12 +1,13 @@
-# Data Model / Migration Report — REQ-012
+# Data Model / Migration Report
 
 ## Summary
 
-REQ-012 is a display-only full-screen photo viewer. It reads `state.photos` already stored on `DiaryEntry` but performs zero writes and introduces zero new storage keys.
+REQ-014 is a read-only stats screen. It reads diary entries via `useDiaries()` and derives
+mood counts in memory. No writes, no deletes, no new localStorage keys, no schema changes.
 
 ## Schema Change Required
 
-None.
+None. `DiaryEntry` shape is unchanged.
 
 ## Migration Strategy
 
@@ -18,31 +19,35 @@ Not applicable. No new fields.
 
 ## Index Requirements
 
-None.
+Not applicable. All filtering is in-memory (`Array.filter` on `e.date.slice(0,7)`).
 
 ## Existing Data Compatibility
 
-Fully compatible. The viewer consumes `DiaryEntry.photos` (existing `Photo[]`) read-only. The field shape is unchanged.
+Full. Existing entries are read as-is; no transformation required.
 
 ## Rollback Considerations
 
-Nothing to roll back. No storage mutations are made by this feature.
+Not applicable. No storage mutation exists to roll back.
 
 ## Query Performance Risk
 
-None. No localStorage reads beyond what the editor already performs on mount.
+None. `useMoodStats` is O(n) over entries, memoized. At most ~365 entries for a single user.
 
 ## Seed / Fixture Impact
 
-No changes required. Existing fixtures with `photos: []` or populated arrays both work.
+None. Existing test fixtures require no changes.
 
 ## Files Expected to Change
 
-Frontend only — `src/lib/hooks/useSwipe.ts`, `src/lib/hooks/usePhotoViewer.ts`, `src/app/diary/[date]/_components/PhotoViewer.tsx`, `src/app/diary/[date]/_components/Editor.tsx`. No storage, model, or migration files touched.
+Storage layer: none.
+New files are all UI/hook (`addMonths.ts`, `useMoodStats.ts`, `StatsHeader.tsx`,
+`MoodBarChart.tsx`, `page.tsx`). No model or migration files.
 
 ## Test Requirements
 
-Unit tests cover component and hook behavior only (initial index, swipe navigation, boundary clamping, close callback). No storage-layer tests needed.
+No storage-layer tests required. `useMoodStats` unit tests operate on plain `DiaryEntry[]`
+arrays passed directly — no localStorage mocking needed beyond what `useDiaries` tests
+already provide.
 
 ## Verdict
 PASS

@@ -2,99 +2,116 @@
 
 ## Summary
 
-REQ-013 adds the diary list screen: a monthly card-list view with month navigation, sort toggle, photo thumbnails, and an empty state. Three new test files cover all acceptance criteria: a pure unit test for the `formatListDate` utility, a happy-dom component test for the list screen, and one Playwright E2E smoke test. Total new: 17 cases (4 unit + 12 component + 1 E2E).
+REQ-014 adds the Stats screen: a mood-distribution horizontal bar chart for a selected month, with month navigation, a close button, and an empty state. Three new test files cover all acceptance criteria: a pure unit test for `addMonths`, a `renderHook` unit test for `useMoodStats`, and a happy-dom component test for the assembled screen. No E2E test is planned because the stats screen has no user-input flow that unit/integration tests cannot cover adequately. Total new: 21 cases (6 unit + 5 hook + 10 component).
 
 ---
 
 ## Unit Tests
 
-### File: `src/lib/utils/__tests__/formatListDate.test.ts`
+### File: `src/lib/utils/__tests__/addMonths.test.ts`
 
-Framework: Vitest (no DOM needed, no `@vitest-environment` directive required).
+Framework: Vitest (no DOM; no `@vitest-environment` directive needed).
 
-| ID | Input | Expected output | What it proves |
-|----|-------|-----------------|----------------|
-| FLD1 | `"2026-05-22"` | `"2026.05.22 토요일"` | Saturday mapping + dot separator |
-| FLD2 | `"2026-01-01"` | `"2026.01.01 목요일"` | Thursday mapping + January leading zero |
-| FLD3 | `"2026-03-07"` | `"2026.03.07 토요일"` | Month and day leading zeros preserved |
-| FLD4 | `"2026-05-25"` | `"2026.05.25 월요일"` | Monday (non-weekend weekday) renders correctly |
+| ID | Call | Expected | Rationale |
+|----|------|----------|-----------|
+| AM1 | `addMonths("2026-05", +1)` | `"2026-06"` | basic forward step |
+| AM2 | `addMonths("2026-05", -1)` | `"2026-04"` | basic backward step |
+| AM3 | `addMonths("2026-01", -1)` | `"2025-12"` | year rollover backward |
+| AM4 | `addMonths("2026-12", +1)` | `"2027-01"` | year rollover forward |
+| AM5 | `addMonths("2026-05",  0)` | `"2026-05"` | identity (delta zero) |
+| AM6 | `addMonths("2026-03", +12)` | `"2027-03"` | full year advance |
 
-All four cases use hardcoded expected strings; no `vi.useFakeTimers` needed because the function takes an explicit date string.
+All cases use hardcoded expected strings; no fakes or mocks needed.
 
 ---
 
 ## Integration Tests
 
-### File: `src/app/list/__tests__/ListScreen.test.tsx`
+### File: `src/app/stats/_components/__tests__/useMoodStats.test.ts`
 
-Framework: Vitest 2, `@testing-library/react@^16`, `@vitest-environment happy-dom`.
+Framework: Vitest + `@testing-library/react` `renderHook`. No DOM environment needed.
 
-Mocks required (declared at module scope, before dynamic imports):
-- `vi.mock('next/navigation', …)` — reuse existing pattern from `CalendarScreen.test.tsx`.
-- `vi.mock('@/lib/storage/useDiaries', () => ({ useDiaries: vi.fn() }))`.
+Imports: `renderHook` from `@testing-library/react`, `useMoodStats` from `../useMoodStats`.
 
-`setupNextNavigation` already exports `mockRouter`, `mockUseRouter`, `mockUseSearchParams`, `resetNavigationMocks`. For `?month` tests the mock needs a custom `URLSearchParams`; override `mockUseSearchParams` locally per test using `vi.spyOn` or a module-level variable pattern matching `CalendarScreen.test.tsx`.
+Helper: `function makeEntry(date: string, mood: MoodId): DiaryEntry` — minimal inline factory (date + mood + empty text + empty photos).
 
-Dynamic imports after mocks (matching existing style):
-```ts
-const { useDiaries } = await import('@/lib/storage/useDiaries');
-const useDiariesMock = useDiaries as ReturnType<typeof vi.fn>;
-// import page component after mocks are in place
-```
-
-`beforeEach`: `resetNavigationMocks()` + `useDiariesMock.mockReturnValue({ entries: [], isReady: true })`.
-`afterEach`: `cleanup()`.
-
-#### Test fixture helpers (defined once at top of file)
-
-```ts
-function makeEntry(date: string, overrides = {}): DiaryEntry {
-  return { date, mood: 'joy', text: '내용', photos: [], ...overrides };
-}
-```
-
-#### Cases
-
-| ID | Description | Setup | Assertion |
-|----|-------------|-------|-----------|
-| LS1 | Month filter: only May entries shown with `?month=2026-05` | 2 May entries + 1 April entry; `mockUseSearchParams` returns `new URLSearchParams('month=2026-05')` | `getByRole('button', {name:/일기 보기/})` count = 2; April entry not found |
-| LS2 | Default month = current month when `?month` absent | `vi.useFakeTimers()` + `vi.setSystemTime(new Date('2026-05-15'))`; 1 May entry + 1 June entry; `mockUseSearchParams` returns `new URLSearchParams()` | Only May card visible; June card absent; `afterEach` restores timers |
-| LS3 | Sort desc (default): newest entry first | 2 May entries dated `2026-05-01` and `2026-05-20`; `?month=2026-05` | First card aria-label contains `"2026년 5월 20일"` |
-| LS4 | Sort asc after clicking sort toggle | Same 2 entries as LS3 | `fireEvent.click(getByRole('button', {name:'정렬 변경'}))` → first card aria-label contains `"2026년 5월 1일"` |
-| LS5 | +N badge for 5 photos | Entry with 5 `Photo` objects; `?month=2026-05` | `getByTestId('photo-overflow-badge')` text = `"+2"`; `getAllByAltText('첨부 사진')` length = 3 |
-| LS6 | "(내용 없음)" when text empty AND no photos | `makeEntry('2026-05-10', {text:'', photos:[]})` | `getByText('(내용 없음)')` visible |
-| LS7 | Body text omitted when text empty AND photos present | `makeEntry('2026-05-10', {text:'', photos:[fakePhoto()]})` | `queryByText('(내용 없음)')` = null; `getByAltText('첨부 사진')` present |
-| LS8 | Empty month shows CTA "캘린더로 가기" | No entries for `?month=2026-05` | `getByText('이 달에는 작성된 일기가 없어요')` visible; `getByRole('button', {name:'캘린더로 가기'})` visible |
-| LS9 | Card tap calls `router.push("/diary/[date]")` | 1 May entry; `?month=2026-05` | `fireEvent.click(getByRole('button', {name:/일기 보기/}))` → `expect(mockRouter.push).toHaveBeenCalledWith('/diary/2026-05-10')` |
-| LS10 | Next month nav pushes `?month=2026-06` | `?month=2026-05` | `fireEvent.click(getByRole('button', {name:'다음 달'}))` → `mockRouter.push` called with string containing `month=2026-06` |
-| LS11 | Prev month from 2026-01 rolls back to 2025-12 | `?month=2026-01` | `fireEvent.click(getByRole('button', {name:'이전 달'}))` → `mockRouter.push` called with string containing `month=2025-12` |
-| LS12 | `isReady=false` shows loading placeholder | `useDiariesMock.mockReturnValue({entries:[], isReady:false})` | `getByText('불러오는 중…')` visible; no card buttons present |
+| ID | entries | yearMonth | Expected result |
+|----|---------|-----------|-----------------|
+| UMS1 | `[]` | `"2026-05"` | `{ counts: [], hasData: false, maxCount: 0 }` |
+| UMS2 | 2 entries dated `"2026-04-01"` (joy + sad) | `"2026-05"` | `{ counts: [], hasData: false, maxCount: 0 }` — other-month entries excluded |
+| UMS3 | joy×3, sad×2 all in `"2026-05"` | `"2026-05"` | `counts[0] = { mood:'joy', count:3 }`, `counts[1] = { mood:'sad', count:2 }`, `maxCount: 3`, `hasData: true` |
+| UMS4 | joy×2, sad×2 all in `"2026-05"` | `"2026-05"` | `counts[0].mood === 'joy'` (joy index 0 < sad index 5 in MOODS master array), `counts[1].mood === 'sad'` |
+| UMS5 | all 10 moods once each in `"2026-05"` | `"2026-05"` | `counts.length === 10`, `maxCount === 1`, every `count === 1`, `hasData: true` |
 
 ---
 
 ## E2E Tests
 
-### File: `e2e/list.spec.ts`
+Not required for this feature. The stats screen performs no form submission, navigation side-effect, or multi-step flow that integration tests cannot exercise directly. The `useMoodStats` hook is pure; the component is rendered and asserted in the component test below.
 
-Framework: Playwright Chromium. Uses existing `seedDiariesScript` helper.
+---
 
-| ID | Steps | Assertions |
-|----|-------|------------|
-| LE1 | Seed 2 current-month entries via `page.addInitScript(seedDiariesScript([e1, e2]))`; `page.goto('/list')`; verify 2 card buttons visible (aria-label `/일기 보기/`); click first card; assert URL matches `/diary/YYYY-MM-DD`; assert editor textarea visible | `toHaveURL(/\/diary\//)`; `getByPlaceholder('오늘 어떤 하루였나요?')` visible |
+## Component Tests
 
-Photo entries not required for LE1 — keep the seed minimal (`mood`, `date`, `text`, `photos: []`).
+### File: `src/app/stats/__tests__/StatsScreen.test.tsx`
+
+Framework: Vitest 2, `@testing-library/react@^16`, `@vitest-environment happy-dom`.
+
+**Mock declarations (module scope, before dynamic imports):**
+
+```ts
+// mutable searchParams pointer — same mutable-variable pattern as ListScreen.test.tsx
+let currentSearchParams = new URLSearchParams();
+
+vi.mock('next/navigation', () => ({
+  useRouter:       () => mockUseRouter(),
+  useSearchParams: () => currentSearchParams,
+  useParams:       () => mockUseParams(),
+  usePathname:     () => mockUsePathname(),
+}));
+
+vi.mock('@/lib/storage/useDiaries', () => ({ useDiaries: vi.fn() }));
+```
+
+**Dynamic imports after mocks:**
+```ts
+const { useDiaries } = await import('@/lib/storage/useDiaries');
+const useDiariesMock = useDiaries as ReturnType<typeof vi.fn>;
+const { default: StatsPage } = await import('@/app/stats/page');
+```
+
+**beforeEach:** `resetNavigationMocks()` + `currentSearchParams = new URLSearchParams()` + `useDiariesMock.mockReturnValue({ entries: [], isReady: true })`.
+
+**afterEach:** `cleanup()`.
+
+**Entry factory:** `makeEntry(date, mood, text = '')` → `{ date, mood, text, photos: [] }`.
+
+| ID | Setup | Action | Assertion |
+|----|-------|--------|-----------|
+| SS1 | `isReady:true, entries:[]`; no `?month` | render | `getByText('이 달에는 기록이 없어요')` present; `queryByTestId('mood-summary-row')` null; `queryByTestId(/^mood-bar-/)` null; prev/next buttons present |
+| SS2 | 5 entries: joy×3, sad×2 for current month | render | `getByTestId('mood-bar-joy')` present first; `getByTestId('mood-bar-sad')` present second; joy bar fill `width` style = `"100%"`; sad bar fill `width` style matches `~67%` (≥ 60%, ≤ 70%); count texts `"3"` and `"2"` visible |
+| SS3 | all 10 moods once each for current month | render | `getAllByTestId(/^mood-bar-/)` length === 10; `getByTestId('mood-summary-row')` children count === 10; all count texts = `"1"` |
+| SS4 | `currentSearchParams = new URLSearchParams('month=2026-01')`; `isReady:true, entries:[]` | `fireEvent.click(getByRole('button', {name:'이전 달'}))` | screen updates to show `"2025"` and `"12월"` |
+| SS5 | `currentSearchParams = new URLSearchParams('month=2026-05')`; `isReady:true, entries:[]` | `fireEvent.click(getByRole('button', {name:'다음 달'}))` | screen shows `"2026"` and `"6월"` |
+| SS6 | default setup | `fireEvent.click(getByRole('button', {name:'닫기'}))` | `mockRouter.back` called once |
+| SS7 | `currentSearchParams = new URLSearchParams('month=2026-03')` | render | `getByText('3월')` visible; `getByText('2026')` visible |
+| SS8 | joy×2, sad×2 for current month | render | `getAllByTestId(/^mood-bar-/)[0]` has `data-testid="mood-bar-joy"` (master-index tiebreak) |
+| SS9 | `useDiariesMock.mockReturnValue({ entries:[], isReady:false })` | render | `getByText('불러오는 중…')` present; `queryByTestId('mood-summary-row')` null |
+| SS10 | 2 distinct moods (joy×1, sad×1) for current month | render | `getByTestId('mood-summary-row')` has exactly 2 child icons; `queryByTestId('mood-bar-excited')` null |
+
+**Note on SS2 width assertion:** query the `div` inside `getByTestId('mood-bar-joy')` that has `className` matching `rounded-full h-full` (the fill div) and check its `style.width`. Use `within(getByTestId('mood-bar-joy')).getByRole` or direct `querySelector`. The exact value depends on implementation's `Math.max(8, …)` formula: joy is `100%`, sad is `Math.max(8, (2/3)*100)` ≈ `66.67%`. Assert `parseFloat(sadFill.style.width)` is in `[60, 70]`.
 
 ---
 
 ## Regression Tests
 
-No existing tests are directly affected. The `src/app/list/page.tsx` stub currently has no test coverage; replacing it cannot break existing passing tests.
+No existing tests are affected. The `addMonths` extraction is a pure refactor; `ListHeader.tsx` will import from the new utility. The full test suite (`npm test`) is run as the regression guard.
 
 ---
 
 ## Security-Relevant Tests
 
-Not applicable for this feature (read-only local storage rendering; no auth, no API calls, no user input sanitisation concerns beyond existing storage layer).
+Not applicable. This feature is read-only rendering of localStorage data; no auth, no API calls, no user-supplied HTML rendered unsanitised.
 
 ---
 
@@ -102,41 +119,37 @@ Not applicable for this feature (read-only local storage rendering; no auth, no 
 
 | Item | Source | Notes |
 |------|--------|-------|
-| `mockRouter`, `mockUseRouter`, `mockUseSearchParams`, `resetNavigationMocks` | `src/lib/navigation/__tests__/setupNextNavigation.ts` | Already exists; no changes needed |
+| `mockRouter`, `mockUseRouter`, `resetNavigationMocks` | `src/lib/navigation/__tests__/setupNextNavigation.ts` | Already exists; no changes |
+| Mutable `currentSearchParams` variable | Declared in test file | Same pattern as `ListScreen.test.tsx` |
 | `useDiaries` mock | `vi.mock('@/lib/storage/useDiaries', …)` | Per-test `.mockReturnValue()` |
-| `makeEntry(date, overrides)` factory | Inline in `ListScreen.test.tsx` | ~5 lines |
-| `fakePhoto()` factory | Inline in `ListScreen.test.tsx` | Returns `{ id: 'p1', dataUrl: 'data:image/png;base64,AA==' }` |
-| `seedDiariesScript` | `e2e/_helpers/seedDiaries.ts` | Already exists |
-| `vi.setSystemTime` for LS2 | Vitest built-in | Restore in `afterEach` with `vi.useRealTimers()` |
-| Custom `URLSearchParams` per test | `new URLSearchParams('month=...')` | Passed inline to `mockUseSearchParams` via `vi.spyOn` override |
+| `makeEntry(date, mood, text?)` factory | Inline in each test file | ~4 lines |
+| `vi.useFakeTimers` / `vi.setSystemTime` | Vitest built-in | Not needed for SS1-SS10 because current month default is only used as initial state and tests that care about month use `?month=` param |
 
 ---
 
 ## Commands to Run
 
 ```bash
-# Unit + component tests
-npm run test -- --reporter=verbose src/lib/utils/__tests__/formatListDate.test.ts
-npm run test -- --reporter=verbose src/app/list/__tests__/ListScreen.test.tsx
+# Unit tests (isolated)
+npm run test -- --reporter=verbose src/lib/utils/__tests__/addMonths.test.ts
+npm run test -- --reporter=verbose src/app/stats/_components/__tests__/useMoodStats.test.ts
+npm run test -- --reporter=verbose src/app/stats/__tests__/StatsScreen.test.tsx
 
-# Full suite (regression guard)
+# Full suite regression guard
 npm test
 
 # Type check
 npm run typecheck
-
-# E2E
-npm run test:e2e -- e2e/list.spec.ts
 ```
 
 ---
 
 ## Not Applicable Tests
 
-- **API / HTTP tests**: no backend endpoints introduced.
+- **API / HTTP tests**: no backend endpoints.
 - **Database / migration tests**: localStorage schema unchanged.
-- **Performance tests**: in-memory filter/sort on typical diary volumes; no measurement needed.
-- **Auth / permission tests**: app has no auth layer in MVP.
+- **E2E tests**: no multi-step user flow that integration tests cannot cover; stats screen has no submission or navigation side-effects beyond `router.back()`.
+- **Performance tests**: O(n) in-memory aggregation on diary-scale data; no measurement needed.
 
 ---
 
