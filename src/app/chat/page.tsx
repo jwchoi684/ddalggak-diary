@@ -1,8 +1,54 @@
+"use client";
+
+import React from 'react';
+import { useRouter } from 'next/navigation';
+import { useConversations } from '@/lib/storage/useConversations';
+import { ChatListHeader } from './_components/ChatListHeader';
+import { NewChatButton } from './_components/NewChatButton';
+import { ConversationCard } from './_components/ConversationCard';
+
 export default function ChatPage() {
+  const router = useRouter();
+  const { conversations, isReady } = useConversations();
+
+  const sorted = [...conversations].sort((a, b) =>
+    b.lastMessageAt.localeCompare(a.lastMessageAt),
+  );
+
   return (
-    <main className="px-6 py-8 text-charcoal">
-      <h1 className="text-3xl">AI 채팅</h1>
-      <p className="mt-2 text-meta">REQ-015에서 채워집니다.</p>
-    </main>
+    <div className="min-h-screen bg-cream" data-testid="chat-page">
+      <ChatListHeader onBack={() => router.back()} />
+
+      <main className="px-4 pt-4 pb-8">
+        <div className="mb-3">
+          <NewChatButton onClick={() => router.push('/chat/new')} />
+        </div>
+
+        {!isReady && (
+          <p className="text-center text-meta py-8">불러오는 중…</p>
+        )}
+
+        {isReady && sorted.length === 0 && (
+          <p
+            data-testid="conversation-list-empty"
+            className="text-center text-meta py-8"
+          >
+            아직 대화가 없어요. AI에게 일기에 대해 물어보세요
+          </p>
+        )}
+
+        {isReady && sorted.length > 0 && (
+          <div className="space-y-3">
+            {sorted.map((conv) => (
+              <ConversationCard
+                key={conv.id}
+                conversation={conv}
+                onTap={() => router.push('/chat/' + conv.id)}
+              />
+            ))}
+          </div>
+        )}
+      </main>
+    </div>
   );
 }

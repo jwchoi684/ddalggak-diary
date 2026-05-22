@@ -1,18 +1,11 @@
-# Git Safety — REQ-014
+# Git Safety — REQ-015
 
 ## Branch
 `master`
 
-## Working Tree Snapshot
+## Working Tree
 
-```
- M .agent-state/requirements/REQ-014.md
- M .agent-state/requirements/index.md
-```
-
-## Analysis
-
-Only orchestrator status-flip files modified. No source/test/report contamination. Safe to proceed.
+Only orchestrator status flips. Safe to proceed.
 
 ## Verdict
 PASS
