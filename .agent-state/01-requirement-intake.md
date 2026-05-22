@@ -1,33 +1,23 @@
-# Requirement Intake — REQ-016
+# Requirement Intake — REQ-017
 
 ## Restatement
-Persona picker modal opened from REQ-015's "새 대화 시작" button. 2-column grid showing all 14 personas with emoji + label + description. Tap selects persona and routes to REQ-017 chat session. ✕ closes back to /chat.
+Active AI chat session with strict context isolation. Each session sends ONLY [system + diary corpus + this session's messages] to LLM. Persona locked at start. Empty sessions not persisted.
 
-## Scope IN
-- New page route `/chat/new` (replaces the placeholder).
-- `PersonaPickerModal` using `useDialogControl` + native `<dialog>` (consistent with MoodPickerSheet/PhotoViewer).
-- 2x7 grid of all 14 PERSONAS from `@/design-system/personas`.
-- Selection → router.push to /chat/session?personaId=X (REQ-017 will own that route).
-- ✕ → router.back to /chat.
-
-## Scope OUT
-- Persona favorites/sorting (v2)
-- Custom personas (out of scope)
+## Build Tier
+Option B (serverless proxy via Next.js API route at `/api/chat`). `OPENAI_API_KEY` server-side env var only.
 
 ## Invariants
-- All 14 personas from `PERSONAS` master rendered, no filtering.
-- Korean: title "어떤 톤으로 대화할까요?", close aria "닫기".
-- Card per persona: bg-paper, p-4, 16px radius, emoji 40-48px + label + description.
-- Tap target ≥ 44×44 per cell.
-- No persona favorites order — render in master array order.
-
-## Open Questions Settled
-- Modal vs page: page route `/chat/new` rendered as fullscreen dialog (matches PhotoViewer pattern, history-stack consistent).
-- Routing on select: `router.push('/chat/session?personaId=' + id)` placeholder (REQ-017 owns).
-- Description text: each Persona already has `.description` field (verify in architecture).
+1. Context isolation: messages array sent to OpenAI = [system, ...sessionMessages]. ZERO other sessions.
+2. Diary serialization: `[YYYY-MM-DD] 기분: label(emoji) | 본문: text` joined by \n.
+3. Model: gpt-4o-mini, temp 0.7, max_tokens 500.
+4. Cited diaries via regex YYYY-MM-DD cross-ref.
+5. Empty conversation (0 messages) NOT persisted.
+6. API key NEVER in client/response.
+7. 0-diary state: friendly empty state + calendar CTA.
+8. Korean strings: header, completion button, error/retry.
 
 ## Dependencies
-REQ-004, REQ-005, REQ-015 all DONE.
+REQ-002, REQ-004, REQ-009, REQ-015, REQ-016 — all DONE.
 
 ## Verdict
 PASS

@@ -1,3 +1,2 @@
-# Git Safety — REQ-016
-
+# Git Safety — REQ-017
 Status flips only. PASS.

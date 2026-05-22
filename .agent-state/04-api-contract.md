@@ -1,33 +1,36 @@
-# API Contract — REQ-016
+# API Contract — REQ-017
 
-## Interfaces
-
-### `PersonaCard` props
-```ts
-{ persona: Persona; onSelect: (id: PersonaId) => void; }
+## HTTP API
+### POST /api/chat
+Request:
+```json
+{ "system": "string", "messages": [{"role":"user|assistant","content":"string"}] }
 ```
+Response 200:
+```json
+{ "content": "string" }
+```
+Errors:
+- 400 missing body
+- 500 missing OPENAI_API_KEY or OpenAI error
 
-### `page.tsx`
-- Route: `/chat/new`.
-- Reads: `PERSONAS` from `@/design-system/personas`.
-- Routing: `router.push('/chat/session?personaId=' + id)`, `router.back()`.
+## Internal Interfaces
+- `serializeDiariesForLLM(entries: DiaryEntry[]): string`
+- `buildChatMessages({persona, diariesText, sessionMessages}): ChatMessageForLLM[]`
+- `extractCitedDates(text: string, entries: DiaryEntry[]): string[]` (returns entry ids)
+- `callChat({system, messages}): Promise<{content: string}>`
 
 ## Storage
-Zero reads, zero writes.
+- Writes `SearchConversation` to `ddalkkak:conversations:v1` via `upsertConversation` ONLY when messages.length > 0.
 
 ## Korean Strings
-- Title: `어떤 톤으로 대화할까요?`
-- Close aria-label: `닫기`
-- Card aria-label: `{label} 페르소나로 시작`
+See design.
 
 ## Caller Invariants
-1. All 14 personas rendered, no filtering.
-2. Selection routes to `/chat/session?personaId=` (REQ-017 owns).
-3. Close: `router.back()` (returns to /chat).
-
-## Backward Compatibility
-- `/chat/new` placeholder route (404 previously) now resolves.
-- REQ-015's NewChatButton already routes here.
+1. `buildChatMessages` receives ONLY `sessionMessages` from this session.
+2. `callChat` calls `/api/chat`, NEVER OpenAI directly.
+3. Server reads `process.env.OPENAI_API_KEY`, response never includes key.
+4. Empty session → no persistence.
 
 ## Verdict
 PASS

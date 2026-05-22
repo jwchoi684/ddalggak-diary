@@ -1,45 +1,36 @@
-# Technical Design — REQ-016
+# Technical Design — REQ-017
 
-## Component Signatures
+## Context Isolation (highest priority)
+`buildChatMessages({persona, diariesText, sessionMessages})` returns `[{role:'system', content: COMMON_BASE + persona.systemPrompt + diariesText}, ...sessionMessages]`. Structurally cannot include other sessions.
 
-### `PersonaCard` — `src/app/chat/new/_components/PersonaCard.tsx`
-```ts
-interface PersonaCardProps {
-  persona: Persona;
-  onSelect: (id: PersonaId) => void;
-}
-```
-- `<button>` wrapping `<Card className="p-4">` full-width.
-- Layout: emoji (text-3xl) + label (text-charcoal font-medium mt-2) + shortDesc (text-meta text-sm mt-1).
-- `aria-label="{label} 페르소나로 시작"`.
-- `data-testid="persona-card-{id}"`.
+## Server Route
+`POST /api/chat` accepts `{system: string, messages: ChatMessage[]}`, calls OpenAI Chat Completions with `gpt-4o-mini`, temp 0.7, max_tokens 500. Returns `{content: string}`.
+- If `OPENAI_API_KEY` missing → HTTP 500 with Korean error message.
+- API key only in outgoing `Authorization` header; never in response.
 
-### `page.tsx` — `src/app/chat/new/page.tsx`
-- `"use client"`.
-- Header with ✕ close button (aria="닫기") top-right, calling `router.back()`.
-- Title: "어떤 톤으로 대화할까요?" centered below header.
-- 2-column grid of 14 PersonaCards (grid-cols-2 gap-3).
-- onSelect → `router.push('/chat/session?personaId=' + id)`.
+## Diary Serialization
+`serializeDiariesForLLM(entries)` returns lines: `[YYYY-MM-DD] 기분: {label}({emoji}) | 본문: {text}`.
 
-## Visual Spec
-- Page wrapper `min-h-screen bg-cream px-4 pb-8`.
-- Header `flex justify-end pt-4` with IconButton.
-- Title `text-xl font-semibold text-charcoal text-center my-4`.
-- Grid `grid grid-cols-2 gap-3`.
+## Cited Diary Detection
+`extractCitedDates(responseText, entries)` regex `\d{4}-\d{2}-\d{2}` matches, intersect with entry.date set, return matching ids.
+
+## State Machine
+useReducer in `useChatSession`. States: idle, sending, error. Messages array preserved on error; retry resends last user message.
+
+## Session Persistence
+- Conversation id generated once via `generateId()`.
+- `upsertConversation` called ONLY when user has sent ≥1 message AND on session end (back or 완료).
+- `isClosed: true` set on close. 0-message sessions never persisted.
+
+## UI
+- Header: ‹ back + persona emoji+label center + "완료" right.
+- Suggested chips when no messages.
+- User: right-aligned primary; AI: left-aligned gray.
+- Cited diary chips below AI responses, tap → editor.
+- Error bubble + 다시 시도.
 
 ## Korean Strings
-- Title: `어떤 톤으로 대화할까요?`
-- Close: `닫기`
-
-## Test Plan
-1. PC1: All 14 personas rendered
-2. PC2: Tap fires onSelect with correct id
-3. PC3: ✕ → router.back called
-4. PC4: Tap card → router.push('/chat/session?personaId=...') called
-
-## File Budget
-- page.tsx: ~55 lines
-- PersonaCard.tsx: ~25 lines
+- 뒤로 가기, 대화 완료, 메시지 입력, 전송, 답변 작성 중…, 응답을 받지 못했어요, 다시 시도, 아직 일기가 없어요. 먼저 일기를 써보세요, 캘린더로 가기.
 
 ## Verdict
 PASS

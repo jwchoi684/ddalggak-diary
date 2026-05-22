@@ -1,0 +1,93 @@
+"use client";
+
+import React from 'react';
+import type { ChatMessage } from '@/lib/storage';
+import { CitedDiaryChip } from './CitedDiaryChip';
+
+interface MessageBubbleProps {
+  message: ChatMessage;
+  onCitedDiaryTap?: (diaryId: string) => void;
+}
+
+/**
+ * MessageBubble — renders a single chat message.
+ *
+ * User messages: right-aligned, peach background.
+ * Assistant messages: left-aligned, white/paper background.
+ * Cited diary chips rendered below assistant message content.
+ */
+export function MessageBubble({ message, onCitedDiaryTap }: MessageBubbleProps) {
+  const isUser = message.role === 'user';
+
+  return (
+    <div
+      className={`flex flex-col gap-1 ${isUser ? 'items-end' : 'items-start'}`}
+      data-testid={`message-bubble-${message.id}`}
+    >
+      <div
+        className={`max-w-[80%] px-4 py-3 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
+          isUser
+            ? 'bg-peach text-charcoal rounded-br-sm'
+            : 'bg-paper text-charcoal rounded-bl-sm'
+        }`}
+        style={{ boxShadow: isUser ? undefined : 'var(--shadow-card)' }}
+      >
+        {message.content}
+      </div>
+
+      {!isUser &&
+        message.citedDiaryIds &&
+        message.citedDiaryIds.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1">
+            {message.citedDiaryIds.map((diaryId) => (
+              <CitedDiaryChip
+                key={diaryId}
+                diaryId={diaryId}
+                onTap={onCitedDiaryTap}
+              />
+            ))}
+          </div>
+        )}
+    </div>
+  );
+}
+
+/**
+ * LoadingBubble — placeholder bubble shown while AI is responding.
+ */
+export function LoadingBubble() {
+  return (
+    <div className="flex items-start" data-testid="loading-bubble">
+      <div
+        className="max-w-[80%] px-4 py-3 rounded-2xl rounded-bl-sm text-sm text-meta bg-paper"
+        style={{ boxShadow: 'var(--shadow-card)' }}
+      >
+        답변 작성 중…
+      </div>
+    </div>
+  );
+}
+
+/**
+ * ErrorBubble — shown when an API call fails.
+ * Preserves the user's message; allows retry.
+ */
+export function ErrorBubble({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="flex items-start" data-testid="error-bubble">
+      <div
+        className="max-w-[80%] px-4 py-3 rounded-2xl rounded-bl-sm text-sm bg-paper"
+        style={{ boxShadow: 'var(--shadow-card)' }}
+      >
+        <p className="text-danger mb-2">응답을 받지 못했어요.</p>
+        <button
+          type="button"
+          onClick={onRetry}
+          className="text-sm font-medium text-peach-dark underline"
+        >
+          다시 시도
+        </button>
+      </div>
+    </div>
+  );
+}

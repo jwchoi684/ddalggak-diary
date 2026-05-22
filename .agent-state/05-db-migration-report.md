@@ -1,6 +1,6 @@
-# DB / Migration — REQ-016
+# DB / Migration — REQ-017
 
-Read-only persona master data. No storage changes.
+Writes to existing `ddalkkak:conversations:v1` key via `upsertConversation`. No schema change. `SearchConversation` already has fields used.
 
 ## Verdict
-PASS — N/A
+PASS — N/A (no new keys, no schema change)
