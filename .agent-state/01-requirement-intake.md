@@ -1,92 +1,119 @@
-# Requirement Intake — REQ-008
+# Requirement Intake — REQ-009
 
 ## Restatement
 
-REQ-008 delivers `MoodPickerSheet`, a reusable bottom-sheet modal that lets the user pick one of the 10 fixed moods (PRD §3.4) for a given diary date. It is composed on top of REQ-005's `BottomSheet` primitive — not a new dialog implementation. The sheet has **two entry modes** that share the **same UI** and differ only in close behavior: `initial` (auto-opened by the editor on an empty entry — cancel must propagate up so the editor steps back to its previous screen) and `change` (user re-tapped the mood icon to swap — cancel just dismisses the sheet, keeping the existing mood). MVP exposes only the "기본 > 기분" category; the inactive top tab ("테마") and inactive sub-tab ("일상") render but show a "곧 만나요!" Toast on tap (v2 preview). REQ-008 is also the **first real consumer** of the REQ-005 `BottomSheet` primitive, so its build doubles as a smoke test for that primitive's API surface.
+REQ-009 delivers the diary editor: a single React component that handles both new-entry creation and existing-entry editing without branching into separate screens or routes. The route `src/app/(routes)/diary/[date]/page.tsx` (stubbed in REQ-006) becomes the host. On entry the component checks storage (REQ-002 `getDiaryByDate`) to determine which of four contexts applies — empty-cell new entry (auto-opens `MoodPickerSheet` in `mode='initial'`; delete hidden), or existing-entry via calendar, list, or AI-citation (prefills data; delete shown; no sheet auto-open). The editor provides a mood icon tap (→ `MoodPickerSheet mode='change'`), a full-height textarea, a bottom toolbar (alignment toggle, current-time insert, and a conditional save icon), 1-second debounce autosave to localStorage, and explicit save with a "일기를 저장했어요!" toast. Back navigation is guarded: if unsaved changes remain, a confirm dialog fires before `router.back()`.
 
 ## In Scope
 
-- One new file: `MoodPickerSheet.tsx` exposing a single React component.
-- Composition over `BottomSheet` from REQ-005 (grip handle, slide-up, dim backdrop, Escape/backdrop close are all delegated — no re-implementation).
-- Header inside the sheet: date label "YYYY.MM.DD 요일" (Korean weekday) + title "오늘은 어떤 하루였나요?".
-- Two-level tab strip: top "기본 / 테마" + sub "기분 / 일상". Only "기본" + "기분" active; inactive tabs are visually muted and, when tapped, trigger a "곧 만나요!" Toast.
-- 3-column grid of all 10 moods from REQ-003 `MOODS` (in array order). Each cell = `MoodIcon size={72}` + Korean label below. Cell-to-cell gap 16–24px.
-- `mode: 'initial' | 'change'` prop branching the close-callback dispatch.
-- Caller-supplied callbacks: `onSelect(mood: MoodId)` (always), `onClose()` (always, fires for the `change`-mode cancel paths), `onCancelInitial()` (only fires for the `initial`-mode cancel paths).
-- Optional `selectedMoodId?: MoodId` to visually highlight the current pick when the sheet is opened in `change` mode.
-- Korean copy throughout; touch targets ≥ 44×44 (mood cells and tab buttons).
+- Route file `src/app/(routes)/diary/[date]/page.tsx` wired to render the editor container (replaces the current stub).
+- Single editor container component at `src/app/(routes)/diary/[date]/_components/Editor.tsx` (route-scoped, split into sub-components per 100-line rule). Sub-components: `EditorHeader`, `EditorBody` (textarea), `EditorToolbar`, `EditorMoreMenu` (wraps BottomSheet), `UnsavedChangesDialog` (wraps ConfirmDialog), plus hooks `useEditorState` and `useAutosave`.
+- Four entry contexts per PRD §4.3.8:
+  - Calendar empty date: all fields blank, `MoodPickerSheet` auto-opens `mode='initial'`, delete menu item hidden.
+  - Calendar existing date: data prefilled from storage, no auto-open, delete shown.
+  - List item tap: same as above.
+  - AI chat citation tap: same as above (the editor only consumes the `date` route param; REQ-017 handles producing the citation link).
+- Header: left = `IconButton` (back arrow, 44×44, white circular) that checks dirty state and either navigates via `router.back()` or fires `UnsavedChangesDialog`; right = `IconButton` (⋯, white circular) that opens `BottomSheet` with "📋 일기 리스트 보기" (→ `Routes.list`) and "🗑 일기 삭제" (only when a saved entry exists → `ConfirmDialog` → REQ-002 `deleteDiary` + `router.back()`).
+- Mood area: `MoodIcon` centered, `size={64}` (at minimum, up to 80px per PRD §4.3.3), tappable. Tap opens `MoodPickerSheet mode='change' selectedMoodId={currentMood}`.
+- Date display below mood: Korean format "2026년 5월 15일 ▾" (static text for this REQ; the ▾ tap for horizontal calendar dropdown is REQ-010 — render the ▾ affordance but leave it inert for now so REQ-010 can hook in).
+- Textarea body: `<textarea>` with placeholder "오늘 어떤 하루였나요?" (PRD §4.3.6; note: REQ-008 sheet header uses "오늘은 어떤 하루였나요?" — the editor placeholder is the shorter form from §4.3.6). CSS class toggled for left vs center alignment. 5000-character soft limit (per PRD §9 row 6). Auto-scroll behavior when keyboard rises (CSS `resize: none` + scroll-padding or similar).
+- Bottom toolbar: always-visible 3-icon set (🖼 gallery stub, ☰ alignment, 🕐 time insert) + conditional 4th icon (✓ save) that appears only when the editor is focused AND there are unsaved changes. Gallery icon is present but calls a stub/noop for this REQ (REQ-011 wires it). Toolbar sticks above keyboard when keyboard is open.
+- Alignment toggle: single icon, toggles `text-left` / `text-center` CSS class on the textarea, state persisted to `DiaryEntry.textAlign` on save (see Open Questions for field addition).
+- Current-time insert: reads `HH:MM ` from `new Date()` and inserts it at `textarea.selectionStart`, replacing any selected range (`selectionStart`/`selectionEnd` API).
+- Explicit save (✓): calls REQ-002 `upsertDiary`, then shows `Toast("일기를 저장했어요!")` for ~1800ms, then blurs the textarea (keyboard closes).
+- Autosave: 1-second debounce on any state change (`body`, `mood`, `textAlign`), calls `upsertDiary` silently. Resets the debounce timer on each keystroke. No toast.
+- Unsaved-changes guard: when dirty state is true and user taps the back arrow, `ConfirmDialog` opens with two actions — "저장" (explicit save then navigate) and "취소" (dismiss dialog, stay on screen). PRD §4.3.2 says "확인 → 저장 후 복귀 / 취소 → 머무름"; confirm = save+back, cancel = stay. No "discard without saving" third option.
+- 1-per-day enforcement: `page.tsx` runs `getDiaryByDate(date)` on mount; if a record exists, treats entry as existing regardless of how the route was reached. Future dates allowed.
+- Empty-body save: allowed per PRD §9 row 3 and §13.2 row 4. A mood-only entry is valid. No blocking toast for empty body.
+- Delete flow: `ConfirmDialog` (no specific copy locked in PRD — see Open Questions) → `deleteDiary(date)` → `router.back()`.
+- Tests: four entry-context initial state tests, autosave debounce test, explicit-save toast test, back-navigation guard test, current-time insert test.
+- E2E: "캘린더 빈 셀 → 무드 선택 → 본문 입력 → 자동 저장 → 뒤로 → 캘린더에 무드 표시".
 
-## Out of Scope (deferred to owner REQ)
+## Out of Scope (with pointer to owner REQ if known)
 
-- Editor integration / the auto-open-on-empty-entry trigger — REQ-009.
-- "테마" category content (seasonal mood packs) — v2, see PRD §3.4.1.
-- "일상" sub-category (activity/state stickers) — v2.
-- User-defined custom moods — not in PRD.
-- Mood-selection-driven LLM context, statistics, or chart wiring — owned by REQ-014/017.
-- Persistence of the picked mood into a `DiaryEntry` — REQ-009 owns the save flow; this REQ only emits `onSelect(mood)` upward.
-- Routing / `router.back()` calls — REQ-009 owns navigation; this REQ only emits `onCancelInitial()`.
-- New shared primitives in `src/design-system/` — REQ-005 already supplies BottomSheet, Toast, MoodIcon, useToast, useDialogControl.
+- Horizontal calendar inline dropdown (▾ tap) — REQ-010. The ▾ affordance renders but is inert.
+- Photo carousel, long-press delete, gallery picker wiring — REQ-011. The 🖼 toolbar icon renders but calls a noop.
+- Fullscreen photo viewer — REQ-012.
+- Diary list screen itself — REQ-013. The ⋯ menu item "📋 일기 리스트 보기" navigates to `Routes.list`, but REQ-013 builds that screen.
+- AI chat citation production (the link that opens the editor) — REQ-017. This REQ only needs to handle incoming `date` route param.
+- Text search and filter — v2, not in PRD MVP scope.
+- Persona / AI chat — REQ-015–018.
+- JSON export — REQ-019.
+- Sharing, exporting entry — v2 (noted as such in PRD §4.3.2).
 
 ## Invariants
 
-1. **Composes REQ-005's `BottomSheet`** — no new `<dialog>`, no new slide animation, no new backdrop. `MoodPickerSheet` body is rendered inside `<BottomSheet>{...}</BottomSheet>`.
-2. **Single component, not two.** PRD §4.2.1 explicitly mandates the same modal for both trigger paths. The `mode` prop is the only differentiator; do not fork into `InitialMoodPickerSheet` + `ChangeMoodPickerSheet`.
-3. **Mood source of truth is REQ-003's `MOODS` array.** Do not hardcode emoji/label/color/ids locally; iterate `MOODS` to render the 10 cells in declared order.
-4. **Date header format**: `YYYY.MM.DD 요일` where 요일 ∈ {월, 화, 수, 목, 금, 토, 일}. Local timezone applies.
-5. **Title text**: "오늘은 어떤 하루였나요?" (no truncation, no variants).
-6. **Inactive tabs are tappable**: tapping "테마" or "일상" fires `Toast("곧 만나요!")` and does NOT change the active tab. Do not disable the element — it must still receive pointer events so the toast can fire.
-7. **Close-behavior dispatch**: every close path (grip drag down — handled by BottomSheet, backdrop click — handled by BottomSheet, explicit X — owned here) must funnel through a single internal `handleCancel()` that branches on `mode`. `initial` → calls `onCancelInitial?.()` then `onClose()`. `change` → calls `onClose()` only.
-8. **Item tap = commit + close**: tapping a mood cell calls `onSelect(moodId)` and then `onClose()`. It must NOT call `onCancelInitial()` even in `initial` mode (selection is not a cancel).
-9. **Toast must render inside the dialog DOM subtree**, per REQ-005's note that `<div>` cannot exceed `showModal()`'s top layer.
-10. **Touch targets ≥ 44×44**: each mood cell (including label region) and each tab pill meets this.
-11. **Achromatic UI; mood color from icons only.** Selected-cell highlight, if any, must come from peach (`#F5C896`) ring/background — never a custom mood-color background that would clash with the icon.
-12. **All user-facing text is Korean.**
+1. **Editor is one component for both new and edit.** The only behavioral differences are: (a) initial field values (empty vs fetched), (b) mood sheet auto-opens in new-entry context, (c) delete menu item visible only when a saved record exists. Do not create separate `NewEditor` and `EditEditor` components or routes.
+2. **Autosave is silent; explicit save shows toast.** 1-second debounce `upsertDiary` calls make no UI noise. Only the ✓ icon tap triggers `Toast("일기를 저장했어요!")`.
+3. **Mood reselect uses `MoodPickerSheet mode='change'`.** Never open it as `mode='initial'` when there is already a selected mood. `selectedMoodId` must be the current mood.
+4. **Header pattern is single ⋯ menu.** PRD §13.2 row 2 recommends ⋯ single menu (레퍼런스 일치). Adopting two separate icons instead requires explicit user re-confirmation; proceed with ⋯ as the locked default.
+5. **Korean copy throughout.** User-facing strings:
+   - Toolbar save toast: `"일기를 저장했어요!"`
+   - Textarea placeholder: `"오늘 어떤 하루였나요?"`
+   - More-menu items: `"📋 일기 리스트 보기"`, `"🗑 일기 삭제"`
+   - Unsaved-changes dialog confirm action: `"저장"`, cancel action: `"취소"` (dialog body copy — see Open Questions for exact wording).
+   - Delete confirm dialog copy — see Open Questions.
+6. **`DiaryEntry.updatedAt` always refreshed on save.** Every `upsertDiary` call — whether autosave or explicit — must set `updatedAt` to the current ISO timestamp. Defined in REQ-002 contract.
+7. **1 entry per date (upsert keyed by `date`).** `upsertDiary` is always an upsert on `DiaryEntry.date`, never a create with a new id on the same date. A "new entry" route for a date that already has a record silently becomes an edit.
+8. **Back navigation preserves originating screen state.** `router.back()` uses REQ-006's history-stack model; the editor must not push to history manually or replace state. The calendar, list, or AI chat restores its own scroll/sort state on re-render.
+9. **No new third-party dependencies.** `selectionStart`/`selectionEnd` for time-insert, `setTimeout`/`clearTimeout` for debounce, `Intl` for any formatting — all native.
+10. **File size rule: each file ≤ ~100 lines.** The container `Editor.tsx` must be split across `EditorHeader`, `EditorBody`, `EditorToolbar`, `EditorMoreMenu`, and `UnsavedChangesDialog`. Hooks `useEditorState` and `useAutosave` are separate files.
+11. **Reuse existing primitives only.** `BottomSheet`, `Toast`, `useToast`, `ConfirmDialog`, `IconButton`, `MoodIcon`, `MoodPickerSheet`, `Routes`, `useRouterBack` (or `router.back()` from `next/navigation`), `upsertDiary`, `deleteDiary`, `getDiaryByDate` from `@/lib/storage`.
 
 ## Open Questions and Recommended Defaults
 
-1. **Component file location** — `src/design-system/MoodPickerSheet.tsx` vs `src/app/_components/MoodPickerSheet.tsx`?
-   - **Recommend** `src/design-system/MoodPickerSheet.tsx`. It is a reusable composite consumed by the editor (REQ-009) and a likely candidate for re-use in any future "change mood in past entry" flow. Aligns with CLAUDE.md's "UI 컴포넌트 재사용 규칙" — register in design system on first appearance even when only one caller exists today.
+1. **Editor sub-component file location** — `src/app/(routes)/diary/[date]/_components/` vs `src/app/_components/`?
+   - **Recommend** route-scoped: `src/app/(routes)/diary/[date]/_components/`. The editor is not re-used from any other route today; REQ-010 and REQ-011 extend it in place. Route-scoping keeps the concern local. If a future REQ creates a second editor consumer, promote to `src/app/_components/` at that time per CLAUDE.md UI reuse rules.
 
-2. **Props signature shape** — one `onCancel(mode)` callback vs explicit `onClose` + `onCancelInitial`?
-   - **Recommend** explicit two callbacks. Contract reads:
-     ```ts
-     interface MoodPickerSheetProps {
-       open: boolean;
-       date: string;                       // ISO 'YYYY-MM-DD'
-       mode: 'initial' | 'change';
-       selectedMoodId?: MoodId;            // highlight in 'change' mode
-       onSelect: (moodId: MoodId) => void;
-       onClose: () => void;                // always fires on close
-       onCancelInitial?: () => void;       // only fires when mode === 'initial' AND closed without selecting
-     }
-     ```
-     Explicit names make the call-site contract self-documenting and remove the caller's need to branch on a `mode` argument inside its handler.
+2. **Form state shape** — separate `useState` calls vs `useReducer` vs a custom `useEditorState` hook?
+   - **Recommend** a custom `useEditorState` hook with `useReducer` internally. The editor manages at least: `mood: MoodId | undefined`, `body: string`, `textAlign: 'left' | 'center'`, `isDirty: boolean`, `isSaved: boolean`, `moodSheetOpen: boolean`, `moreMenuOpen: boolean`, `unsavedDialogOpen: boolean`. Eight interacting fields with defined transitions are better served by named reducer actions than eight `useState` calls scattered across the container.
 
-3. **Toast scoping** — global vs per-instance?
-   - **Recommend** per-instance. Use REQ-005's `useToast()` inside `MoodPickerSheet`; render `<Toast>` as a child of the sheet body (which lives inside `<dialog>`), satisfying the z-index note in REQ-005. No new global toast queue.
+3. **`isDirty` derivation** — snapshot diff or explicit setter on every mutating action?
+   - **Recommend** snapshot diff. On mount, capture `initialSnapshot = { mood, body, textAlign }` (from fetched data or empty defaults). After each change, `isDirty = JSON.stringify(current) !== JSON.stringify(initialSnapshot)`. Reset snapshot after every successful save (autosave or explicit). This prevents drift where a user types then deletes back to original and the guard still fires.
 
-4. **Date-string formatting** — pull in `date-fns`/`dayjs` or hand-roll?
-   - **Recommend** hand-roll a 5-line helper using `Intl.DateTimeFormat('ko-KR', { weekday: 'short' })` for the Korean weekday and string slicing of the ISO `'YYYY-MM-DD'` input for the date portion. No new dependency; the formatter is local to MoodPickerSheet and can graduate to a shared util when REQ-009's editor needs the same format.
+4. **Autosave debounce wiring** — inline `useEffect` with `setTimeout` in the editor vs a standalone `useAutosave` hook?
+   - **Recommend** a standalone `useAutosave(value, delay, saveFn)` hook in `src/lib/hooks/useAutosave.ts`. Reasons: (a) isolatable and testable on its own, (b) REQ-019 (JSON export) and REQ-017 (chat input auto-draft) may need a similar primitive, (c) separates timing logic from editor business logic per the file-responsibility rule.
 
-5. **Tab styling** — new `Tabs` primitive in design system or inline Tailwind?
-   - **Recommend** inline Tailwind only. The tab pattern (charcoal underline on active, meta gray on inactive) is small and currently used in just one place. Promote to a `Tabs` primitive when a second consumer appears (per CLAUDE.md "UI 컴포넌트 재사용 규칙" step 3). No primitive in REQ-008.
+5. **Current-time insert behavior** — insert at cursor start only, or replace the selection range?
+   - **Recommend** replace the selection range. Behavior: read `selectionStart` and `selectionEnd`, splice `"HH:MM "` into `body` string at that range (replacing any selected text), then programmatically set `selectionStart === selectionEnd === insertionEnd`. This is the standard text-editor idiom and avoids surprising behavior when text is selected before tapping the clock icon.
 
-6. **Selected-mood highlight in `change` mode** — what visual?
-   - **Recommend** optional 2px peach (`#F5C896`) ring + subtle peach-tint background on the selected cell. PRD does not specify, but a visible "current pick" cue is necessary for the change path to feel correct. Falls back to plain rendering when `selectedMoodId` is undefined (i.e. always in `initial` mode).
+6. **Save toast component** — which `Toast` and `useToast` instance?
+   - **Recommend** a per-instance `useToast()` inside `EditorToolbar` (or hoisted to `Editor` and passed down), rendering `<Toast>` outside the keyboard-attached toolbar (e.g. in the screen body, below the textarea), following the REQ-005/REQ-008 pattern. Do not use a global singleton — there is none in the current codebase.
 
-7. **Explicit close (X) button** — present or rely on backdrop/grip?
-   - PRD §4.2.3 explicitly lists "명시적 닫기 X 버튼" as one of three close affordances. **Recommend** including a small `IconButton` (X) in the top-right of the sheet body. All three close paths (X tap, backdrop click, Escape key) funnel through the same `handleCancel()`.
+7. **Confirm dialog for both unsaved-changes guard and delete confirm** — share `ConfirmDialog` with different props?
+   - **Recommend** yes: reuse `ConfirmDialog` from REQ-005 for both. Pass different `title`, `confirmLabel`, `cancelLabel` props. Do not fork into two separate component files.
+
+8. **Back-navigation guard implementation** — `beforeunload` event vs in-app back-button intercept?
+   - **Recommend** in-app intercept only. `beforeunload` fires on browser tab close — outside the scope of the PRD guard (which is about the in-app back arrow). Intercept by replacing the back `IconButton`'s `onClick`: if `isDirty`, open `UnsavedChangesDialog`; else call `router.back()`. The autosave should already have resolved most dirty states within 1 second of the last change, making this guard rare in practice.
+
+9. **Unsaved-changes dialog and delete-confirm dialog copy** — PRD §4.3.2 describes behavior but does not specify exact dialog body text.
+   - **Recommend defaults**:
+     - Unsaved-changes dialog: title `"저장되지 않은 변경사항이 있어요"`, confirm `"저장하고 나가기"`, cancel `"계속 작성"`.
+     - Delete dialog: title `"일기를 삭제할까요?"`, body `"삭제한 일기는 복구할 수 없어요."`, confirm `"삭제"`, cancel `"취소"`.
+   - These can be tuned during implementation without re-asking the user since they are copy choices, not feature decisions.
+
+10. **`textAlign` field on `DiaryEntry`** — PRD §4.3.6 specifies alignment, but REQ-002's `DiaryEntry` schema may not include a `textAlign` field. If it does not exist, adding it is a minor schema extension (no migration needed for localStorage append).
+    - **Recommend** add `textAlign?: 'left' | 'center'` to `DiaryEntry` type and default to `'left'` on read. This is additive and backward-compatible since old entries without the field will read as `undefined` and fall back to `'left'`.
+
+11. **Gallery toolbar icon behavior** — REQ-011 is not yet done. Should the 🖼 icon be visible but inert, visible with a "곧 만나요!" toast, or hidden?
+    - **Recommend** visible but fires a `Toast("곧 만나요!")` noop, consistent with the inactive-tab pattern used in REQ-008. This avoids a dead tap with no feedback. REQ-011 will replace the noop with the real handler.
 
 ## Dependency Check
 
-| Dep | Status | Used for |
+| Dep | Status in index | What REQ-009 uses from it |
 |---|---|---|
-| REQ-002 (`MoodId`, types) | DONE | Type import from `@/lib/storage` for the `onSelect` payload and `selectedMoodId` prop. |
-| REQ-003 (`MOODS`, `MoodIcon`) | DONE | Grid iteration source + 72px icon renderer. |
-| REQ-005 (`BottomSheet`, `Toast`, `useToast`, `useDialogControl`, `IconButton`) | DONE | `BottomSheet` for sheet shell, `Toast` + `useToast` for inactive-tab feedback, `IconButton` for the X close. |
-| REQ-001 (Option B scaffold: Next.js / Tailwind / `'use client'`) | DONE | Required for any new client component. |
+| REQ-002 | DONE | `DiaryEntry` type, `upsertDiary(entry)`, `deleteDiary(date)`, `getDiaryByDate(date)`, `MoodId` type |
+| REQ-003 | DONE | `MoodIcon` component (mood display in editor body), `MOODS` array (passed to `MoodPickerSheet` via that component) |
+| REQ-005 | DONE | `BottomSheet` (⋯ more menu shell), `Toast` + `useToast` (save toast), `ConfirmDialog` (unsaved-changes guard + delete confirm), `IconButton` (header buttons, toolbar buttons) |
+| REQ-006 | DONE | `Routes` constants (`Routes.list` for the list-nav menu item), history-stack navigation model (`router.back()` from `next/navigation`, same pattern as `useRouterBack` established in REQ-006) |
+| REQ-008 | DONE | `MoodPickerSheet` (both `mode='initial'` auto-open and `mode='change'` re-open), `MoodPickerSheetProps` interface |
 
-No forward dependency on REQ-009 (the editor); REQ-008 ships as a stand-alone reusable component with its props as the only integration surface.
+All five declared dependencies are DONE in the index. No forward dependencies are blocked. REQ-009 is the first real consumer of `MoodPickerSheet` (REQ-008) — the integration is expected and the API contract is fully documented in `/Users/jay/Documents/Projects/ai_diary/.agent-state/04-api-contract.md`.
+
+Carry-forward items from REQ-008 code review (noted in `/Users/jay/Documents/Projects/ai_diary/.agent-state/00-git-safety.md`):
+- NB-1: Escape key may not fire `onCancelInitial` in `mode='initial'` — the editor's `onCancelInitial` handler calls `router.back()`, so if Escape does not fire it, the back-navigation guard is bypassed. Implementer should verify and fix opportunistically.
+- NB-2: `MoodPickerSheet.tsx` is 129 lines — extract `MoodPickerTabs` if REQ-009 integration adds further lines to the file.
+- NB-3: Minor test-quality issue in REQ-008 TC-2; fix when convenient.
 
 ## Verdict
 PASS

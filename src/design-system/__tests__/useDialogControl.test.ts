@@ -93,4 +93,35 @@ describe('useDialogControl', () => {
     // The bubbled click's e.target is childDiv, not dialogEl
     expect(onClose).not.toHaveBeenCalled();
   });
+
+  it('cancel event (Escape key) calls onClose', () => {
+    const onClose = vi.fn();
+    render(React.createElement(TestDialog, { open: true, onClose }));
+    const dialogEl = document.querySelector('dialog') as HTMLDialogElement;
+
+    act(() => {
+      dialogEl.dispatchEvent(new Event('cancel', { bubbles: false, cancelable: true }));
+    });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancel event after open=false does not call onClose again', () => {
+    const onClose = vi.fn();
+    const { rerender } = render(
+      React.createElement(TestDialog, { open: true, onClose }),
+    );
+    act(() => {
+      rerender(React.createElement(TestDialog, { open: false, onClose }));
+    });
+    const callCountAfterClose = onClose.mock.calls.length;
+
+    const dialogEl = document.querySelector('dialog') as HTMLDialogElement;
+    act(() => {
+      dialogEl.dispatchEvent(new Event('cancel', { bubbles: false, cancelable: true }));
+    });
+
+    // Listener was removed — no new calls
+    expect(onClose.mock.calls.length).toBe(callCountAfterClose);
+  });
 });

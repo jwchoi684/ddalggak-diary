@@ -1,106 +1,92 @@
-# Test Report — REQ-008: 무드 선택 바텀시트 모달
+# Test Report — REQ-009 (일기 에디터)
 
 ## Summary
 
-Independent verification run for REQ-008 (Phase 9 landing). Two new files were inspected and
-all four quality gates were executed from the repo root. All 10 specified test cases from the
-test plan are present in `MoodPickerSheet.test.tsx`. No regressions in the pre-existing 181-test
-baseline. Full suite: 191/191 tests pass across 29 files.
+Independent verification of the REQ-009 implementation. All five verification commands passed with exit code 0. Total test count is 215 (32 test files), matching the claimed delta of +24 from a pre-REQ-009 baseline of 191. All new test files meet or exceed their minimum case counts. No skipped, `.only`, or `.skip` tests were found. The E2E suite expanded from 1 to 2 tests and both pass.
 
 ---
 
-## Tests Added / Updated
+## Verification Results
 
-### New — test file
-
-`src/design-system/__tests__/MoodPickerSheet.test.tsx` — 10 `it()` blocks inside one `describe`.
-
-| # | it() description | TC from plan | Status |
+| Command | Exit Code | Result | Notes |
 |---|---|---|---|
-| 1 | `open=true calls showModal` | TC-1a | PRESENT |
-| 2 | `open=false calls close` | TC-1b | PRESENT |
-| 3 | `renders formatted date and title in header` | TC-2 | PRESENT |
-| 4 | `renders a button for each of the 10 moods` | TC-3 | PRESENT |
-| 5 | `tapping a mood calls onSelect then onClose; does not call onCancelInitial` | TC-4 | PRESENT |
-| 6 | `X button in change mode calls onClose once, not onCancelInitial` | TC-5/7 (merged) | PRESENT |
-| 7 | `X button in initial mode calls onCancelInitial then onClose` | TC-6 | PRESENT |
-| 8 | `tapping an inactive tab shows the 곧 만나요! toast` | TC-8 | PRESENT |
-| 9 | `joy button has ring-2 and ring-peach when selectedMoodId="joy"` | TC-9 | PRESENT |
-| 10 | `MoodPickerSheet.tsx has "use client" directive` | TC-10 | PRESENT |
-
-Coverage notes per plan:
-
-- **TC-5 and TC-7 merged** — both assertions (`onClose` once, `onCancelInitial` not called in
-  `mode='change'`) are in the single `it` block at line 90. The plan explicitly permits this merge
-  when budget is tight.
-- **TC-6 call-order guard** — `invocationCallOrder[0]` comparison is present (line 108), confirming
-  `onCancelInitial` fires before `onClose`.
-- **TC-4 call-order guard** — `invocationCallOrder[0]` comparison is present (line 87).
-- **TC-8** — both inactive tabs (`테마` and `일상`) asserted in a single `it`.
-- No skipped tests (`it.skip`, `xit`, `.todo`). No `.only` calls. No flaky async gaps.
-
-### New — production source (inspected only, no changes made)
-
-`src/design-system/MoodPickerSheet.tsx` — 129 lines. `"use client"` directive on line 1.
-All imports resolve to existing `@/design-system/*` and `@/lib/storage` modules.
+| `npm run typecheck` | 0 | PASS | 0 TypeScript errors |
+| `npm run lint` | 0 | PASS | 0 ESLint warnings or errors (deprecation notice for `next lint` is cosmetic only) |
+| `npm test` | 0 | PASS | 32 test files, 215 tests, 0 failures |
+| `npm run build` | 0 | PASS | Clean production build; `/diary/[date]` = 5.68 kB |
+| `npm run test:e2e` | 0 | PASS | 2 Playwright tests pass (calendar + editor journey) |
 
 ---
 
-## Commands Run
+## Test Case Audit (counts per file)
 
-```
-npm run typecheck   → PASS (exit 0, no output)
-npm run lint        → PASS (no ESLint warnings or errors; next lint deprecation notice is cosmetic)
-npm test            → PASS (191/191 tests, 29 files)
-npm run build       → PASS (Next.js 15.5.18, 7 routes; compiled successfully)
-```
+| File | `it()` / `test()` blocks | Requirement | Delta vs pre-REQ-009 |
+|---|---|---|---|
+| `src/lib/hooks/__tests__/useAutosave.test.ts` | 5 | >= 5 | New file (+5) |
+| `src/lib/hooks/__tests__/useEditorState.test.ts` | 5 | >= 5 | New file (+5) |
+| `src/app/diary/[date]/__tests__/Editor.test.tsx` | 12 | >= 12 | New file (+12) |
+| `src/design-system/__tests__/useDialogControl.test.ts` | 7 (was 5 at commit 43310cb) | +2 new | +2 confirmed via git show |
+| `e2e/editor.spec.ts` | 1 | >= 1 | New file (+1 Playwright test) |
 
----
-
-## Results
-
-| Command | Exit code | Result |
-|---|---|---|
-| `npm run typecheck` | 0 | PASS |
-| `npm run lint` | 0 | PASS |
-| `npm test` | 0 | PASS — 191/191 tests (29 files) |
-| `npm run build` | 0 | PASS — 7 static/dynamic routes generated |
+All counts meet expectations. No `.only`, `.skip`, `xtest`, or `xit` modifiers present in any of the new files.
 
 ---
 
-## Failures
+## Spot Checks
 
-None.
+### C4 - Autosave called silently after 1 s
+
+`Editor.test.tsx` lines 115-131. The test seeds an entry with `mood: 'joy'` (so `saveFn` guard passes), fires `fireEvent.change` on the textarea, advances fake timers by 1000 ms, then asserts:
+- `expect(upsertDiaryMock).toHaveBeenCalledTimes(1)` - silent call happened once
+- `expect(upsertDiaryMock).toHaveBeenCalledWith(expect.objectContaining({ text: '새 내용', date: '2026-05-15' }))` - correct payload
+- `expect(document.body.textContent).not.toContain('일기를 저장했어요!')` - no toast rendered
+
+All three assertions present and correct.
+
+### C6 - Explicit save shows toast
+
+`Editor.test.tsx` lines 145-161. After typing, the test clicks the `aria-label="저장"` button and asserts:
+- `expect(upsertDiaryMock).toHaveBeenCalledTimes(1)` - storage write happened
+- `expect(upsertDiaryMock).toHaveBeenCalledWith(expect.objectContaining({ text: '수정됨' }))` - correct text
+- `expect(document.body.textContent).toContain('일기를 저장했어요!')` - toast visible
+
+All three assertions present and correct.
+
+### C8 - Dirty + back opens unsaved dialog (not router.back)
+
+`Editor.test.tsx` lines 173-185. After changing textarea text, the test clicks `aria-label="뒤로가기"` and asserts:
+- `expect(document.body.textContent).toContain('저장되지 않은 변경사항이 있어요')` - dialog copy visible
+- `expect(mockRouter.back).not.toHaveBeenCalled()` - navigation blocked
+
+Both assertions present and correct.
+
+### useDialogControl delta confirmation
+
+`git show 43310cb:src/design-system/__tests__/useDialogControl.test.ts` yields 5 `it()` blocks. The current file has 7 `it()` blocks. The two new cases (lines 97-127) are:
+- D1: `cancel event (Escape key) calls onClose` - dispatches a `cancel` event and asserts `onClose` called once
+- D2: `cancel event after open=false does not call onClose again` - transitions to `open=false`, then dispatches `cancel` and asserts no additional `onClose` calls
+
+Both cases are substantive and validate the NB-1 fix correctly.
 
 ---
 
 ## Coverage Notes
 
-- `MoodPickerSheet` unit surface is fully covered: open/close state wiring (via `BottomSheet`
-  delegate), header rendering, all 10 mood cells, both close paths (`handleCancel` vs
-  `handleSelect`), both `mode` branches, inactive-tab toast, selected-mood highlight, and the
-  "use client" source guard.
-- `BottomSheet`, `Toast`, `useToast`, and `MoodIcon` primitives are tested by their own existing
-  suites; `MoodPickerSheet.test.tsx` treats them as black-box dependencies (correct).
-- `formatSheetDate` output is validated indirectly through TC-2 (`'2026.05.17 일'`), which locks
-  local-TZ dot-separated format and Korean single-char weekday.
-- The `document.querySelectorAll` + `btn()` helper pattern is required because happy-dom excludes
-  `<dialog>` content from the a11y tree when `showModal()` is mocked (native `open` attribute is
-  never set). This matches the established pattern in `ConfirmDialog.test.tsx`.
+The following deferred gaps from the test plan remain non-blocking:
+
+1. `textAlign` not asserted in explicit-save payload (C6 uses `objectContaining` without `textAlign`).
+2. `textAlign ?? 'left'` fallback for legacy data (INV-13) - fixtures always provide `textAlign`.
+3. Combined "Escape on MoodPickerSheet in mode=initial" chain test - deferred.
+4. More-menu delete item hidden for new entry verified indirectly (C1 scans all button text) but not by opening the menu for a new entry.
+
+None of these are blockers.
 
 ---
 
 ## Remaining Risks
 
-- **Line budget soft cap exceeded**: component is 129 lines, test file is 132 lines. Both exceed
-  the 110-line cap stated in the technical design. CLAUDE.md notes the cap is a signal not an
-  absolute; the extra lines are structural (JSDoc interface comments, happy-dom workaround helper)
-  not padding. No action required before release.
-- **`formatSheetDate` is private**: if REQ-009's editor needs the same format, promote to
-  `src/lib/formatDate.ts` at that time.
-- **Full editor flow E2E**: calendar to mood picker to body input is deferred to REQ-009's
-  Playwright suite per the test plan.
-- **CJS Vite deprecation warning**: cosmetic, affects all test runs in this project. Deferred.
+- **E2E date dependency**: the `editor.spec.ts` test dynamically uses today's date. If the calendar FAB's `aria-label` changes or is not `"오늘 일기 쓰기"`, the test will break. Currently passes against the live app.
+- **E2E history dependency**: the test navigates via `goto('/')` + FAB to establish history for `router.back()`. A direct `goto('/diary/...')` would break back navigation in the browser. This is a known intentional design (noted in implementation deviations).
 
 ---
 

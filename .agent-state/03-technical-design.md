@@ -1,262 +1,420 @@
-# Technical Design — REQ-008
+# Technical Design — REQ-009
 
-## Goal
+## Summary
 
-Deliver `MoodPickerSheet`, a single composite client component wrapping REQ-005's `BottomSheet`. User picks 1 of 10 fixed moods. Supports two entry modes (`initial` / `change`) sharing same UI, differing only in close-callback dispatch. No new libraries, no new primitives, no backend.
+REQ-009 delivers the diary editor: a single "use client" React component tree that handles both new-entry creation and existing-entry editing under the same route `src/app/diary/[date]/`. The route stub (already a Next.js 15 async server component with date validation) is kept as-is; it gains one line: rendering `<Editor date={date} />`. All editor logic lives in route-scoped `_components/` files and two shared hooks. No new third-party dependencies. No backend changes. No schema changes (`DiaryEntry.textAlign` is already present as a required field).
 
----
-
-## Resolved Unknowns + Risks
-
-**Unknown 1 — Toast positioning inside `<dialog>`.** `Toast.tsx` uses `fixed bottom-24`. Inside `showModal()` top-layer, `fixed` is relative to dialog's containing block (not viewport). Pre-emptively pass `className="!bottom-6 left-1/2 -translate-x-1/2"` for in-sheet context. Test verifies text appears, not pixel position.
-
-**Unknown 2 — Sub-component split.** Total file likely 100–130 lines. Extract `MoodPickerTabs` as PRIVATE (non-exported) function in same `MoodPickerSheet.tsx`. If file exceeds 110 lines, move to `src/design-system/MoodPickerTabs.tsx` named export. Inline-first; revisit only if hit.
-
-**Risk 1 — Toast z-index inside dialog.** Addressed: `<Toast>` is last child inside BottomSheet `children` fragment. `z-50` in top-layer context is fine.
-
-**Risk 2 — MoodIcon (Server) in Client.** Legal in Next.js 15. No action.
-
-**Risk 3 — Date TZ.** Use `new Date(date + 'T00:00:00')` (local TZ) — never `new Date(date)` (UTC midnight).
-
-**Risk 4 — `handleCancel` double-call.** `useDialogControl` only fires `onClose` on `e.target === ref.current` (backdrop), not children. X click doesn't bubble to backdrop. No code change; test case locks behavior.
+Six open unknowns from the architecture report are resolved in this design (detailed in Implementation Strategy below).
 
 ---
 
-## File Layout
+## Implementation Strategy
 
-| File | Role | Budget |
-|---|---|---|
-| `src/design-system/MoodPickerSheet.tsx` | Component | target 95, cap 110 |
-| `src/design-system/__tests__/MoodPickerSheet.test.tsx` | Vitest | target 95, cap 110 |
+### Decision log — closing the six architecture unknowns
 
-Conditional: `src/design-system/MoodPickerTabs.tsx` (only if hit 110-line cap).
+**Unknown 1 — `ConfirmDialog` missing `title` prop.**
+Decision: option (a) — embed all copy in `message` as a single string. Do not add a `title?` prop to `ConfirmDialog` and do not create a new component. The design-system surface stays unchanged.
 
-No existing files modified.
+Concrete copy:
+- Unsaved-changes guard: `message="저장되지 않은 변경사항이 있어요. 저장하고 나가시겠어요?"` / `confirmLabel="저장하고 나가기"` / `cancelLabel="계속 작성"`
+- Delete confirm: `message="일기를 삭제할까요? 삭제한 일기는 복구할 수 없어요."` / `confirmLabel="삭제"` / `cancelLabel="취소"` / `destructive={true}`
 
----
+**Unknown 2 — Hydration flash before storage read.**
+Decision: render the editor shell unconditionally. The textarea starts empty. Once `readDiaries()` returns inside `useEffect`, a `LOAD_ENTRY` action populates all fields. The `isLoaded` flag is `false` until that action fires. `isDirty` is defined as `false` when `!isLoaded` — this prevents the back-guard from triggering before load completes. For a new entry the empty state IS the correct initial state, so there is no visible flash. For an existing entry the textarea is blank for one paint frame; this is acceptable for MVP.
 
-## Props Signature
+**Unknown 3 + 6 — Textarea keyboard avoidance / toolbar sticky positioning.**
+Decision: CSS-only, no `visualViewport` JS. Layout is a full-height flex column:
+```
+<main class="flex flex-col h-[100dvh] bg-cream">
+  <EditorHeader />                   /* fixed height */
+  <EditorBody class="flex-1 overflow-y-auto" />
+  <EditorToolbar class="sticky bottom-0 bg-paper border-t pb-[env(safe-area-inset-bottom,0px)]" />
+</main>
+```
+`100dvh` shrinks with the keyboard on modern iOS/Chrome. `sticky bottom-0` keeps the toolbar at the bottom of the scroll container. `env(safe-area-inset-bottom,0px)` covers iPhone notch padding.
 
+**Unknown 4 — E2E localStorage seeding.**
+Decision: `page.addInitScript(fn)` runs in the page context before any page script. Define `e2e/_helpers/seedDiaries.ts` exporting a function returning the serialized fixture data. The E2E test calls `await page.addInitScript(seedFn)` before `await page.goto(url)`.
+
+**Unknown 5 — `MoodPickerSheet` Escape / `useDialogControl` NB-1.**
+Decision: fix `useDialogControl` as part of this REQ. Add a `cancel` event listener that calls `onClose` when the user presses Escape. ~8 lines of change; benefits BottomSheet, ConfirmDialog, and MoodPickerSheet uniformly.
+
+Updated `useDialogControl` effect (capture latest `onClose` via ref to keep effect deps minimal):
 ```ts
-import type { MoodId } from '@/lib/storage';
+const onCloseRef = useRef(onClose);
+useEffect(() => { onCloseRef.current = onClose; });
 
-export interface MoodPickerSheetProps {
-  open: boolean;
-  date: string;                 // ISO 'YYYY-MM-DD', local TZ
-  selectedMoodId?: MoodId;      // undefined in 'initial'; set in 'change'
-  mode: 'initial' | 'change';
-  onSelect: (moodId: MoodId) => void;
-  onClose: () => void;
-  onCancelInitial?: () => void; // ONLY in mode='initial' AND closed without select
-}
+useEffect(() => {
+  const el = ref.current;
+  if (!el) return;
+  if (open) el.showModal();
+  else el.close();
+  const handleCancel = (e: Event) => { e.preventDefault(); onCloseRef.current(); };
+  el.addEventListener('cancel', handleCancel);
+  return () => el.removeEventListener('cancel', handleCancel);
+}, [open]);
 ```
 
+`e.preventDefault()` keeps the controlled `open` prop in charge of the animation.
+
+### `isDirty` derivation — snapshot diff
+
+```
+isDirty = isLoaded && (
+  state.mood !== state.snapshot.mood ||
+  state.text !== state.snapshot.text ||
+  state.textAlign !== state.snapshot.textAlign
+)
+```
+`snapshot` is set by `LOAD_ENTRY` and reset by `MARK_SAVED` (autosave or explicit).
+
+### Autosave save function
+
+`saveFn` (in `Editor.tsx`):
+1. Returns early if `state.mood === undefined` (mood is required for a valid `DiaryEntry`).
+2. Uses `state.persistedId ?? generateId()` as id.
+3. `createdAt = state.persistedCreatedAt ?? new Date().toISOString()`.
+4. Calls `upsertDiary({ id, date, mood, text, textAlign, photos: [], createdAt, updatedAt: new Date().toISOString() })`.
+5. Dispatches `MARK_SAVED({ id, createdAt })`.
+
 ---
 
-## Component Skeleton
+## Frontend Design
+
+### Component tree
+
+```
+src/app/diary/[date]/page.tsx            (server, unchanged + <Editor />)
+src/app/diary/[date]/_components/
+  Editor.tsx                             (client container)
+  EditorHeader.tsx                       (client)
+  EditorBody.tsx                         (client)
+  EditorToolbar.tsx                      (client)
+  EditorMoreMenu.tsx                     (client)
+```
+
+No `UnsavedChangesDialog.tsx` — the two `ConfirmDialog` instances render inline in `Editor.tsx`.
+
+### `page.tsx`
 
 ```tsx
-"use client";
+import { Editor } from './_components/Editor';
+// ...
+const { date } = await params;
+if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) notFound();
+return <Editor date={date} />;
+```
 
-import React from 'react';
-import type { MoodId } from '@/lib/storage';
-import { MOODS } from '@/design-system/moods';
-import { BottomSheet } from '@/design-system/BottomSheet';
-import { Toast } from '@/design-system/Toast';
-import { useToast } from '@/design-system/useToast';
-import { IconButton } from '@/design-system/IconButton';
-import { MoodIcon } from '@/design-system/MoodIcon';
+Outer `<main>` wrapper removed — `Editor` owns its own layout root.
 
-const WEEKDAY_FMT = new Intl.DateTimeFormat('ko-KR', { weekday: 'short' });
+### `Editor.tsx` (container, ~90 lines)
 
-function formatSheetDate(date: string): string {
-  const d = new Date(date + 'T00:00:00');
-  return `${date.replace(/-/g, '.')} ${WEEKDAY_FMT.format(d)}`;
-}
+Imports: `useEditorState`, `useAutosave`, `useRouter` (from `next/navigation`), `useToast`, `readDiaries`, `upsertDiary`, `removeDiary`, `generateId`, `Routes`, `MoodPickerSheet`, sub-components, `ConfirmDialog`, `Toast`.
 
-const CloseIcon = (
-  <svg viewBox="0 0 24 24" width={20} height={20} fill="none"
-       stroke="currentColor" strokeWidth={2} strokeLinecap="round">
-    <line x1="6" y1="6" x2="18" y2="18" />
-    <line x1="6" y1="18" x2="18" y2="6" />
-  </svg>
-);
+Responsibilities:
+- `const [state, dispatch] = useEditorState(date)`.
+- `const isDirty = state.isLoaded && (state.mood !== state.snapshot.mood || state.text !== state.snapshot.text || state.textAlign !== state.snapshot.textAlign);`
+- `autosaveValue = useMemo(() => ({ mood, text, textAlign }), [state.mood, state.text, state.textAlign])`
+- `saveFn = useCallback(...)` depending on `[state.persistedId, state.persistedCreatedAt, date, dispatch]`
+- `useAutosave(autosaveValue, 1000, saveFn)`.
+- `handleBack`: dirty → `dispatch SET_UNSAVED_DIALOG(true)`; else `router.back()`.
+- `handleSaveAndBack`: call `saveFn` then `router.back()`.
+- `handleDelete`: `removeDiary(state.persistedId!)` then `router.back()`.
+- `handleExplicitSave`: call `saveFn`, then `toast.show('일기를 저장했어요!')`.
+- `<MoodPickerSheet open={state.moodSheetMode !== 'closed'} mode={state.moodSheetMode === 'initial' ? 'initial' : 'change'} ...>` with `onCancelInitial={() => router.back()}`.
+- Two inline `<ConfirmDialog>` instances for unsaved-changes and delete.
+- `<Toast {...toastState}>` rendered above the toolbar in the DOM tree.
 
-function MoodPickerTabs({ onInactiveTap }: { onInactiveTap: () => void }) {
-  return (
-    <div className="mb-4">
-      <div className="flex gap-4 mb-1">
-        <button type="button"
-          className="text-sm font-medium text-charcoal border-b-2 border-charcoal pb-1 min-h-[44px] px-2">
-          기본
-        </button>
-        <button type="button" onClick={onInactiveTap}
-          className="text-sm text-meta pb-1 min-h-[44px] px-2">
-          테마
-        </button>
-      </div>
-      <div className="flex gap-4">
-        <button type="button"
-          className="text-xs font-medium text-charcoal border-b-2 border-charcoal pb-1 min-h-[44px] px-2">
-          기분
-        </button>
-        <button type="button" onClick={onInactiveTap}
-          className="text-xs text-meta pb-1 min-h-[44px] px-2">
-          일상
-        </button>
-      </div>
-    </div>
-  );
-}
+### `useEditorState.ts`
 
-export interface MoodPickerSheetProps { /* as above */ }
+`useEditorState(date: string): [EditorState, Dispatch<EditorAction>]`.
 
-export function MoodPickerSheet({
-  open, date, selectedMoodId, mode, onSelect, onClose, onCancelInitial,
-}: MoodPickerSheetProps) {
-  const toast = useToast();
-
-  function handleCancel() {
-    if (mode === 'initial') onCancelInitial?.();
-    onClose();
-  }
-
-  function handleSelect(moodId: MoodId) {
-    onSelect(moodId);
-    onClose();
-  }
-
-  return (
-    <BottomSheet open={open} onClose={handleCancel}>
-      <div className="flex items-start justify-between mb-2">
-        <div>
-          <p className="text-xs text-meta">{formatSheetDate(date)}</p>
-          <h2 className="text-lg font-medium text-charcoal">오늘은 어떤 하루였나요?</h2>
-        </div>
-        <IconButton icon={CloseIcon} label="닫기" onClick={handleCancel} />
-      </div>
-
-      <MoodPickerTabs onInactiveTap={() => toast.show('곧 만나요!')} />
-
-      <div className="grid grid-cols-3 gap-4">
-        {MOODS.map((mood) => (
-          <button
-            key={mood.id}
-            type="button"
-            aria-label={mood.label}
-            onClick={() => handleSelect(mood.id)}
-            className={`flex flex-col items-center gap-2 p-2 rounded-[var(--radius-card)] min-h-[44px]${
-              mood.id === selectedMoodId ? ' ring-2 ring-peach bg-peach-light/30' : ''
-            }`}
-          >
-            <MoodIcon id={mood.id} size={72} />
-            <span className="text-sm text-charcoal">{mood.label}</span>
-          </button>
-        ))}
-      </div>
-
-      <Toast
-        message={toast.message}
-        open={toast.open}
-        onClose={toast.hide}
-        className="!bottom-6 left-1/2 -translate-x-1/2"
-      />
-    </BottomSheet>
-  );
+State:
+```ts
+interface EditorState {
+  mood: MoodId | undefined;
+  text: string;
+  textAlign: 'left' | 'center';
+  persistedId: string | undefined;
+  persistedCreatedAt: string | undefined;
+  snapshot: { mood: MoodId | undefined; text: string; textAlign: 'left' | 'center' };
+  isLoaded: boolean;
+  moodSheetMode: 'initial' | 'change' | 'closed';
+  moreMenuOpen: boolean;
+  unsavedDialogOpen: boolean;
+  deleteDialogOpen: boolean;
 }
 ```
 
----
+Initial: all empty/false; `moodSheetMode: 'closed'`.
 
-## Date Formatter
+Actions:
+```ts
+type EditorAction =
+  | { type: 'LOAD_ENTRY'; entry: DiaryEntry | undefined }
+  | { type: 'SET_MOOD'; mood: MoodId }
+  | { type: 'SET_TEXT'; text: string }
+  | { type: 'TOGGLE_ALIGN' }
+  | { type: 'INSERT_TIME'; nextText: string }
+  | { type: 'MARK_SAVED'; id: string; createdAt: string }
+  | { type: 'OPEN_MOOD_SHEET' }
+  | { type: 'CLOSE_MOOD_SHEET' }
+  | { type: 'SET_MORE_MENU'; open: boolean }
+  | { type: 'SET_UNSAVED_DIALOG'; open: boolean }
+  | { type: 'SET_DELETE_DIALOG'; open: boolean };
+```
 
-`formatSheetDate(date: string): string` — module-level private function, not exported. If REQ-009's editor needs the same format, promote to `src/lib/formatDate.ts` at that point.
+Reducer key cases:
+- `LOAD_ENTRY` with entry: populate fields, snapshot=current, isLoaded=true, moodSheetMode='closed'.
+- `LOAD_ENTRY` without entry: snapshot=empty, isLoaded=true, moodSheetMode='initial'.
+- `MARK_SAVED`: snapshot=current, persistedId/persistedCreatedAt set.
+- `OPEN_MOOD_SHEET`: moodSheetMode='change'.
+- `CLOSE_MOOD_SHEET`: moodSheetMode='closed'.
 
-Input: ISO `'YYYY-MM-DD'`. Output: `'2026.05.17 일'` (dot-separated + Korean single-char weekday). Local TZ guaranteed.
+`useEffect` inside the hook: on mount (and date change), `dispatch LOAD_ENTRY(readDiaries().find(e => e.date === date))`.
 
----
+### `useAutosave.ts`
 
-## CloseIcon SVG
+```ts
+function useAutosave<T>(value: T, delayMs: number, saveFn: (v: T) => void): void {
+  useEffect(() => {
+    const t = setTimeout(() => saveFn(value), delayMs);
+    return () => clearTimeout(t);
+  }, [value, delayMs, saveFn]);
+}
+```
 
-Inline feather-style X, module-level constant. Passed to `IconButton`'s `icon` prop.
+Caller wraps `saveFn` in `useCallback`. Caller memoizes `value` if it is an object.
 
----
+### `EditorHeader.tsx` (~50 lines)
 
-## Tab Strip Structure
+Props: `{ onBack: () => void; onMoreMenu: () => void }`. Two `IconButton`s (back chevron left, ⋯ right) in a flex row.
 
-Two rows of inline Tailwind tabs. No `Tabs` primitive (single usage).
+### `EditorBody.tsx` (~80 lines)
 
-Active: `font-medium text-charcoal border-b-2 border-charcoal`. Inactive: `text-meta`.
+Props:
+```ts
+{
+  date: string;
+  mood: MoodId | undefined;
+  text: string;
+  textAlign: 'left' | 'center';
+  onMoodTap: () => void;
+  onTextChange: (text: string) => void;
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+}
+```
 
-Critical:
-- Inactive tabs MUST NOT carry `disabled` — must receive pointer events for toast.
-- Stateless — only one tab per row ever active in v1. Active styling is static.
-- All 4 tab buttons `min-h-[44px] px-2`.
+Mood area: `MoodIcon size={72}` inside a tappable button when mood set; placeholder dashed circle + "기분을 선택해요" otherwise. 44px touch target.
+
+Date label: `Intl.DateTimeFormat('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' }).format(new Date(date + 'T00:00:00'))` + static ` ▾`. Inert affordance.
+
+Textarea: `<textarea ref={textareaRef} value={text} onChange={e => onTextChange(e.target.value)} placeholder="오늘 어떤 하루였나요?" maxLength={5000} className="w-full flex-1 resize-none bg-transparent outline-none text-charcoal text-base placeholder:text-meta [textAlign-class]" />`.
+
+### `EditorToolbar.tsx` (~70 lines)
+
+Props:
+```ts
+{
+  isDirty: boolean;
+  textAlign: 'left' | 'center';
+  onAlignToggle: () => void;
+  onTimeInsert: () => void;
+  onGalleryTap: () => void;
+  onExplicitSave: () => void;
+}
+```
+
+`sticky bottom-0 bg-paper border-t flex items-center px-4 py-3 pb-[env(safe-area-inset-bottom,0px)] gap-4`.
+
+Icons in order: 🖼 gallery (noop), ☰ align toggle, 🕐 time, then conditional ✓ save (rendered only when `isDirty`).
+
+### `EditorMoreMenu.tsx` (~50 lines)
+
+Props:
+```ts
+{
+  open: boolean;
+  hasSavedEntry: boolean;
+  onClose: () => void;
+  onNavigateList: () => void;
+  onDeleteTap: () => void;
+}
+```
+
+`<BottomSheet open onClose>` body contains:
+- Button "📋 일기 리스트 보기" → `onNavigateList`
+- Button "🗑 일기 삭제" (only when `hasSavedEntry`) → `onDeleteTap`. Use `text-danger`.
+
+### Time insert flow
+
+In `Editor.tsx`:
+1. Holds `textareaRef = useRef<HTMLTextAreaElement>(null)`.
+2. `pendingCursorPos = useRef<number | null>(null)`.
+3. `handleTimeInsert()`:
+   ```ts
+   const el = textareaRef.current;
+   if (!el) return;
+   const start = el.selectionStart;
+   const end = el.selectionEnd;
+   const now = new Date();
+   const hh = String(now.getHours()).padStart(2, '0');
+   const mm = String(now.getMinutes()).padStart(2, '0');
+   const timeStr = `${hh}:${mm} `;
+   const newText = state.text.slice(0, start) + timeStr + state.text.slice(end);
+   pendingCursorPos.current = start + timeStr.length;
+   dispatch({ type: 'INSERT_TIME', nextText: newText });
+   ```
+4. `useLayoutEffect` after dispatch:
+   ```ts
+   useLayoutEffect(() => {
+     if (pendingCursorPos.current !== null && textareaRef.current) {
+       const p = pendingCursorPos.current;
+       textareaRef.current.focus();
+       textareaRef.current.setSelectionRange(p, p);
+       pendingCursorPos.current = null;
+     }
+   });
+   ```
+
+### `useDialogControl.ts` change
+
+See "Unknown 5" decision above. Add `onCloseRef` capture + `cancel` event listener inside the existing `useEffect`.
 
 ---
 
 ## Backend Design
 
-None. Purely compositional frontend.
+None.
 
 ---
 
 ## Data Model / Migration Design
 
-None. Existing types/data only.
+None. `DiaryEntry.textAlign` already in types. Editor uses `entry.textAlign ?? 'left'` defensively at runtime.
 
 ---
 
-## Test Design (handover to Phase 8)
+## Test Design
 
-File: `src/design-system/__tests__/MoodPickerSheet.test.tsx`. `// @vitest-environment happy-dom`.
+### `src/lib/hooks/__tests__/useAutosave.test.ts`
 
-Setup: `vi.fn()` stubs for `HTMLDialogElement.prototype.{showModal, close}` in `beforeEach`; `vi.useFakeTimers()`/`useRealTimers()`; `cleanup()` in `afterEach`.
+`// @vitest-environment happy-dom`, `vi.useFakeTimers()`.
 
-Helper:
+5 cases:
+1. Does not call `saveFn` before `delayMs` elapses.
+2. Calls `saveFn` exactly once after `delayMs` elapses.
+3. Resets timer on value change.
+4. Does not call `saveFn` after unmount.
+5. Passes the latest `value` to `saveFn`.
+
+### `src/lib/hooks/__tests__/useEditorState.test.ts`
+
+`// @vitest-environment happy-dom`. Import `@/lib/storage/__tests__/setup`.
+
+5 cases:
+1. Initial state: `isLoaded=false`, `moodSheetMode='closed'`, fields empty.
+2. After `useEffect` (mount) with empty storage: `LOAD_ENTRY(undefined)` → `moodSheetMode='initial'`.
+3. After mount with seeded entry: fields populated, snapshot set, `moodSheetMode='closed'`.
+4. `isDirty` derivation: `SET_TEXT` makes dirty; re-set to original makes not dirty.
+5. `MARK_SAVED` resets snapshot: dirty → not dirty.
+
+### `src/app/diary/[date]/__tests__/Editor.test.tsx`
+
+`// @vitest-environment happy-dom`. Mocks `next/navigation`, `HTMLDialogElement.prototype.{showModal, close}`. Storage setup imported.
+
+12 cases:
+1. New entry: textarea empty, mood sheet auto-opened (mode=initial), delete absent from more menu.
+2. Existing entry: textarea filled, mood icon shown, no mood sheet, delete visible in more menu.
+3. One-per-day: navigate to date with existing entry shows existing data.
+4. Autosave: typing then advancing 1000ms calls `upsertDiary` silently.
+5. Autosave guard: `upsertDiary` NOT called when mood undefined.
+6. Explicit save tap → `upsertDiary` + toast "일기를 저장했어요!".
+7. ✓ icon absent when not dirty.
+8. Dirty + back → unsaved dialog opens (not `router.back()`).
+9. "저장하고 나가기" → `upsertDiary` + `router.back()`.
+10. ⋯ → 일기 삭제 → confirm → `removeDiary(id)` + `router.back()`.
+11. MoodIcon tap → mood sheet opens with `mode='change'`, `selectedMoodId={current}`.
+12. Time icon tap inserts `HH:MM ` at textarea cursor position.
+
+### `e2e/editor.spec.ts`
+
+One Playwright test. Uses dynamic date (within current month, computed at runtime). Asserts: mood sheet auto-opens on `/diary/[date]`, mood selection closes sheet, typing + 1.5s pause persists to storage, back to `/` shows mood emoji somewhere in calendar grid.
+
+### `e2e/_helpers/seedDiaries.ts`
+
 ```ts
-const defaultProps: MoodPickerSheetProps = {
-  open: true, date: '2026-05-17', mode: 'change',
-  onSelect: vi.fn(), onClose: vi.fn(),
-};
+export function seedDiariesScript(entries: DiaryEntry[]) {
+  const json = JSON.stringify(entries);
+  return () => { localStorage.setItem('ddalkkak:diaries:v1', json); };
+}
 ```
 
-10 cases:
-1. `open=true` → `showModal` called; `open=false` → `close` called.
-2. Header: `'2026.05.17 일'` + `'오늘은 어떤 하루였나요?'`.
-3. 10 mood buttons rendered (query by mood label).
-4. Mood tap → `onSelect(moodId)` then `onClose`; not `handleCancel`/`onCancelInitial`.
-5. X click → `onClose` exactly once.
-6. `mode='initial'` + X: `onCancelInitial` called once AND `onClose` once.
-7. `mode='change'` + X: `onCancelInitial` NOT called; `onClose` once.
-8. Inactive tab tap (테마 or 일상): `'곧 만나요!'` toast appears.
-9. `selectedMoodId='joy'`: joy button has `ring-2` + `ring-peach` classes; others don't.
-10. Source-guard: contains `"use client"` (`fs.readFileSync`).
+Usage: `await page.addInitScript(seedDiariesScript([...]))` before `page.goto(...)`.
+
+---
+
+## Files Expected to Change
+
+### Modified
+- `src/app/diary/[date]/page.tsx` — render `<Editor date={date} />`.
+- `src/design-system/useDialogControl.ts` — add `cancel` listener via ref pattern.
+
+### New (route-scoped)
+- `src/app/diary/[date]/_components/Editor.tsx`
+- `src/app/diary/[date]/_components/EditorHeader.tsx`
+- `src/app/diary/[date]/_components/EditorBody.tsx`
+- `src/app/diary/[date]/_components/EditorToolbar.tsx`
+- `src/app/diary/[date]/_components/EditorMoreMenu.tsx`
+
+### New (shared hooks)
+- `src/lib/hooks/useAutosave.ts`
+- `src/lib/hooks/useEditorState.ts`
+
+### New (tests)
+- `src/app/diary/[date]/__tests__/Editor.test.tsx`
+- `src/lib/hooks/__tests__/useAutosave.test.ts`
+- `src/lib/hooks/__tests__/useEditorState.test.ts`
+- `e2e/editor.spec.ts`
+- `e2e/_helpers/seedDiaries.ts`
+
+### Not changed
+- `src/design-system/ConfirmDialog.tsx` (no `title` prop needed).
+- `src/design-system/MoodPickerSheet.tsx` (NB-2 deferred; REQ-009 does not add lines).
+- `src/lib/storage/types.ts`, `src/lib/storage/diaries.ts`.
 
 ---
 
 ## Implementation Order
 
-1. `MoodPickerSheet.tsx` — imports, `formatSheetDate`, `CloseIcon`, `MoodPickerTabs`, `MoodPickerSheet`. Strict TS — no `any`.
-2. Verify dependencies resolve via existing `@/design-system/*` and `@/lib/storage`.
-3. `MoodPickerSheet.test.tsx` — 10 cases with mocks.
-4. `npm run typecheck` — must pass.
-5. `npm test` — all tests pass, no regressions.
-6. `npm run lint` + `npm run build` — clean.
+1. `useDialogControl.ts` — NB-1 fix first.
+2. `useAutosave.ts` + tests.
+3. `useEditorState.ts` + tests.
+4. `EditorHeader.tsx`.
+5. `EditorBody.tsx`.
+6. `EditorMoreMenu.tsx`.
+7. `EditorToolbar.tsx`.
+8. `Editor.tsx` (wires all sub-components + inline ConfirmDialogs).
+9. `page.tsx` — swap stub for `<Editor />`.
+10. `Editor.test.tsx` — integration tests.
+11. `seedDiaries.ts` + `editor.spec.ts`.
 
 ---
 
 ## Backward Compatibility
 
-No existing file modified. Net-new export. REQ-009 will import it.
+- `useDialogControl` change is additive (cancel listener calls existing `onClose` callback). Safe.
+- `textAlign ?? 'left'` fallback is defensive only; no production data.
+- No route path change.
 
 ---
 
 ## Performance Considerations
 
-- `MOODS`, `WEEKDAY_FMT`, `CloseIcon` module-level constants — zero per-render allocation.
-- `MoodIcon` (Server Component) imported into Client boundary — Next.js handles, no JS bundle bloat from MoodIcon internals.
-- BottomSheet always-mounted (REQ-005 invariant). 10 cells always rendered but hidden off-screen when `open=false`. Negligible cost.
+- `readDiaries()` runs once on mount inside `useEffect`. Negligible for MVP scale.
+- `autosaveValue` memoized via `useMemo` so debounce timer only resets on actual content change.
+- `saveFn` wrapped in `useCallback` — re-created only when entry ID/date changes.
+- `100dvh` supported in modern mobile browsers (Safari 16+, Chrome 108+).
 
 ---
 
@@ -268,19 +426,18 @@ None.
 
 ## Risks and Tradeoffs
 
-**Tab touch-target horizontal:** `text-sm` Korean text width may be ≤ 44px alone. Added `px-2` to widen tap area.
-
-**Static tabs vs `useState`:** Static correct for v1 (one tab per row ever active). v2 may swap to state without breaking external API.
-
-**Inline `MoodPickerTabs` vs separate file:** Inline-first; extract if line count exceeds 110.
-
-**`className` Toast positioning:** `!bottom-6` is assumption-based; refine if visual review finds clipping.
+1. **Debounce + unmount race** — mitigated by `useAutosave` cleanup `clearTimeout`. Risk: LOW.
+2. **`onClose` stability** — addressed via `onCloseRef` capture pattern. Risk: LOW.
+3. **`MoodPickerSheet` auto-open timing** — `moodSheetMode` starts `'closed'`, transitions to `'initial'` only after `LOAD_ENTRY`. Dialog always-mounted (REQ-005). Risk: LOW.
+4. **`ConfirmDialog` copy without `title`** — sacrifices visual hierarchy. Acceptable for MVP. Future: add `title?` prop.
+5. **Toast re-entrancy** — gallery noop and save toast share one `useToast`. Re-entrant calls reset the message; acceptable.
+6. **E2E test date dependency** — use dynamic date within current month at test runtime, not hardcoded.
 
 ---
 
 ## Open Questions
 
-None blocking. All unknowns + risks addressed.
+None remaining. All six architecture unknowns closed.
 
 ---
 

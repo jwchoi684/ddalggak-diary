@@ -1,136 +1,68 @@
-# E2E Report — REQ-008: 무드 선택 바텀시트 모달
+# E2E Report — REQ-009: 일기 에디터
 
 ## Summary
 
-REQ-008 delivers `MoodPickerSheet`, a reusable client component. The component has no route, no page mount, and no caller in the current app. There is no user-reachable journey that surfaces the sheet today. Accordingly, REQ-008-specific E2E coverage is not applicable for this phase.
+REQ-009 diary editor E2E suite verified against the current codebase. Both Playwright tests (calendar navigation + editor journey) passed cleanly in 17.9 s with no retries. The `editor.spec.ts` file was written during Phase 9 (test-engineer) and is confirmed green here.
 
-The existing E2E baseline (`e2e/calendar.spec.ts`, established in REQ-007) was re-run to confirm it remains green. Result: 1/1 PASS (3.1s, Chromium).
+## Scenario Tested
 
----
+**Core user journey:** User opens the calendar, taps the FAB to enter today's editor, sees the mood picker auto-open, selects a mood (기쁨), types diary text, waits for the 1-second autosave to fire, taps the back button to return to the calendar, and confirms the calendar cell for today now shows a mood emoji rather than a plain date number.
 
-## Why E2E Is Not Applicable for REQ-008
+## Steps
 
-`MoodPickerSheet` is a composite design-system component. It can only be reached through a screen that mounts it with a controlling `open` state. The first and only planned caller is the diary editor (REQ-009), which is not yet implemented.
-
-The REQ-008 requirement card explicitly states the relevant E2E scenario as:
-
-> "캘린더 빈 셀 → 에디터 → 모달 자동 → 무드 선택 → 본문 작성으로 이어지는 흐름의 일부"
-
-This flow requires:
-
-1. A calendar cell tap that navigates to `/diary/[date]` — this works today (covered by the FAB test in `calendar.spec.ts`).
-2. The `/diary/[date]` editor screen to mount `MoodPickerSheet` and open it automatically — REQ-009 is not yet implemented, so the route renders a stub page that does not render the sheet.
-3. The user selecting a mood and being returned to the editor body — depends on step 2.
-
-Steps 2 and 3 are blocked by the absence of REQ-009. No browser automation can reach the sheet by clicking through the app as a real user. A Playwright test written today would immediately fail because `role=dialog` with mood buttons is never present in the DOM.
-
-Unit tests fully cover the component in isolation: all 10 specified test cases pass across 191/191 tests in the Vitest suite. The unit surface covers both `mode='initial'` and `mode='change'` close paths, all 10 mood tap callbacks, inactive-tab toast, selected-mood highlight, and the `"use client"` source guard.
-
----
-
-## Existing E2E Baseline Status
-
-File: `e2e/calendar.spec.ts`
-Test: `캘린더 화면 진입 후 FAB 탭 시 오늘 일기 에디터로 이동`
-
-Command run:
-
-```
-npx playwright test --reporter=list
-```
-
-Output:
-
-```
-Running 1 test using 1 worker
-
-  ✓  1 [chromium] › e2e/calendar.spec.ts:3:5 › 캘린더 화면 진입 후 FAB 탭 시 오늘 일기 에디터로 이동 (3.1s)
-
-  1 passed (14.5s)
-```
-
-Exit code: 0. No regressions. The REQ-007 calendar baseline is unaffected by REQ-008 (which added only two new files with no modifications to existing source).
-
-The webServer (`npm run dev` on `http://localhost:3000`) started automatically via Playwright's `webServer` config (`reuseExistingServer: true`). Chromium binaries were already installed.
-
----
-
-## Deferred E2E Coverage (handed to REQ-009)
-
-The following E2E case must be authored by REQ-009 once the editor screen and its `MoodPickerSheet` integration exist:
-
-**Scenario: 빈 날짜 셀 탭 → 무드 선택 → 에디터 본문 입력 대기**
-
-Steps:
 1. Navigate to `/` (calendar screen).
-2. Tap an empty calendar cell (a date without a diary entry).
-3. Assert navigation to `/diary/[date]`.
-4. Assert `role=dialog` is visible (mood picker sheet auto-opened).
-5. Assert 10 mood buttons are present (query by Korean mood labels, e.g. `기쁨`, `슬픔`).
-6. Click a mood button (e.g. `기쁨`).
-7. Assert the dialog is dismissed (no longer visible).
-8. Assert focus returns to the editor and the body textarea is available.
-
-Suggested file: `e2e/editor.spec.ts`
-
-Additional coverage to layer in with REQ-009:
-- `mode='change'` path: tap the mood icon in the editor header → sheet opens → select different mood → sheet closes, editor retains original mood until new one saved.
-- Dismiss-without-select: X button in `mode='initial'` → sheet closes → navigate back to calendar (editor leaves without saving).
-
----
+2. Tap `오늘 일기 쓰기` FAB — router navigates to `/diary/YYYY-MM-DD`.
+3. Assert `MoodPickerSheet` heading `오늘은 어떤 하루였나요?` is visible (auto-open on empty entry).
+4. Click `기쁨` mood button — sheet closes.
+5. Assert textarea placeholder `오늘 어떤 하루였나요?` is visible.
+6. Fill textarea with `E2E 테스트 일기`.
+7. Wait 1500 ms (autosave debounce = 1000 ms + 500 ms buffer).
+8. Click `뒤로가기` button — expect URL to return to `/`.
+9. Find today's calendar button by date string regex — assert text content is non-empty and not a bare digit string (confirms mood emoji rendered).
 
 ## Test Files Added / Updated
 
-None. No E2E files were added or modified for REQ-008. `e2e/calendar.spec.ts` is unchanged.
+- `/Users/jay/Documents/Projects/ai_diary/e2e/editor.spec.ts` — 1 Playwright test (written in Phase 9; no changes made in this phase)
+- `/Users/jay/Documents/Projects/ai_diary/e2e/_helpers/seedDiaries.ts` — localStorage seed utility used by tests (no changes made in this phase)
 
----
+The existing `e2e/calendar.spec.ts` (FAB navigation test from REQ-007) also runs in this suite and passes; it was not modified.
 
 ## Commands Run
 
 ```
-npx playwright test --reporter=list
+npx playwright install chromium
+npm run test:e2e
 ```
-
----
 
 ## Results
 
-| Test | Status | Duration |
-|---|---|---|
-| `캘린더 화면 진입 후 FAB 탭 시 오늘 일기 에디터로 이동` | PASS | 3.1s |
+```
+Running 2 tests using 2 workers
 
-Total: 1/1 passed (14.5s wall time including webServer startup).
+  ✓  2 [chromium] › e2e/calendar.spec.ts:3:5 › 캘린더 화면 진입 후 FAB 탭 시 오늘 일기 에디터로 이동 (2.4s)
+  ✓  1 [chromium] › e2e/editor.spec.ts:3:5 › 캘린더 빈 셀 → 무드 선택 → 본문 입력 → 자동 저장 → 뒤로 → 캘린더에 무드 표시 (4.2s)
 
----
+  2 passed (17.9s)
+```
+
+Browser: Chromium (Desktop Chrome profile), Playwright 1.60.0.
+Dev server: `npm run dev` on `http://localhost:3000` (reused if already running per `reuseExistingServer: true`).
+Spec config: `playwright.config.ts` — `testDir: ./e2e`, `timeout: 30_000`, Chromium only, `fullyParallel: false`.
 
 ## Failures
 
 None.
 
----
-
 ## Screenshots / Artifacts
 
-No screenshots captured. `trace: 'on-first-retry'` is configured in `playwright.config.ts`; no failures occurred so no traces were produced.
-
----
+No failures occurred. `trace: 'on-first-retry'` is configured; no traces were produced.
 
 ## Not Tested
 
-| Journey | Reason | Deferred To |
-|---|---|---|
-| 빈 날짜 셀 → 에디터 → MoodPickerSheet 자동 열림 | REQ-009 (editor screen) not yet implemented | REQ-009 |
-| 무드 탭 → sheet 닫힘 → 에디터 복귀 | Same — requires editor caller | REQ-009 |
-| X 버튼 (initial mode) → sheet 닫힘 → 에디터 뒤로 이동 | Same | REQ-009 |
-| 기분 변경 경로 (change mode) | Same | REQ-009 |
-| 비활성 탭 탭 → "곧 만나요!" 토스트 표시 | Toast inside dialog; requires editor mount | REQ-009 |
-
-All of the above are covered at the unit level by `MoodPickerSheet.test.tsx` (191/191 tests pass).
-
----
+- **Existing-entry re-open persistence (E2E):** Covered by integration tests (Cases C2, C3) but not by a dedicated E2E flow. Omitted to keep E2E scope narrow.
+- **Delete flow (E2E):** Covered by integration test (Case C10); not duplicated in E2E.
+- **Unsaved-changes guard (E2E):** Covered by integration tests (Cases C8, C9); not duplicated in E2E.
+- **Mobile viewport:** Config uses `Desktop Chrome`. Mobile-first layout is validated by unit tests; no mobile Playwright project is configured.
 
 ## Verdict
-
-PASS — not applicable
-
-REQ-008 E2E coverage is deferred to REQ-009 by design. The component has no reachable user journey today. The existing E2E baseline (`e2e/calendar.spec.ts`) passes without regressions.
+PASS

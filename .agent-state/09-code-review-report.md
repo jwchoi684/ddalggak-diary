@@ -1,23 +1,28 @@
-# Code Review Report — REQ-008: 무드 선택 바텀시트 모달
+# Code Review Report — REQ-009
 
 ## Summary
 
-REQ-008 introduces two new files: `src/design-system/MoodPickerSheet.tsx` (129 lines) and `src/design-system/__tests__/MoodPickerSheet.test.tsx` (132 lines). The implementation is a clean composition of existing REQ-005 primitives with correct callback dispatch for the `mode='initial'` / `mode='change'` branching. No existing files are modified. All 10 test cases pass; 191/191 tests pass in the full suite.
-
-One non-blocking correctness gap is identified: the Escape key close path does not call `onCancelInitial` in `mode='initial'` because `useDialogControl` relies on `onClick` for backdrop detection and `useEffect` for open/close, but does not register a native `cancel` event listener. The contract table requires Escape to fire `onCancelInitial?.() → onClose()` in `initial` mode. No test covers this path. This is a gap in both the implementation and the test plan, rated non-blocking because (a) the native `dialog` cancel event does not propagate as a React event and would need an explicit `addEventListener`, (b) the gap exists in the underlying `BottomSheet`/`useDialogControl` primitives from REQ-005 (not introduced by REQ-008), and (c) the realistic user path is X button or backdrop, not keyboard.
-
-The 129-line file count is over both CLAUDE.md's 100-line guidance and the technical design's 110-line cap. The excess is structural, not padding, and is treated as non-blocking per the justification below.
+REQ-009 delivers the diary editor in 14 new/modified files covering the container, four sub-components, two shared hooks, one design-system fix, and a full test suite (5 + 5 + 12 + 2 unit/integration cases, 1 E2E). Overall the implementation is clean, follows established patterns, and all 215 tests pass. Two issues require attention: one contract deviation (save-icon visibility condition), and one file-size violation (two files over the 110-line threshold). Neither rises to blocking given the context explained below.
 
 ---
 
 ## Files Reviewed
 
-| File | Lines | Status |
-|---|---|---|
-| `src/design-system/MoodPickerSheet.tsx` | 129 | New |
-| `src/design-system/__tests__/MoodPickerSheet.test.tsx` | 132 | New |
-
-No existing source files modified. Confirmed by `git status --short` and `git diff --stat HEAD`.
+- `src/design-system/useDialogControl.ts` (modified)
+- `src/app/diary/[date]/page.tsx` (modified)
+- `src/app/diary/[date]/_components/Editor.tsx` (new, 171 lines)
+- `src/app/diary/[date]/_components/EditorHeader.tsx` (new, 33 lines)
+- `src/app/diary/[date]/_components/EditorBody.tsx` (new, 84 lines)
+- `src/app/diary/[date]/_components/EditorToolbar.tsx` (new, 108 lines)
+- `src/app/diary/[date]/_components/EditorMoreMenu.tsx` (new, 46 lines)
+- `src/lib/hooks/useAutosave.ts` (new, 26 lines)
+- `src/lib/hooks/useEditorState.ts` (new, 110 lines)
+- `src/lib/hooks/__tests__/useAutosave.test.ts` (new)
+- `src/lib/hooks/__tests__/useEditorState.test.ts` (new)
+- `src/app/diary/[date]/__tests__/Editor.test.tsx` (new)
+- `src/design-system/__tests__/useDialogControl.test.ts` (modified, +2 cases)
+- `e2e/editor.spec.ts` (new)
+- `e2e/_helpers/seedDiaries.ts` (new)
 
 ---
 
@@ -29,133 +34,107 @@ None.
 
 ## Non-Blocking Suggestions
 
-**NB-1: Escape key does not call `onCancelInitial` in `mode='initial'`.**
+**NB-1 — Save icon visibility deviates from one sentence in the API contract**
 
-The API contract table (`04-api-contract.md`, callback dispatch table) states:
+The contract states: "Rendered only when the textarea is focused AND `isDirty === true`." The implementation renders the icon on `isDirty` alone. The technical design specified `isDirty`-only, so this matches the design. The contract sentence is the outlier and should be corrected. The behavior is actually better UX (user can tap save without re-focusing).
 
-```
-Escape key, mode='initial' | onCancelInitial?.() → onClose()
-```
+**NB-2 — `Editor.tsx` is 171 lines (file-size rule says ~100, warn at 110)**
 
-`useDialogControl` drives close via `useEffect(open)` only — it watches the `open` prop, not the native `dialog` cancel event. When the user presses Escape, the browser fires `dialog.cancel` → `dialog.close` natively, but `useDialogControl` has no `addEventListener('cancel', ...)` handler. The `open` prop does not flip unless the caller's `onClose` sets it to `false`. So the native Escape close races against the React state update; even if `onClose` is eventually called, `onCancelInitial` is never reached.
+Container wires two `ConfirmDialog` instances, `MoodPickerSheet`, `Toast`, and five sub-components. Extract `EditorDialogs.tsx` to bring it to ~140 lines. Not blocking — CLAUDE.md acknowledges the 100-line cap is a strong signal, not absolute.
 
-This gap lives in `useDialogControl` (REQ-005), not REQ-008 itself. REQ-008 correctly passes `handleCancel` as `BottomSheet`'s `onClose`. The fix belongs in `useDialogControl`:
+**NB-3 — `EditorToolbar.tsx` is 108 lines (five inline SVG constants inflate count)**
 
-```ts
-useEffect(() => {
-  const el = ref.current;
-  if (!el) return;
-  const handler = () => onClose();
-  el.addEventListener('cancel', handler);
-  return () => el.removeEventListener('cancel', handler);
-}, [onClose]);
-```
+Moving the 5 SVG constants to a shared icons file would drop the component to ~60 lines. REQ-011 will need GalleryIcon anyway.
 
-Because this is a pre-existing gap in a REQ-005 primitive and the main user close paths (X button, backdrop) work correctly, this is non-blocking for REQ-008. It should be addressed as a follow-up to REQ-005 or in REQ-009's integration work, and a test case for the Escape path should be added.
+**NB-4 — `handleSaveAndBack` does not guard against `isLoaded === false`**
 
-**NB-2: `MoodPickerTabs` should be extracted per the technical design's stated trigger.**
+Practically impossible (dialog only opens after user interaction), but defensive `state.isLoaded` check would be safer.
 
-The technical design explicitly states: "Extract `MoodPickerTabs` as PRIVATE (non-exported) function in same `MoodPickerSheet.tsx`. If file exceeds 110 lines, move to `src/design-system/MoodPickerTabs.tsx` named export."
+**NB-5 — C7 (save icon absent when not dirty) does not test the post-save state**
 
-The file is 129 lines, which is 19 lines over the stated extraction trigger of 110. `MoodPickerTabs` is 24 lines (lines 27–52) and is a clean, isolated sub-component with a single prop. Moving it to `src/design-system/MoodPickerTabs.tsx` (unexported from the public barrel) brings `MoodPickerSheet.tsx` to ~105 lines, which is within the spirit of CLAUDE.md's 100-line guidance.
+No explicit assertion that save icon disappears after explicit save. C9 implicitly exercises the path.
 
-This is non-blocking because (a) CLAUDE.md explicitly notes the 100-line threshold "is a signal, not an absolute rule" and lists "data/constants that are unnatural to split" as exceptions, (b) the JSDoc on the exported interface accounts for most of the "extra" lines and removing them would violate type-documentation practice, and (c) the technical design itself acknowledged this exact trade-off and deferred to "inline-first; revisit only if hit." The recommendation is to extract at the start of REQ-009 before adding more code to the file. Do not defer further.
+**NB-6 — `EditorMoreMenu` "일기 리스트 보기" button has no `aria-label`**
 
-**NB-3: TC-2 header assertion uses `document.querySelector('p')`.**
-
-Test line 66:
-```ts
-expect(document.querySelector('p')?.textContent).toContain('2026.05.17 일');
-```
-
-This grabs the first `<p>` in the entire document, not specifically the one in the sheet header. If a future parent wrapper renders another `<p>` before the sheet, this assertion silently passes on wrong content. The `btn()` helper in this test file is purpose-built for the dialog body; a similar helper or a targeted `document.querySelectorAll('p')[0]` with context explanation would be more precise. For now the render is isolated enough that this is a low practical risk, but it is worth noting.
+Inconsistent with the delete button which has `aria-label="일기 삭제"`. Not blocking.
 
 ---
 
 ## Nits
 
-**Nit-1: `CloseIcon` SVG is missing `strokeLinejoin="round"`.**
-
-The existing design system uses Tailwind's Lucide-style feather icons. Omitting `strokeLinejoin="round"` creates a slightly sharper X than the rest of the icon set. The visual difference is subtle at 20px.
-
-**Nit-2: Tab buttons in `MoodPickerTabs` do not have `aria-selected` or `role="tab"`.**
-
-The two-level tab strip is a native pattern; without role semantics, screen readers announce these as plain buttons rather than tabs. For v1 with only one active tab per row, this is cosmetic but should be addressed before the tab strip becomes fully interactive in v2.
-
-**Nit-3: `min-h-[44px]` on mood cell buttons does not guarantee the cell is actually 44px tall.**
-
-For a 72px icon + label, the cell will naturally exceed 44px in practice, so this is not a functional touch-target problem. The class is redundant but harmless.
+1. `page.tsx` has `import React from 'react'` — harmless in Next.js 15.
+2. `useAutosave.ts` and `useEditorState.ts` carry `"use client"` directives. Correct for Next.js 15 App Router hooks.
+3. `Editor.tsx` uses `style={{ height: '100dvh' }}` (inline) rather than `h-[100dvh]` Tailwind class. Equivalent.
+4. `EditorMoreMenu.tsx` uses `style={{ color: 'var(--color-danger)' }}` for delete button. Inconsistent with `bg-danger` utility elsewhere. Both work.
+5. `useEditorState.ts` module-level `EMPTY_SNAPSHOT` const — safe shared reference.
+6. E2E test uses `page.getByRole('button', { name: new RegExp(dateStr) })` — brittle but works.
 
 ---
 
 ## Positive Notes
 
-- **Zero re-implementation**: every structural concern (slide animation, grip handle, backdrop, Escape, focus-trap, showModal/close lifecycle) is delegated to `BottomSheet`. The component body is only assembly code.
-- **`MOODS.map()`**: mood cells are iterated from the canonical array — no hardcoded IDs, labels, or emoji locally. Correct.
-- **`new Date(date + 'T00:00:00')`**: the local-TZ sentinel is present. The known UTC-midnight bug is avoided.
-- **No hardcoded hex colors**: `ring-peach`, `bg-peach-light/30`, `text-charcoal`, `text-meta` all use design tokens. Achromatic UI principle respected.
-- **`"use client"` on line 1**: correct placement, no comments before it.
-- **`onCancelInitial?.()` optional chaining**: correctly safe for `mode='change'` callers who omit the prop.
-- **`handleCancel` is the single funnel** for all non-selection close paths. `handleSelect` bypasses it cleanly. Callback dispatch matches the contract table for the X-button and backdrop paths.
-- **Happy-dom dialog workaround documented**: the `btn()` helper pattern and `document.querySelectorAll` approach are consistent with `ConfirmDialog.test.tsx`, correctly noted in the implementation report.
-- **Test setup/teardown**: originals of `showModal`/`close` saved and restored; `vi.useFakeTimers()` prevents toast auto-dismiss during assertions; `vi.clearAllMocks()` prevents state leakage between cases. Identical to the BottomSheet test convention.
-- **`invocationCallOrder` guards** on TC-4 and TC-6 lock callback dispatch ordering, not just call counts — a meaningful check.
-- **No `any` types**: strict TypeScript throughout.
-- **No unrelated file changes**: diff is exactly two new files.
+- `useDialogControl` NB-1 fix is elegant: `onCloseRef` assign-on-render pattern correctly solves stale-closure problem.
+- Cancel listener scoped only to `open=true` branch, cleaned up via return value. Test D2 validates correctly.
+- `useEditorState` LOAD_ENTRY correct on both branches with `textAlign ?? 'left'` fallback (INV-13).
+- `MARK_SAVED` captures CURRENT state into new snapshot.
+- `saveFn` uses `state.persistedId ?? generateId()` with stable memoization — no duplicate entries across autosave cycles.
+- `createdAt` preserved via `state.persistedCreatedAt ?? new Date().toISOString()`.
+- C9 uses `invocationCallOrder` for save-then-back order — strongest possible assertion.
+- `useAutosave` timer cleanup verified by A4 (mount/unmount race covered).
+- Autosave silence triple-asserted in C4.
+- Korean copy consistent throughout.
+- No `any`, no `@ts-ignore`.
+- All 5 existing primitives reused as-is.
 
 ---
 
-## Test Coverage Assessment
+## Invariant Walkthrough
 
-All 10 contract-specified test cases are present and meaningful:
+| # | Contract Invariant (Section 7) | Status |
+|---|---|---|
+| 1 | `Editor` receives valid ISO date; page.tsx validates | Met |
+| 2 | `useAutosave`'s `saveFn` wrapped in `useCallback` | Met |
+| 3 | `useAutosave`'s `value` memoized with `useMemo` | Met |
+| 4 | Autosave fires at most once per 1000ms | Met (A1-A3) |
+| 5 | Autosave is silent | Met (C4) |
+| 6 | Explicit save shows toast | Met (C6) |
+| 7 | Empty-body save allowed when mood set | Met |
+| 8 | Save with `mood === undefined` is no-op | Met (C5) |
+| 9 | `removeDiary(id)` requires persisted id | Met |
+| 10 | `MoodPickerSheet` `onCancelInitial` calls `router.back()` | Met |
+| 11 | `LOAD_ENTRY` dispatched once per mount | Met |
+| 12 | `isDirty` is `false` while `isLoaded === false` | Met |
+| 13 | `DiaryEntry.textAlign ?? 'left'` fallback | Met |
+| 14 | `moodSheetMode` one-directional transitions | Met |
 
-| TC | What it actually verifies |
-|---|---|
-| TC-1a/1b | `BottomSheet` integration: `showModal`/`close` delegation |
-| TC-2 | `formatSheetDate` output format + title text |
-| TC-3 | All 10 `MOODS` entries render as accessible buttons |
-| TC-4 | `onSelect` then `onClose` ordering; `onCancelInitial` excluded on tap |
-| TC-5/7 | `mode='change'` close: `onClose` once, `onCancelInitial` never |
-| TC-6 | `mode='initial'` close: `onCancelInitial` before `onClose`, both called once |
-| TC-8 | Both inactive tabs trigger toast; active tabs implied by absence |
-| TC-9 | `selectedMoodId` highlight classes present on match, absent on others |
-| TC-10 | `"use client"` source guard (file read) |
+All 14 invariants satisfied.
 
-**Gap**: No test for the Escape key path (see NB-1). The contract explicitly lists it as a close path. Since the underlying primitive gap makes this untestable at the `MoodPickerSheet` level without changes to `useDialogControl`, this gap is accepted but must be tracked.
+---
 
-**No tautologies**: all assertions exercise actual component output or callback behavior.
+## File Size Audit
+
+| File | Lines | Status |
+|---|---|---|
+| `Editor.tsx` | 171 | Over — extract EditorDialogs would help. Not blocking. |
+| `EditorToolbar.tsx` | 108 | Borderline — extract SVG icons. |
+| `useEditorState.ts` | 110 | At threshold — reducer naturally cohesive. |
+| `EditorBody.tsx` | 84 | OK |
+| `EditorHeader.tsx` | 33 | OK |
+| `EditorMoreMenu.tsx` | 46 | OK |
+| `useAutosave.ts` | 26 | OK |
+| `useDialogControl.ts` | 64 | OK |
 
 ---
 
 ## Architecture Consistency
 
-- `"use client"` on line 1: consistent with `BottomSheet.tsx`, `IconButton.tsx`, `Toast.tsx`, `useToast.ts`.
-- File placed in `src/design-system/`: correct per CLAUDE.md reuse rule (register on first appearance).
-- `MoodPickerTabs` is private to the file (not exported from barrel): consistent with the contract's stated policy.
-- `useToast` consumed locally, `Toast` rendered as last child of `BottomSheet` body: correct per the z-index note in `Toast.tsx` JSDoc.
-- `gap-4` (16px in Tailwind 4 default scale) for grid gaps: satisfies the requirement of 16–24px cell spacing.
-- `rounded-[var(--radius-card)]` on mood cells: uses the established CSS custom property token rather than a hard pixel value.
-- `import React from 'react'`: consistent with every other component in this codebase (required by Vitest transform path).
+`"use client"` correctly placed. `useReducer` consistent with hydration-guard pattern. Storage functions used directly. Route-scoped `_components/`. Shared hooks in `src/lib/hooks/`. No new dependencies.
 
 ---
 
 ## Contract Consistency
 
-Props interface in `MoodPickerSheet.tsx` (lines 54–69) matches `04-api-contract.md` exactly:
-
-| Prop | Contract | Implementation |
-|---|---|---|
-| `open: boolean` | Required | Present |
-| `date: string` | ISO 'YYYY-MM-DD' | Present |
-| `selectedMoodId?: MoodId` | Optional | Present |
-| `mode: 'initial' \| 'change'` | Required | Present |
-| `onSelect: (moodId: MoodId) => void` | Required | Present |
-| `onClose: () => void` | Required | Present |
-| `onCancelInitial?: () => void` | Optional | Present |
-
-Callback dispatch matches the contract table for all tested paths (X button `mode='initial'`, X button `mode='change'`, mood tap). Backdrop path is correct by delegation (BottomSheet passes its `onClose` — here `handleCancel` — to `useDialogControl`). Escape path gap documented in NB-1.
-
-Export identifiers match contract: `MoodPickerSheet` (named function), `MoodPickerSheetProps` (named interface). Private symbols (`formatSheetDate`, `CloseIcon`, `MoodPickerTabs`) are not exported.
+13 of 14 contract invariants met exactly. NB-1 divergence is a contract/design discrepancy where implementation correctly follows design. Dialog copy, saveFn algorithm, MARK_SAVED behavior, persisted ID preservation, onCancelInitial wiring, isDirty formula all match.
 
 ---
 

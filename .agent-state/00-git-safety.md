@@ -1,25 +1,37 @@
-# Git Safety — REQ-008
+# Git Safety — REQ-009
 
 ## Verdict
 PASS
 
 ## State
-- Branch `master`. Last commit `43cc986` (REQ-007). Previous: `77dba70` (REQ-006), `43310cb` (REQ-005), `dc3198d` (REQ-001~004).
-- Working tree clean at REQ-008 start (only status flips).
-- No untracked files.
+- Branch `master`. Last commits:
+  - `18c3020` — chore: mark REQ-008 DONE in status index
+  - `7a255b5` — feat: mood picker bottom-sheet modal (REQ-008)
+  - `43cc986` — feat: main calendar screen + Playwright bootstrap (REQ-007)
+- Working tree changes (REQ-009 status flips only):
+  - `M .agent-state/requirements/REQ-009.md` (TODO → IN_PROGRESS)
+  - `M .agent-state/requirements/index.md` (REQ-009 row)
+- No untracked source files.
 
 ## Files at risk for this requirement
-REQ-008 introduces:
-- **Creates** `MoodPickerSheet` component (likely under `src/design-system/` since it's reusable across editor/standalone, OR `src/app/_components/` if it's screen-coupled). Design phase decides.
-- **Possibly modifies** `src/app/_components/CalendarScreen.tsx` — REQ-007 already does `router.push(Routes.diary(date))` on cell tap. REQ-008's "신규 작성 자동 호출" path is owned by the EDITOR screen (REQ-009), not the calendar. So REQ-008 likely does NOT modify CalendarScreen.
-- **Tests** for MoodPickerSheet under `src/design-system/__tests__/` or `src/app/__tests__/`.
+REQ-009 introduces the diary editor:
+- **Creates** `src/app/(routes)/diary/[date]/_components/Editor.tsx` (or under existing `src/app/_components/` if simpler) — primary editor container.
+- **Creates** sub-components: EditorHeader, EditorBody (textarea), EditorToolbar, EditorMoreMenu (bottom-sheet menu using REQ-005 BottomSheet), UnsavedChangesDialog (REQ-005 ConfirmDialog).
+- **Creates** custom hooks: `useEditorState` (form state, dirty tracking, autosave debounce), `useAutosave` (1s debounce + upsert to localStorage via REQ-002 `upsertDiary`).
+- **Modifies** `src/app/(routes)/diary/[date]/page.tsx` — the route stub from REQ-006 must now render the editor.
+- **Creates** tests under `src/app/__tests__/` and/or `src/lib/hooks/__tests__/`.
+- **Possibly extracts** `MoodPickerTabs` from `MoodPickerSheet.tsx` (NB-2 from REQ-008 code review) — only if the file size discipline applies.
 
 MUST NOT modify:
-- REQ-002~007 source files (consume only).
-- `playwright.config.ts`, `vitest.config.ts`.
+- REQ-002~008 design-system primitives (consume only).
+- `playwright.config.ts`, `vitest.config.ts`, build configs.
+- AI / chat / persona surfaces (REQ-015+).
 
 ## Notes
-- REQ-008 is the first BottomSheet consumer (per REQ-005 forward constraint).
-- The "two trigger paths" issue is interesting: the SHEET itself is one component with a `mode` prop ("initial" vs "change"); the EDITOR (REQ-009) wires which mode based on entry presence.
-- REQ-007 only routes to `/diary/[date]`; REQ-008 sheet renders inside the editor (REQ-009). So REQ-008 may be hard to integration-test without REQ-009 — likely just unit-test the sheet in isolation.
+- REQ-009 is the first real consumer of `MoodPickerSheet` (REQ-008) — its integration doubles as a smoke test for the contract.
+- High risk: data-loss potential via debounce/race or wrong upsert key. Tests must lock the four entry contexts (PRD §4.3.8) and the autosave behavior.
+- Carry-forward from REQ-008 code review (non-blocking):
+  - NB-1: Escape key doesn't fire `onCancelInitial` in REQ-005 `useDialogControl` — may surface here as the editor exits via Escape from the auto-opened mood sheet. Fix opportunistically if it blocks E2E.
+  - NB-2: `MoodPickerSheet.tsx` is 129 lines (over 110 cap) — extract `MoodPickerTabs` if/when this REQ adds more lines to the file.
+  - NB-3: REQ-008 TC-2 uses `document.querySelector('p')` — fix when convenient.
 - 1 commit per REQ enforced.

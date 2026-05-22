@@ -19,19 +19,43 @@ vi.mock('next/navigation', () => ({
   notFound:        mockNotFound,
 }));
 
-beforeEach(() => resetNavigationMocks());
-afterEach(() => cleanup());
+vi.mock('@/lib/storage', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/lib/storage')>();
+  return { ...original, readDiaries: vi.fn(() => []) };
+});
+
+let showModalMock: ReturnType<typeof vi.fn>;
+let closeMock: ReturnType<typeof vi.fn>;
+let origShowModal: typeof HTMLDialogElement.prototype.showModal;
+let origClose: typeof HTMLDialogElement.prototype.close;
+
+beforeEach(() => {
+  origShowModal = HTMLDialogElement.prototype.showModal;
+  origClose = HTMLDialogElement.prototype.close;
+  showModalMock = vi.fn();
+  closeMock = vi.fn();
+  HTMLDialogElement.prototype.showModal = showModalMock;
+  HTMLDialogElement.prototype.close = closeMock;
+  resetNavigationMocks();
+});
+
+afterEach(() => {
+  HTMLDialogElement.prototype.showModal = origShowModal;
+  HTMLDialogElement.prototype.close = origClose;
+  cleanup();
+});
 
 // Import after mocking
 const { default: DiaryPage } = await import('@/app/diary/[date]/page');
 
 describe('DiaryPage — date format guard', () => {
-  it('valid date "2026-05-17": renders heading containing the date; mockNotFound not called', async () => {
+  it('valid date "2026-05-17": renders editor textarea; mockNotFound not called', async () => {
     const date = '2026-05-17';
+    const { act } = await import('@testing-library/react');
     const jsx = await DiaryPage({ params: Promise.resolve({ date }) });
-    render(jsx);
-    const heading = screen.getByRole('heading');
-    expect(heading.textContent).toContain(date);
+    await act(async () => { render(jsx); });
+    // Editor renders a textarea (the diary body input)
+    expect(document.querySelector('textarea')).toBeTruthy();
     expect(mockNotFound).not.toHaveBeenCalled();
   });
 
@@ -51,12 +75,12 @@ describe('DiaryPage — date format guard', () => {
     expect(mockNotFound).toHaveBeenCalledTimes(1);
   });
 
-  it('out-of-range month "2026-13-01": passes /^\\d{4}-\\d{2}-\\d{2}$/, renders without calling notFound (semantic check deferred to REQ-009)', async () => {
+  it('out-of-range month "2026-13-01": passes /^\\d{4}-\\d{2}-\\d{2}$/, renders without calling notFound (semantic check deferred)', async () => {
     const date = '2026-13-01';
+    const { act } = await import('@testing-library/react');
     const jsx = await DiaryPage({ params: Promise.resolve({ date }) });
-    render(jsx);
-    const heading = screen.getByRole('heading');
-    expect(heading.textContent).toContain(date);
+    await act(async () => { render(jsx); });
+    expect(document.querySelector('textarea')).toBeTruthy();
     expect(mockNotFound).not.toHaveBeenCalled();
   });
 });

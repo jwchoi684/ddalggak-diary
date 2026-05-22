@@ -1,15 +1,14 @@
-# Data Model / Migration Report
+# Data Model / Migration Report — REQ-009
 
 ## Summary
 
-REQ-008 delivers `MoodPickerSheet`, a purely compositional UI component. It has no
-persistence concerns of any kind.
+REQ-009 (일기 에디터) is the first real consumer of `upsertDiary` and `removeDiary`. No schema changes are needed and no migration is required.
 
 ## Schema Change Required
 
-No. The project uses `localStorage` (no relational DB, no ORM, no migration files).
-The storage schema (`ddalkkak:diaries:v1`, `ddalkkak:conversations:v1`,
-`ddalkkak:settings:v1`) was fixed in REQ-002 and is untouched here.
+No. `DiaryEntry` in `src/lib/storage/types.ts` already contains all 8 fields:
+`id`, `date`, `mood`, `text`, `textAlign: 'left' | 'center'`, `photos`, `createdAt`, `updatedAt`.
+`textAlign` is required (not optional). The body field is `text`, not `body`. The API contract and technical design are aligned.
 
 ## Migration Strategy
 
@@ -17,45 +16,39 @@ Not applicable.
 
 ## Backfill / Default / Nullability
 
-Not applicable. No new fields, no nullability changes, no default values introduced.
+`textAlign` is required in TypeScript but old localStorage data from informal pre-REQ-009 testing could lack the field. The editor reads `entry.textAlign ?? 'left'` defensively in `LOAD_ENTRY` (confirmed in API contract Section 6 and technical design). No backfill script is needed.
 
 ## Index Requirements
 
-Not applicable. The component reads nothing from storage.
+Not applicable (localStorage, not a relational database).
 
 ## Existing Data Compatibility
 
-Not applicable. `MoodPickerSheet` emits a `MoodId` value upward via `onSelect`
-callback only. The caller (REQ-009's diary editor) is responsible for persistence.
+Safe. `upsertDiary` uses two-step dedup: id-match first, date-match second. The editor calls `upsertDiary` with `state.persistedId ?? generateId()` — for a new unsaved entry the fresh id will miss the id-match and hit the date-match if a same-date entry exists, replacing it in-place. The 1-per-day invariant (PRD §9) is preserved in all paths.
+
+`removeDiary(id: string)` is keyed on `DiaryEntry.id`. The editor only exposes delete when `state.persistedId` is defined (`hasSavedEntry === true`). Safe.
+
+The localStorage key `ddalkkak:diaries:v1` is unchanged.
 
 ## Rollback Considerations
 
-Not applicable. No storage writes occur at this layer. Removing the component has
-zero data impact.
+Not applicable. No structural change to the stored schema or key name.
 
 ## Query Performance Risk
 
-None. No storage reads or writes.
+None. `readDiaries()` is called once on mount inside `useEffect` and the result is filtered by `date`. At MVP scale (one entry per day, months of use) the array is tiny.
 
 ## Seed / Fixture Impact
 
-No changes to seed or fixture data. The existing `MOODS` constant (REQ-003) is
-imported read-only.
+`makeDiary` fixture factory in `src/lib/storage/__tests__/fixtures.ts` already populates `textAlign: 'left'`. No fixture changes are needed.
 
 ## Files Expected to Change
 
-None in the storage or data layer. Only net-new UI files are introduced:
-- `src/design-system/MoodPickerSheet.tsx`
-- `src/design-system/__tests__/MoodPickerSheet.test.tsx`
-
-Conditional: `src/design-system/MoodPickerTabs.tsx` (only if the primary file
-exceeds the 110-line budget cap).
+None in the storage layer. All new files are frontend-only (`_components/`, `src/lib/hooks/`, tests, E2E helpers).
 
 ## Test Requirements
 
-No storage-layer tests required. All tests are UI-layer (Vitest / happy-dom),
-covering callback dispatch, mode branching, toast trigger, and selected-mood
-highlight styling.
+Storage-layer tests (`diaries.test.ts`) already cover `upsertDiary` dedup and `removeDiary`. No new storage tests are required for REQ-009. Editor-layer tests (`Editor.test.tsx`, `useEditorState.test.ts`) will verify the correct fields are passed to `upsertDiary` and the correct id is passed to `removeDiary`.
 
 ## Verdict
-PASS — not applicable
+PASS — not applicable (no schema or migration changes)

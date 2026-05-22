@@ -13,6 +13,7 @@ const WEEKDAY_FMT = new Intl.DateTimeFormat('ko-KR', { weekday: 'short' });
 
 function formatSheetDate(date: string): string {
   const d = new Date(date + 'T00:00:00');
+  if (isNaN(d.getTime())) return date.replace(/-/g, '.');
   return `${date.replace(/-/g, '.')} ${WEEKDAY_FMT.format(d)}`;
 }
 

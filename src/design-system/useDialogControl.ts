@@ -14,6 +14,10 @@ import React, { useRef, useEffect } from 'react';
  * Backdrop click detection: e.target === ref.current means the click landed on
  * the <dialog> backdrop (not a child), so onClose is called.
  *
+ * Escape key: native <dialog> fires a 'cancel' event before auto-closing.
+ * We attach a listener that calls onClose() and calls e.preventDefault() so
+ * the controlled `open` prop drives the close animation (not the browser).
+ *
  * Caller is responsible for flipping open=false in their onClose handler.
  */
 export interface DialogControlResult {
@@ -27,11 +31,26 @@ export function useDialogControl(
 ): DialogControlResult {
   const ref = useRef<HTMLDialogElement | null>(null);
 
+  // Keep a ref to the latest onClose so the cancel listener never captures a stale copy.
+  const onCloseRef = useRef(onClose);
   useEffect(() => {
+    onCloseRef.current = onClose;
+  });
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
     if (open) {
-      ref.current?.showModal();
+      el.showModal();
+      const handleCancel = (e: Event) => {
+        e.preventDefault(); // keep controlled open prop in charge of animation
+        onCloseRef.current();
+      };
+      el.addEventListener('cancel', handleCancel);
+      return () => el.removeEventListener('cancel', handleCancel);
     } else {
-      ref.current?.close();
+      el.close();
     }
   }, [open]);
 
