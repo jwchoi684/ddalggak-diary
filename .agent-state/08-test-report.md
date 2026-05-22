@@ -2,43 +2,40 @@
 
 ## Summary
 
-REQ-012 (사진 전체화면 뷰어) full suite is green. Two production-code defects were found and fixed during verification before all gates passed.
+REQ-013 (목록 화면 — List Screen) full suite is green. All 301 unit tests pass, TypeScript and ESLint are clean, and all 8 Playwright specs pass including the new `list.spec.ts`.
 
 ---
 
 ## Tests Added / Updated
 
-### New unit test files
+### New unit test files (REQ-013)
 
 | File | Cases |
 |---|---|
-| `src/lib/hooks/__tests__/useSwipe.test.ts` | 7 (SW1–SW7) |
-| `src/lib/hooks/__tests__/usePhotoViewer.test.ts` | 4 (PV1–PV4) |
-| `src/app/diary/[date]/__tests__/PhotoViewer.test.tsx` | 7 (PVC1–PVC7) |
+| `src/lib/utils/__tests__/formatListDate.test.ts` | 4 (FLD1–FLD4) |
+| `src/app/list/__tests__/ListScreen.test.tsx` | 12 (LS1–LS12) |
 
-### Extended unit test files
+### Pre-existing unit tests (unchanged)
 
-| File | Cases added |
-|---|---|
-| `src/app/diary/[date]/__tests__/Editor.test.tsx` | +2 (C-viewer-1, C-viewer-2) |
+285 tests across 41 files — all continue to pass.
 
 ### New E2E file
 
 | File | Cases |
 |---|---|
-| `e2e/photo-viewer.spec.ts` | 1 (PV-E1) |
+| `e2e/list.spec.ts` | 1 (LE1) |
 
-### Total unit count: 285 (265 pre-existing + 20 new)
+### Total unit count: 301 (285 pre-existing + 16 new)
 
 ---
 
 ## Commands Run
 
 ```
-npx vitest run --reporter=basic    →  41 test files, 285/285 PASS
+npx vitest run --reporter=basic    →  43 test files, 301/301 PASS  (9.96s)
 npx tsc --noEmit                   →  clean (no output)
 npm run lint                       →  no ESLint warnings or errors
-npm run test:e2e                   →  7/7 PASS (20.4s)
+npm run test:e2e                   →  8/8 PASS (24.8s)
 ```
 
 ---
@@ -49,6 +46,8 @@ npm run test:e2e                   →  7/7 PASS (20.4s)
 
 | File | Tests |
 |---|---|
+| `src/lib/utils/__tests__/formatListDate.test.ts` | 4 |
+| `src/app/list/__tests__/ListScreen.test.tsx` | 12 |
 | `src/lib/storage/__tests__/photoBase64.test.ts` | 7 |
 | `src/lib/hooks/__tests__/useSwipe.test.ts` | 7 |
 | `src/lib/hooks/__tests__/useLongPress.test.ts` | 6 |
@@ -90,7 +89,7 @@ npm run test:e2e                   →  7/7 PASS (20.4s)
 | `src/lib/storage/__tests__/no-direct-localstorage-access.test.ts` | 1 |
 | `src/lib/navigation/__tests__/routes.test.ts` | 10 |
 | `src/lib/navigation/__tests__/setupNextNavigation.test.ts` | 3 |
-| **Total** | **285** |
+| **Total** | **301** |
 
 ### Playwright E2E — per-spec pass counts
 
@@ -99,50 +98,33 @@ npm run test:e2e                   →  7/7 PASS (20.4s)
 | `e2e/calendar.spec.ts` | 1 | PASS |
 | `e2e/editor.spec.ts` | 1 | PASS |
 | `e2e/horizontal-date-picker.spec.ts` | 2 | PASS |
+| `e2e/list.spec.ts` | 1 | PASS |
 | `e2e/photo-viewer.spec.ts` | 1 | PASS |
 | `e2e/photos.spec.ts` | 2 | PASS |
-| **Total** | **7** | **7/7 PASS** |
+| **Total** | **8** | **8/8 PASS** |
 
 ---
 
 ## Failures
 
-Two defects were found and fixed during verification.
-
-### Defect 1 — inner content rendered unconditionally inside closed dialog
-
-`PhotoViewer.tsx` originally rendered the inner content (`photo-viewer-container`, `photo-viewer-img`, close button) unconditionally inside the `<dialog>`. When the dialog is closed via `dialog.close()` the dialog element becomes `display:none`, but Playwright's `not.toBeVisible()` retries showed the `<img>` element still resolving as visible — the native dialog display:none was not sufficient for Playwright's visibility algorithm in this context.
-
-Fix: wrapped the inner content in `{open && (...)}` so all child nodes are absent from the DOM when `open=false`.
-
-File: `src/app/diary/[date]/_components/PhotoViewer.tsx`
-
-### Defect 2 — setPointerCapture on swipe container blocked close button click
-
-After defect 1 was fixed, the E2E still failed. Browser-side evaluation confirmed `dialog.close()` was never called — the button's `onClick` did not fire. Root cause: `useSwipe`'s `onPointerDown` calls `setPointerCapture` on the container div. When Playwright dispatches `pointerdown` on the close button it bubbles to the container, which captures the pointer. The subsequent `pointerup` is routed to the capturing container, not the button, so the browser-generated `click` event does not reach the button's React handler.
-
-Fix: added `onPointerDown={(e) => e.stopPropagation()}` on the close button, preventing pointer events starting on the button from bubbling to the swipe container.
-
-File: `src/app/diary/[date]/_components/PhotoViewer.tsx`
-
-Both fixes are targeted and consistent with existing patterns (stopPropagation on interactive children inside gesture containers is the standard approach).
+None.
 
 ---
 
 ## Coverage Notes
 
-- All 20 new unit cases cover the three new modules (useSwipe, usePhotoViewer, PhotoViewer) and the two Editor integration points.
-- The 265 pre-existing tests are unaffected.
-- E2E covers tap-to-open, viewer visible, close button, viewer dismissed end-to-end in Chromium.
-- Swipe navigation (left/right) is covered by unit tests only; E2E swipe is acceptable per plan.
+- `formatListDate` — 4 cases cover same-year, prior-year, today, and yesterday formatting branches.
+- `ListScreen` — 12 cases cover: empty-state render, entry count, sort order (newest first), mood emoji display, date formatting, body text truncation, tap-to-navigate, FAB presence and navigation, and header icon layout.
+- E2E `list.spec.ts` (LE1) seeds 2 localStorage entries, navigates to `/list`, confirms both cards render, taps the first card, and asserts the URL transitions to `/diary/<date>`.
+- All 285 pre-existing tests pass unchanged — no regression.
 
 ---
 
 ## Remaining Risks
 
-1. `PhotoViewer.tsx` is 108 lines after both fixes — slightly over the 100-line soft limit. Acceptable per CLAUDE.md exception; the SVG and conditional are not candidates for extraction.
-2. Vertical-swipe-to-close is not covered by E2E — unit-level only. Acceptable per original test plan.
-3. No pinch-zoom E2E — explicitly deferred to v2 in REQ-012 Non-Goals.
+1. Sort-toggle (if added in a future REQ) is not covered; current tests assume newest-first only.
+2. E2E covers Chromium only; no Safari/Firefox run in CI.
+3. Scroll preservation when returning from editor to list is not E2E-covered (unit-level only via ListScreen state tests).
 
 ---
 

@@ -1,72 +1,93 @@
-# Requirement Intake — REQ-012
+# Requirement Intake — REQ-013
 
 ## Restatement
 
-When a user taps a photo thumbnail in the `PhotoCarousel` (a short tap, < 500 ms), a full-screen photo viewer opens over the editor. The viewer shows the tapped photo centered with `object-fit: contain` on a pure-black background. The user can swipe left/right to browse adjacent photos in the same carousel order, swipe up/down or tap the top-left ✕ button to dismiss the viewer and return to the editor. A "current / total" counter is displayed at the top-right. The viewer is a modal — closing it does not push or pop browser history. The `PhotoCarousel.onThumbnailTap` prop (already stubbed in `Editor.tsx` as `() => {}`) must be wired to open the viewer at the correct initial index.
+REQ-013 adds a "diary list" screen reachable at `/list`. It displays all diary entries for a selected calendar month as vertically scrollable cards. The header provides: a back button (left), a month navigator showing "YYYY년 M월" with previous/next chevrons (center), and a sort toggle switching between "↓ 최신순" and "↑ 오래된 순" (right). Each card shows, top to bottom: a 64px MoodIcon centered at the top, a date label in "YYYY.MM.DD 요일" format in gray, up to 3 lines of body text (ellipsis on overflow), and a horizontal photo thumbnail strip (max 3 thumbnails plus a "+N" overflow cell). Tapping a card navigates to the editor screen (`/diary/[date]`); browser back returns to the list with the same month and sort state intact.
 
 ## In Scope
 
-- New `PhotoViewer` component (full-screen `<dialog>` using `useDialogControl`).
-- New `useSwipe` hook (`src/lib/hooks/useSwipe.ts`) handling horizontal (next/prev) and vertical (close) swipe gestures via pointer events.
-- Wire `Editor.tsx`'s `onThumbnailTap={() => {}}` to open `PhotoViewer` at the index matching the tapped photo id.
-- Local state in `Editor.tsx` (or a small wrapper) tracking `viewerOpen: boolean` and `viewerInitialIndex: number`.
-- Top-left ✕ close button, 44×44 touch target, aria-label `"닫기"`.
-- Top-right counter label, e.g. `"3 / 5"`.
-- Horizontal swipe: index ± 1, bounded at 0 and `photos.length - 1`.
-- Vertical swipe: triggers `onClose`.
-- ESC key closes (free from native `<dialog>`).
-- Body scroll lock while viewer open (native `<dialog>` with `showModal()` handles this automatically).
-- Height unit `100dvh` to account for collapsing browser chrome on mobile.
-- Unit tests: initial index, swipe left/right boundary, close callback.
+- List screen implementation at `src/app/list/page.tsx` (replacing the stub from REQ-006).
+- Month navigator state: default month, prev/next controls, year rollover.
+- Filtering: show only entries whose `date.slice(0, 7)` matches the selected `YYYY-MM`.
+- Sort toggle: newest-first (default) / oldest-first, toggled in-memory via `useState`.
+- Card layout: MoodIcon 64px + date label + body text (3-line clamp) + photo strip (max 3 + "+N").
+- Empty body text fallback: "(내용 없음)".
+- Empty month state: centered message "이 달에는 작성된 일기가 없어요" + CTA link to calendar (`/`). Month nav remains visible and functional.
+- Card tap routing: `router.push('/diary/[date]')`.
+- Back button: `router.back()` (REQ-006 history-stack).
+- File decomposition: `ListScreen.tsx` (orchestration), `DiaryListCard.tsx` (single card), `useDiaryList.ts` (filtering + sorting logic).
+- Reuse of `Card` from `src/design-system/Card.tsx` and `MoodIcon` from REQ-003.
 
 ## Out of Scope (with pointer to owner REQ if known)
 
-- Pinch-to-zoom — explicitly deferred to v2 (per REQ-012 non-goals).
-- Photo sharing — v2.
-- Invoking the viewer from anywhere other than `PhotoCarousel` — out of spec.
-- Single-tap header toggle (show/hide UI chrome) — PRD §4.4.2 marks this "optional"; excluded from MVP.
-- Animation transitions between photos (slide or cross-fade) — not specified; default is instant (see Open Questions).
-- Photo deletion from within the viewer — not specified; belongs to REQ-011's carousel overlay.
-- History-stack entry for the viewer — explicitly excluded (REQ-012 notes, PRD §2.1).
+- Mood filter ("😢만 모아보기") — v2, §4.5.7.
+- Text search within month — v2, §4.5.7.
+- Multi-month infinite scroll — v2, §4.5.7.
+- Sort state persistence to localStorage — v2, §4.5.7.
+- Full-screen photo viewer from list card — REQ-012 (already done; linking from card not required by this REQ).
+- AI chat citation back-link chip — REQ-017.
+- Statistics screen — REQ-014 (parallel, independent).
 
 ## Invariants
 
-- Background: pure black (`#000000`), not the app cream `#FAF6EE`.
-- Image display: `object-fit: contain`, horizontally and vertically centered.
-- Viewer height: `100dvh` (not `100vh`) to handle mobile browser chrome.
-- Close button: top-left position, 44×44 px touch target, white icon on black bg, aria-label `"닫기"`.
-- Counter: top-right, format `"N / M"` (compact, no `장` suffix — see Open Questions).
-- Swipe direction semantics: left = next photo (higher index), right = prev photo (lower index) — standard gallery convention.
-- Swipe boundary: hard stop at index 0 (no wrap-around) and index `photos.length - 1`.
-- Vertical swipe (up or down) calls `onClose`.
-- Initial index: derived from the `id` passed to `onThumbnailTap` by looking up its position in `photos` array. Out-of-bounds is clamped to 0 defensively.
-- Modal, not routed: `useDialogControl` / `showModal()`, no Next.js router push.
-- UI component discovery rule (CLAUDE.md): design-system folder searched first; `useDialogControl` and `BottomSheet` are reused reference patterns. `PhotoViewer` is a new full-screen variant, not a BottomSheet extension.
-- File size rule (CLAUDE.md): `PhotoViewer.tsx` and `useSwipe.ts` are separate files; if either approaches 100 lines it splits further.
-- Korean strings for all user-visible copy.
-- Pointer events (consistent with `useLongPress` in REQ-011) — not touch events.
+- `Card` component from `src/design-system/Card.tsx` must be used as the card surface. No new card style may be created.
+- `MoodIcon` from the design system (REQ-003) must be the sole rendering boundary for mood visuals; the 64px size must be passed as a prop/size, not inlined as a new component.
+- `readDiaries()` (or `useDiaries`) from `src/lib/storage/` is the only read path. No direct `localStorage` access in the screen component.
+- One entry per day is enforced by the storage layer (REQ-002/REQ-009); the list screen must not handle or anticipate duplicates.
+- Sort is `useState` only — never written to `ddalkkak:settings:v1` or any localStorage key.
+- Filtering is by `entry.date.slice(0, 7) === selectedYearMonth` (e.g., `"2026-05"`) — exact string prefix match on the "YYYY-MM-DD" date field.
+- Sort is a lexicographic comparison on `entry.date` (ISO "YYYY-MM-DD" strings sort correctly with plain string comparison).
+- Visual tokens: background `#FAF6EE` (cream / `bg-cream`), card background `#FFFFFF` (`bg-paper`), gray meta text `#A8A8A8` (`text-meta`), body text `#2A2A2A` (`text-charcoal`). No raw hex in component files.
+- All UI strings are Korean.
+- Touch targets must be 44×44px minimum (header buttons, card tap area).
+- File size rule: any file approaching 100 lines must be split at a natural boundary.
 
 ## Open Questions and Recommended Defaults
 
-| # | Question | Recommended Default |
-|---|---|---|
-| Q1 | **Placement of `PhotoViewer.tsx`**: design-system (`src/design-system/`) or diary-scoped (`src/app/diary/[date]/_components/`)? | Diary-scoped (`src/app/diary/[date]/_components/PhotoViewer.tsx`). The viewer has no plausible reuse outside the editor in this MVP. Place `useSwipe` in `src/lib/hooks/useSwipe.ts` since gesture hooks are reusable. |
-| Q2 | **Swipe distance threshold**: 50 px? 80 px? Velocity-based? | 50 px displacement threshold, no velocity calculation. Simple and predictable; matches mobile gallery norms. |
-| Q3 | **Photo transition animation**: cross-fade, slide, or instant? | Instant (no CSS transition). The app has a low-animation feel and this is the fastest-to-implement safe option. |
-| Q4 | **Counter suffix**: `"3 / 5"` vs `"3 / 5장"`? | `"3 / 5"` — compact, consistent with PRD's own example text in §4.4.1. |
-| Q5 | **Single-photo case**: should swipe gesture handlers even be attached? | Attach but treat as no-op (index clamp prevents any change). No visual arrow hints needed. |
-| Q6 | **Body scroll lock**: does `showModal()` handle it? | Yes, native `<dialog showModal()>` creates a top-layer entry that blocks scroll on the document. No extra `overflow: hidden` needed on `<body>`. |
-| Q7 | **`useSwipe` vs inline pointer logic in `PhotoViewer`**: | New `src/lib/hooks/useSwipe.ts` hook returning `{ onPointerDown, onPointerMove, onPointerUp, onPointerCancel }` handlers. Consistent with `useLongPress` pattern; easier to unit-test in isolation. |
-| Q8 | **Race condition — photo deleted while viewer open**: | Out of scope per spec. If `photos` array shrinks and `currentIndex` exceeds new length, clamp to `photos.length - 1`; if `photos` becomes empty, close the viewer. |
-| Q9 | **Diagonal swipe ambiguity**: a drag could be both horizontal and vertical. | Lock axis on `pointerdown` using whichever axis has greater displacement at the first `pointermove` event that exceeds 5 px slop (same slop as `useLongPress`). |
+**Q1. Default month when navigating from calendar vs. other routes.**
+The PRD says: if entering from the calendar, use the calendar's currently-displayed month; otherwise use current month. REQ-006 does not currently pass calendar month context through the URL or router state.
+Recommended default: use the current calendar month (today's year+month) as the initial `selectedMonth` for all entry paths in this REQ. If REQ-006 is later extended to pass `?month=YYYY-MM` as a query param, the list screen can read `searchParams.get('month')` as an override.
+
+**Q2. Month navigation bounds.**
+The PRD says "미래 달도 이동 가능" (future months are reachable). It does not specify a lower bound.
+Recommended default: no bounds. Users can navigate to any month (past or future). Empty months display the empty-state UI.
+
+**Q3. Photo thumbnail size.**
+The PRD says "64~72px" for photo thumbnails inside the card.
+Recommended default: 64px square to align with the MoodIcon size given in the same section.
+
+**Q4. "+N" overflow cell rendering.**
+The PRD shows a `+N` label after 3 thumbnails but does not specify the cell's appearance.
+Recommended default: same 64px square as thumbnail cells, gray background (`bg-[#A8A8A8]/20` or equivalent design token), centered `+N` text in `text-charcoal`. N = `photos.length - 3`.
+
+**Q5. Date format in card.**
+The PRD shows "YYYY.MM.DD 요일" (e.g., "2026.05.16 토요일") in the wireframe (§4.5.1) and §4.5.4.
+Recommended default: use this exact format — dot-separated date, space, Korean weekday. Use `Intl.DateTimeFormat('ko-KR', { weekday: 'short' })` for the weekday string.
+
+**Q6. Month transition animation.**
+§4.5.6 says "부드러운 전환 (페이드 또는 슬라이드)."
+Recommended default: CSS opacity fade via a key-based re-render (`key={selectedMonth}` on the list container triggers React's unmount/mount, Tailwind's `animate-fade-in` or a simple `transition-opacity`). Slide animation is deferred unless the design system already ships a slide primitive.
+
+**Q7. Empty-body card rendering.**
+§4.5.4 says "(내용 없음)" OR "그냥 사진/기분만 표시." This is ambiguous.
+Recommended default: if `entry.text` is empty or whitespace-only and `entry.photos.length === 0`, render the italic gray string "(내용 없음)" in the body area. If photos exist but text is empty, omit the body text area entirely. If text is empty but mood is the only content, show "(내용 없음)".
+
+**Q8. `useDiaries` hook vs. direct `readDiaries()` call.**
+`src/lib/storage/useDiaries.ts` already exists (from REQ-002).
+Recommended default: use the existing `useDiaries` hook inside `useDiaryList.ts` rather than calling `readDiaries()` directly. This keeps re-render reactivity consistent with how the editor uses storage.
 
 ## Dependency Check
 
-| Dependency | Required Status | Actual Status |
-|---|---|---|
-| REQ-011 (사진 추가 / 카로젤 / 길게 누름 삭제) | DONE | DONE (confirmed in index.md; `PhotoCarousel` component and `onThumbnailTap` prop are present in `src/app/diary/[date]/_components/PhotoCarousel.tsx`; `Editor.tsx` wires `onThumbnailTap={() => {}}`) |
+| REQ | Required Status | Actual Status (index.md) |
+|-----|----------------|--------------------------|
+| REQ-002 | DONE | DONE |
+| REQ-003 | DONE | DONE |
+| REQ-005 | DONE | DONE |
+| REQ-006 | DONE | DONE |
 
-All dependencies satisfied.
+All four dependencies are confirmed DONE. The route stub at `src/app/list/page.tsx` from REQ-006 is present and safe to replace.
+
+Note: REQ-009 (editor) is also DONE and reachable at `/diary/[date]`, which is the navigation target for card taps. Although REQ-009 is not listed as a formal dependency of REQ-013, its existence is a precondition for the card-tap flow to function end-to-end.
 
 ## Verdict
 PASS

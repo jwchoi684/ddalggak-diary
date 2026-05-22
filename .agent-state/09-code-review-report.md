@@ -1,106 +1,136 @@
-# Code Review Report — REQ-012
+# Code Review Report — REQ-013
 
 ## Summary
 
-REQ-012 (사진 전체화면 뷰어) adds three new files (`useSwipe.ts`, `usePhotoViewer.ts`, `PhotoViewer.tsx`) and modifies `Editor.tsx` and its test file. Two correctness defects were discovered and fixed during Phase 10 verification. The implementation correctly follows the technical design, API contract, and existing architecture patterns. All acceptance criteria are met.
+REQ-013 implements the diary list screen by replacing a stub `page.tsx` with a full composition of new components (`ListHeader`, `DiaryListCard`, `PhotoThumbnailStrip`) and a utility (`formatListDate`). The implementation closely follows the technical design and API contract. All 12 unit tests and 1 E2E test pass. No blocking issues were found.
+
+---
 
 ## Files Reviewed
 
-| File | Status | Notes |
+| File | Type | Lines |
 |---|---|---|
-| `src/lib/hooks/useSwipe.ts` | New | 82 lines (target was ~50) |
-| `src/lib/hooks/usePhotoViewer.ts` | New | 29 lines |
-| `src/app/diary/[date]/_components/PhotoViewer.tsx` | New | 106 lines (target was ~80, soft cap 100) |
-| `src/app/diary/[date]/_components/Editor.tsx` | Modified | 253 lines (accepted at design phase) |
-| `src/lib/hooks/__tests__/useSwipe.test.ts` | New | 7 cases |
-| `src/lib/hooks/__tests__/usePhotoViewer.test.ts` | New | 4 cases |
-| `src/app/diary/[date]/__tests__/PhotoViewer.test.tsx` | New | 7 cases |
-| `src/app/diary/[date]/__tests__/Editor.test.tsx` | Modified | +2 cases |
-| `e2e/photo-viewer.spec.ts` | New | 1 E2E case |
-| `src/app/diary/[date]/_components/PhotoCarousel.tsx` | UNCHANGED | 96 lines, budget protected |
+| `src/lib/utils/formatListDate.ts` | New utility | 15 |
+| `src/app/list/_components/PhotoThumbnailStrip.tsx` | New component | 39 |
+| `src/app/list/_components/DiaryListCard.tsx` | New component | 52 |
+| `src/app/list/_components/ListHeader.tsx` | New component | 75 |
+| `src/app/list/page.tsx` | Replaced stub | 83 |
+| `src/lib/utils/__tests__/formatListDate.test.ts` | New tests | 26 |
+| `src/app/list/__tests__/ListScreen.test.tsx` | New tests | 260 |
+| `e2e/list.spec.ts` | New E2E | 46 |
+
+---
 
 ## Blocking Issues
 
 None.
 
+---
+
 ## Non-Blocking Suggestions
 
-**1. Focus management gap when `{open && (...)}` is used**
+1. **`DiaryListCard` and `PhotoThumbnailStrip` missing `"use client"` directive.** Both components are rendered as children of a Client Component (`page.tsx`), so they inherit the client boundary at runtime. However, they are not explicitly marked `"use client"` and would fail if ever rendered inside a Server Component tree without the parent boundary. `ListHeader.tsx` is correctly marked. Adding `"use client"` to both files would make the boundary explicit and consistent.
 
-The design spec states "Close button is first focusable element in DOM so `showModal()` auto-focus lands here." With `{open && (...)}`, children are absent from the DOM when `open=false`. When `open` flips to `true`, React renders the children synchronously, but `useDialogControl`'s `showModal()` fires inside a `useEffect` — which runs after the render commit. In practice this ordering is correct (children are in the DOM by the time `showModal()` runs), but it is a subtle dependency on React's commit-then-effect sequencing. The design note claiming auto-focus reliability should be acknowledged as dependent on this ordering, not a hard guarantee in all React environments. This is acceptable for the current Next.js + React 18 stack but worth a comment.
+2. **Sort-toggle touch target uses inline `style` rather than a Tailwind class.** `ListHeader.tsx` line 69 uses `style={{ minHeight: 44 }}` for the sort button while `IconButton` enforces 44×44 via its own inline style internally. Using `className="min-h-[44px]"` instead of the inline style would be consistent with the rest of the design-system pattern.
 
-**2. `useSwipe.ts` exceeds the file-size target significantly**
+3. **`key={activeMonth}` is on an inner `div` that's not list-rendered.** At `page.tsx` line 62 the `key={activeMonth}` is set on a `<div>` rendered unconditionally inside the same tree — it is not a list-rendered element. React will not treat a non-list key as a reset trigger in this position; the `key` has no effect on remount. The intended reset-on-month-change behavior should be achieved by setting `key={activeMonth}` on `<main>` instead. Currently the sort state will not reset when the month changes — which matches the spec ("정렬 상태는 세션 내 유지"), so there is no user-visible bug. Worth fixing for intent clarity.
 
-The target was ~50 lines; actual is 82 lines (64% over). The implementation report acknowledges this. The code is clean and not a candidate for splitting, but the size overage is larger than the typical "a few lines over" exception. No action required now.
-
-**3. Empty-photos guard shows an empty opened dialog if `openViewer` were ever called with an empty array**
-
-When `photos.length === 0`, hooks (`useDialogControl`, `useEffect`, etc.) still run. If `open=true` somehow propagated with an empty array, `useDialogControl` would call `showModal()` on an empty `<dialog>`, producing a bare black-backdrop top-layer with no content and no close affordance (ESC still works via `cancel` event). The path is unreachable in practice because `PhotoCarousel` returns `null` when empty, but the component itself provides no failsafe against showing in that state. A `useEffect` or early guard that calls `onClose()` if `photos.length === 0 && open` would make it truly bulletproof.
+---
 
 ## Nits
 
-**N1.** `useSwipe.ts` has `import type React from 'react'` but uses `React.PointerEvent` in the type signatures. This is fine (`import type` with named types works), but the comment about the import purpose could be clearer.
+1. `ListHeader.tsx`: `ChevronLeft` and `ChevronRight` inline arrow components could be extracted to a shared `icons.tsx` to reduce future SVG duplication. Low priority.
+2. `ListScreen.test.tsx` line 31: `useDiaries as ReturnType<typeof vi.fn>` — `vi.mocked(useDiaries)` would be cleaner. Pure nit.
+3. `LOADING` constant at `page.tsx` lines 12-14 is a JSX expression hoisted to module scope. Fine in React 18 but unusual style.
 
-**N2.** The `onPointerCancel` handler signature in the contract is `(e: React.PointerEvent) => void` but the implementation at line 76 of `useSwipe.ts` declares it as `() => void` (no argument). The argument is unused and TypeScript accepts this (narrower function is assignable to the wider type when spread), but the implementation signature does not match the exported `SwipeHandlers` interface exactly. This is a minor inconsistency.
-
-**N3.** `PhotoViewer.tsx` has two nearly-identical `<dialog>` JSX blocks (empty-photos path and the normal path) with the same `className` string repeated. Extracting the class string to a constant would reduce duplication.
+---
 
 ## Positive Notes
 
-- Axis-lock logic in `useSwipe` is correct: `lockedAxis` is set once on the first `pointermove` that exceeds `slopPx`, using `adx >= ady` to resolve diagonal ties. The lock is never changed mid-gesture. Callbacks fire only on `pointerup`. This is exactly the design spec.
-- `setPointerCapture` is wrapped in `try/catch` with a descriptive comment — correct for happy-dom compatibility.
-- `usePhotoViewer.openViewer` correctly clamps unknown IDs to index 0 (`idx >= 0 ? idx : 0`).
-- `useDialogControl` ref is used; `onDialogClick` is intentionally not spread — comment at line 17 of `PhotoViewer.tsx` makes the deliberate omission explicit and reviewable.
-- `"use client"` directive is present on all three new files.
-- No `any`, no `@ts-ignore`, no new dependencies.
-- `PhotoCarousel.tsx` is untouched at 96 lines.
-- All four required `data-testid` selectors are present: `photo-viewer-container`, `photo-viewer-close`, `photo-viewer-img`, `photo-viewer-counter`.
-- Korean strings are exact: `aria-label="닫기"`, `` alt={`사진 ${currentIndex + 1}`} ``, `{currentIndex + 1} / {photos.length}` (numeric only, no suffix).
-- The two Phase-10 fixes are sound: `{open && (...)}` correctly gates DOM presence (resolving Playwright visibility without display:none ambiguity), and `e.stopPropagation()` on the close button's `onPointerDown` is the standard and non-disruptive fix for setPointerCapture bubbling.
-- `<PhotoViewer>` is mounted unconditionally and placed after `<PhotoCarousel>`, before `<Toast>` — per contract invariant 3 and placement spec.
-- Both new Editor integration cases (C-viewer-1, C-viewer-2) test the full open-and-close cycle through actual `showModal`/`close` mock counts.
+- `formatListDate` correctly avoids the UTC-shift trap by appending `'T00:00:00'` and builds the date string from string slices to preserve leading zeros.
+- All production files are under 100 lines as required by CLAUDE.md.
+- No `any`, no `@ts-ignore`, no new external dependencies.
+- `<img>` (not `next/image`) is used correctly for base64 `dataUrl` values, with `// eslint-disable-next-line @next/next/no-img-element` where needed.
+- `PhotoThumbnailStrip` uses `key={photo.id}` (stable, entity-based key) rather than array index.
+- FLD1 weekday deviation (test plan said `토요일`, calendar fact is `금요일`) was caught and corrected.
+- `<Suspense>` boundary wraps `ListPageContent` correctly per Next.js 15 App Router rules.
+- `Routes.calendar` is used for the empty-state CTA rather than a hardcoded `'/'`.
+- `localeCompare` on ISO-8601 date strings is correct — ISO strings sort lexicographically in date order without parsing.
+
+---
+
+## Test Coverage Assessment
+
+| Concern | Coverage |
+|---|---|
+| Month filtering | LS1 |
+| Default month fallback | LS2 |
+| Sort desc default | LS3 |
+| Sort asc toggle | LS4 |
+| +N overflow badge | LS5 |
+| Empty body + no photos | LS6 |
+| Empty body + photos present | LS7 |
+| Empty month state | LS8 |
+| Card tap navigation | LS9 |
+| Next month nav | LS10 |
+| Prev month year rollover | LS11 |
+| Loading state | LS12 |
+| formatListDate correctness | FLD1–FLD4 |
+| E2E smoke | LE1 |
+
+Coverage is complete against all 12 test plan cases plus 4 formatListDate cases.
+
+---
 
 ## Invariant Walkthrough
 
-| # | Invariant | Verification | Status |
+| # | Caller Invariant | Status | Notes |
 |---|---|---|---|
-| 1 | `usePhotoViewer` and `<PhotoViewer>` receive the same `photos` array (`state.photos`) | Editor.tsx line 36: `usePhotoViewer(state.photos)`, line 197: `photos={state.photos}` — same reference | PASS |
-| 2 | `openViewer` only called from `PhotoCarousel`'s `onThumbnailTap` | Editor.tsx line 193: `onThumbnailTap={openViewer}` — sole call site | PASS |
-| 3 | `<PhotoViewer>` mounted unconditionally; `open` drives show/hide | Editor.tsx lines 196-201: unconditional mount, no conditional wrapper | PASS |
-| 4 | Swipe handlers spread on inner container `<div>`, not on `<dialog>` | PhotoViewer.tsx line 61: `{...swipeHandlers}` on `photo-viewer-container` div, not on `<dialog>` | PASS |
-| 5 | `initialIndex` passed to `<PhotoViewer>` equals `viewerInitialIndex` from `usePhotoViewer` | Editor.tsx line 199: `initialIndex={viewerInitialIndex}` | PASS |
+| 1 | `useDiaries` called inside `"use client"` component | PASS | `ListPageContent` inside `page.tsx` (`"use client"`) |
+| 2 | `<Suspense>` wraps `useSearchParams` consumer | PASS | `ListPage` wraps `ListPageContent` |
+| 3 | `DiaryListCard.onTap` uses `router.push(Routes.diary(entry.date))` | PASS | `page.tsx` line 65 |
+| 4 | `PhotoThumbnailStrip` only rendered when `photos.length > 0` | PASS | `DiaryListCard` line 48 gates on `hasPhotos` |
+| 5 | `formatListDate` only receives "YYYY-MM-DD" strings | PASS | All callers pass `entry.date` |
+| 6 | Sort state never written to localStorage | PASS | Sort is `useState` only |
+| 7 | `MoodIcon` is the sole mood-rendering boundary | PASS | `DiaryListCard` uses `<MoodIcon id={entry.mood} size={64} />` |
+| 8 | `Card` from design-system is the sole card surface | PASS | `DiaryListCard` wraps `<Card className="p-4">` |
+
+---
 
 ## File Size Audit
 
-| File | Target | Actual | Delta | Verdict |
-|---|---|---|---|---|
-| `useSwipe.ts` | ~50 | 82 | +64% | Over — acceptable, no natural split point |
-| `usePhotoViewer.ts` | ~25 | 29 | +16% | Acceptable |
-| `PhotoViewer.tsx` | ~80 | 106 | +33% | Over soft cap of 100 — 6 lines from inline SVG and `{open && ...}` fix; acceptable per CLAUDE.md exception |
-| `Editor.tsx` | ~255 | 253 | within | PASS |
-| `PhotoCarousel.tsx` | ≤96 | 96 | unchanged | PASS |
+| File | Actual Lines | Limit | Status |
+|---|---|---|---|
+| `formatListDate.ts` | 15 | 100 | PASS |
+| `PhotoThumbnailStrip.tsx` | 39 | 100 | PASS |
+| `DiaryListCard.tsx` | 52 | 100 | PASS |
+| `ListHeader.tsx` | 75 | 100 | PASS |
+| `page.tsx` | 83 | 100 | PASS |
+
+---
 
 ## Architecture Consistency
 
-The implementation follows all existing patterns:
-- `useDialogControl` reused from design-system (same as `BottomSheet`, `ConfirmDialog`, `MoodPickerSheet`)
-- Pointer-event handler shape (`onPointerDown/Move/Up/Cancel`) matches `useLongPress.ts`
-- `showModal`/`close` prototype mock pattern in tests matches `Editor.test.tsx` and `MoodPickerSheet.test.tsx`
-- `makePointerEvent` helper pattern reused from `useLongPress.test.ts`
-- `makePhoto()` / `makeDiary()` fixtures reused from existing test fixtures
-- `eslint-disable-next-line @next/next/no-img-element` comment matches `PhotoCarousel.tsx` line 52
-- Navigation remains modal (not in history stack) per PRD §2.1 and REQ-012 Notes
+- Reuses `Card`, `MoodIcon`, `EmptyState`, `IconButton` from `@/design-system/`.
+- Uses `useDiaries` from `@/lib/storage/useDiaries` (read-only).
+- Follows the `Routes.*` navigation pattern.
+- Uses `new Date(isoDate + 'T00:00:00')` UTC-safe parsing — same as `EditorBody`.
+- Uses plain `<img>` (not `next/image`) for base64 data URLs — same as `PhotoCarousel`.
+- Test mock pattern (`currentSearchParams` mutable variable + `vi.mock`) matches `CalendarScreen.test.tsx`.
+
+---
 
 ## Contract Consistency
 
-All interface shapes match the API contract document exactly:
-- `SwipeOptions` and `SwipeHandlers` interfaces — exact match
-- `usePhotoViewer` return type — exact match
-- `PhotoViewerProps` — exact match
-- Korean strings — exact match
-- Test selector guarantees — all four testids present
+All four interface contracts from the API contract document are satisfied:
+- `formatListDate(isoDate: string): string` — correct signature, UTC-safe parsing, correct Intl call.
+- `ListHeader` — all 5 props, sticky header, correct aria labels, `addMonths` for prev/next, sort label strings match.
+- `DiaryListCard` — correct props, `aria-label` via `Intl.DateTimeFormat('ko-KR')` on `entry.date + 'T00:00:00'`, body text rules applied in specified order, `PhotoThumbnailStrip` gated on `photos.length > 0`.
+- `PhotoThumbnailStrip` — correct props, 3-thumbnail + overflow badge, `data-testid="photo-overflow-badge"`, `loading="lazy"`, `alt="첨부 사진"`.
 
-One minor implementation-vs-contract discrepancy: `onPointerCancel` in `SwipeHandlers` is typed `(e: React.PointerEvent) => void` in the contract, but the implementation declares it as `() => void`. TypeScript allows this assignment (a function ignoring its argument is assignable to one that expects it), so it compiles cleanly and behaves correctly, but the contract states the handler receives an event. Non-breaking.
+Korean strings all match the contract table exactly.
+
+---
 
 ## Verdict
 PASS

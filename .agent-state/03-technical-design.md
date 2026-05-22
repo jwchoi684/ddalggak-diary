@@ -1,187 +1,249 @@
-# Technical Design — REQ-012: 사진 전체화면 뷰어
+# Technical Design — REQ-013: 일기 리스트 화면
 
 ## Summary
 
-REQ-012 adds a full-screen photo viewer modal to the diary editor. When a user short-taps a `PhotoCarousel` thumbnail, a `<dialog>`-based full-screen viewer opens over the editor on a pure-black background. The viewer supports left/right pointer swipe to navigate photos, vertical swipe or ✕ button (or ESC) to close. No backend, database, or routing changes are required. The feature is entirely display-only and zero-impact on autosave.
+REQ-013 replaces the 8-line stub at `src/app/list/page.tsx` with a fully functional diary list screen. The screen shows one calendar month of diary entries as vertically scrollable cards, with a sticky header containing back navigation, month navigator, and sort toggle. All state is minimal: month is URL-canonical via `?month=YYYY-MM`, sort is local `useState` (session-only). No new dependencies, no new design-system primitives — only composition of existing pieces.
 
 ---
 
 ## Implementation Strategy
 
-Three new files; one file edited.
-
-1. `src/lib/hooks/useSwipe.ts` — gesture hook (no React component, pure pointer-event logic).
-2. `src/lib/hooks/usePhotoViewer.ts` — state-management hook for open/close/index.
-3. `src/app/diary/[date]/_components/PhotoViewer.tsx` — `<dialog>`-based full-screen viewer component.
-4. `src/app/diary/[date]/_components/Editor.tsx` — wire `onThumbnailTap` and mount `<PhotoViewer>`.
+Pure composition over existing primitives. The only new production code lives in:
+- `src/app/list/page.tsx` (replaced)
+- `src/app/list/_components/ListHeader.tsx` (new)
+- `src/app/list/_components/DiaryListCard.tsx` (new)
+- `src/app/list/_components/PhotoThumbnailStrip.tsx` (new)
+- `src/lib/utils/formatListDate.ts` (new, small utility)
+- `src/app/list/__tests__/ListScreen.test.tsx` (new)
 
 ---
 
 ## Component / File Map
 
 ```
-src/
-  lib/hooks/
-    useSwipe.ts                             # new — gesture hook
-    usePhotoViewer.ts                       # new — viewer open/close/index state
-  app/diary/[date]/
-    _components/
-      PhotoViewer.tsx                       # new — full-screen <dialog> viewer
-      Editor.tsx                            # edited — wire hook + mount viewer
-    __tests__/
-      PhotoViewer.test.tsx                  # new — 7 unit cases
-  lib/hooks/
-    __tests__/
-      useSwipe.test.ts                      # new — 7 unit cases
-      usePhotoViewer.test.ts                # new — 4 unit cases
+src/app/list/
+  page.tsx                  # "use client" + Suspense wrapper + state orchestrator
+  _components/
+    ListHeader.tsx           # sticky header: back + month nav + sort toggle
+    DiaryListCard.tsx        # single card: MoodIcon + date + text + photos
+    PhotoThumbnailStrip.tsx  # max 3 img + +N badge
+  __tests__/
+    ListScreen.test.tsx
+src/lib/utils/
+  formatListDate.ts          # "YYYY.MM.DD 요일" helper
+```
+
+---
+
+## Data Flow
+
+```
+page.tsx
+  useSearchParams() → activeMonth ("YYYY-MM", default: today's month)
+  useState<'asc'|'desc'>('desc') → sort
+  useDiaries() → { entries, isReady }
+
+  filtered = entries.filter(e => e.date.slice(0,7) === activeMonth)
+  sorted   = [...filtered].sort((a,b) =>
+               sort === 'desc'
+                 ? b.date.localeCompare(a.date)
+                 : a.date.localeCompare(b.date))
+
+  → <ListHeader month={activeMonth} sort={sort}
+                onMonthChange={m => router.push(Routes.listWithFilter({month:m}))}
+                onSortToggle={() => setSort(s => s==='desc' ? 'asc' : 'desc')}
+                onBack={() => router.back()} />
+  → sorted.map(e => <DiaryListCard key={e.date} entry={e}
+                                   onTap={() => router.push(Routes.diary(e.date))} />)
+  → empty → <EmptyState … />
 ```
 
 ---
 
 ## Exact Function Signatures
 
-### `useSwipe.ts`
-
 ```ts
-export interface SwipeOptions {
-  onSwipeLeft: () => void;     // dx < -threshold and axis locked to x
-  onSwipeRight: () => void;    // dx > +threshold and axis locked to x
-  onSwipeVertical: () => void; // |dy| > threshold and axis locked to y
-  threshold?: number;          // default 50 (px displacement)
-  slopPx?: number;             // default 5 (px before axis is locked)
-}
+// page.tsx (inner component, wrapped in Suspense)
+function ListPageContent(): JSX.Element
 
-export interface SwipeHandlers {
-  onPointerDown: (e: React.PointerEvent) => void;
-  onPointerMove: (e: React.PointerEvent) => void;
-  onPointerUp: (e: React.PointerEvent) => void;
-  onPointerCancel: (e: React.PointerEvent) => void;
+// ListHeader.tsx
+interface ListHeaderProps {
+  month: string;          // "YYYY-MM"
+  sort: 'asc' | 'desc';
+  onBack: () => void;
+  onMonthChange: (month: string) => void;
+  onSortToggle: () => void;
 }
+export function ListHeader(props: ListHeaderProps): JSX.Element
 
-export function useSwipe(options: SwipeOptions): SwipeHandlers
+// DiaryListCard.tsx
+interface DiaryListCardProps {
+  entry: DiaryEntry;
+  onTap: () => void;
+}
+export function DiaryListCard(props: DiaryListCardProps): JSX.Element
+
+// PhotoThumbnailStrip.tsx
+interface PhotoThumbnailStripProps {
+  photos: Photo[];      // caller passes all photos; strip shows first 3 + badge
+}
+export function PhotoThumbnailStrip(props: PhotoThumbnailStripProps): JSX.Element
+
+// src/lib/utils/formatListDate.ts
+export function formatListDate(isoDate: string): string
+// "2026-05-22" → "2026.05.22 토요일"
+// Implementation: parse via new Date(isoDate + 'T00:00:00') to avoid UTC offset shifting;
+// build "YYYY.MM.DD" from string slices; append weekday via Intl.DateTimeFormat('ko-KR', {weekday: 'long'})
 ```
 
-Internal mechanics (refs, not state — no re-render during drag):
-- `startX`, `startY` — coordinates at `pointerdown`.
-- `lockedAxis: 'x' | 'y' | null` — set once the first `pointermove` exceeds `slopPx` on either axis; the larger delta wins; never changes after lock.
-- `active: boolean` — true from `pointerdown` until `pointerup` / `pointercancel`.
-- On `pointerdown`: capture via `e.currentTarget.setPointerCapture(e.pointerId)` (wrap in try/catch for happy-dom); record `startX`/`startY`; reset `lockedAxis` and `active=true`.
-- On `pointermove`: if not active, return. If `lockedAxis` is null and displacement exceeds `slopPx`, lock to axis with larger absolute delta. No callback fired on move — callbacks fire only on `pointerup`.
-- On `pointerup`: if not active, return. Set `active=false`. If axis locked to `'x'`: fire `onSwipeLeft` if dx < -threshold, `onSwipeRight` if dx > +threshold. If axis locked to `'y'`: fire `onSwipeVertical` if |dy| > threshold. Pointer capture auto-releases on pointerup.
-- On `pointercancel`: set `active=false`, reset `lockedAxis`. No callback.
-- All handlers stable via `useCallback`. Options wrapped in a ref so callbacks are never stale without needing to be in dep arrays.
-
-### `usePhotoViewer.ts`
+### Month Navigation Helper
 
 ```ts
-export function usePhotoViewer(photos: Photo[]): {
-  viewerOpen: boolean;
-  viewerInitialIndex: number;
-  openViewer: (id: string) => void;
-  closeViewer: () => void;
+function addMonths(yearMonth: string, delta: number): string {
+  const [y, m] = yearMonth.split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 ```
 
-- `const [viewerOpen, setViewerOpen] = useState(false)`
-- `const [viewerInitialIndex, setViewerInitialIndex] = useState(0)`
-- `openViewer(id)`: `const idx = photos.findIndex(p => p.id === id); setViewerInitialIndex(idx >= 0 ? idx : 0); setViewerOpen(true)`. Wrapped in `useCallback([photos])`.
-- `closeViewer()`: `setViewerOpen(false)`. Wrapped in `useCallback([])`.
-
-### `PhotoViewer.tsx`
-
-```ts
-export interface PhotoViewerProps {
-  photos: Photo[];
-  open: boolean;
-  initialIndex: number;
-  onClose: () => void;
-}
-
-export function PhotoViewer({ photos, open, initialIndex, onClose }: PhotoViewerProps): React.ReactElement
-```
-
-- Internal: `const [currentIndex, setCurrentIndex] = useState(initialIndex)`.
-- Reset on each open:
-  ```ts
-  useEffect(() => {
-    if (open) setCurrentIndex(Math.max(0, Math.min(initialIndex, photos.length - 1)));
-  }, [open, initialIndex]);
-  ```
-- Dialog control: `const { ref } = useDialogControl(open, onClose)`. `onDialogClick` is intentionally NOT spread onto `<dialog>` (per architecture risk #1).
-- Empty photos: if `photos.length === 0`, render `<dialog ref={ref} className="..." />` (empty closed dialog) so the ref is still attached but no content is shown.
-- Swipe callbacks (stable via `useCallback`):
-  - `onSwipeLeft`: `setCurrentIndex(i => Math.min(i + 1, photos.length - 1))`
-  - `onSwipeRight`: `setCurrentIndex(i => Math.max(i - 1, 0))`
-  - `onSwipeVertical`: `onClose`
-- Spread `useSwipe({ onSwipeLeft, onSwipeRight, onSwipeVertical })` onto the inner container `<div>`, NOT on `<dialog>`.
+Handles year rollover automatically via `Date` constructor overflow.
 
 ---
 
-## Editor.tsx Integration Delta
+## page.tsx Integration Sketch
 
-```diff
-+ import { usePhotoViewer } from '@/lib/hooks/usePhotoViewer';
-+ import { PhotoViewer } from './PhotoViewer';
+```tsx
+"use client";
+import { Suspense, useState } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
+import { useDiaries } from '@/lib/storage/useDiaries';
+import { Routes } from '@/lib/navigation';
+import { ListHeader } from './_components/ListHeader';
+import { DiaryListCard } from './_components/DiaryListCard';
+import { EmptyState } from '@/design-system/EmptyState';
 
-  export function Editor({ date }: EditorProps) {
-    ...
-+   const { viewerOpen, viewerInitialIndex, openViewer, closeViewer } =
-+     usePhotoViewer(state.photos);
-    ...
-    <PhotoCarousel
-      photos={state.photos}
-      onDelete={(id) => dispatch({ type: 'DELETE_PHOTO', id })}
--     onThumbnailTap={() => {}}
-+     onThumbnailTap={openViewer}
-    />
-    ...
-+   <PhotoViewer
-+     photos={state.photos}
-+     open={viewerOpen}
-+     initialIndex={viewerInitialIndex}
-+     onClose={closeViewer}
-+   />
+function ListPageContent() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const today = new Date();
+  const currentMonth = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`;
+  const activeMonth = searchParams.get('month') ?? currentMonth;
+  const [sort, setSort] = useState<'asc'|'desc'>('desc');
+  const { entries, isReady } = useDiaries();
+
+  const filtered = isReady
+    ? entries.filter(e => e.date.slice(0, 7) === activeMonth)
+    : [];
+  const sorted = [...filtered].sort((a, b) =>
+    sort === 'desc' ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date)
+  );
+
+  return (
+    <div className="min-h-screen bg-cream">
+      <ListHeader
+        month={activeMonth} sort={sort}
+        onBack={() => router.back()}
+        onMonthChange={m => router.push(Routes.listWithFilter({ month: m }))}
+        onSortToggle={() => setSort(s => s === 'desc' ? 'asc' : 'desc')}
+      />
+      <main className="px-4 pt-4 pb-8">
+        {!isReady && <div className="text-center text-meta py-8">불러오는 중…</div>}
+        {isReady && sorted.length === 0 && (
+          <EmptyState
+            className="mt-16"
+            title="이 달에는 작성된 일기가 없어요"
+            action={<button onClick={() => router.push('/')} className="…">캘린더로 가기</button>}
+          />
+        )}
+        {isReady && (
+          <div className="space-y-3" key={activeMonth}>
+            {sorted.map(e => (
+              <DiaryListCard
+                key={e.date} entry={e}
+                onTap={() => router.push(Routes.diary(e.date))}
+              />
+            ))}
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+export default function ListPage() {
+  return (
+    <Suspense fallback={<div className="text-center text-meta py-8">불러오는 중…</div>}>
+      <ListPageContent />
+    </Suspense>
+  );
+}
 ```
-
-`<PhotoViewer>` is mounted always — `useDialogControl` drives `showModal`/`close` internally based on the `open` prop. Placement: after `<PhotoCarousel>`, before `<Toast>`.
 
 ---
 
 ## Visual Spec
 
-| Element | Tailwind / style |
-|---|---|
-| `<dialog>` | `p-0 m-0 border-none bg-transparent max-w-none max-h-none w-full h-full` — reset all browser dialog defaults |
-| Container `<div>` | `w-full h-[100dvh] bg-black flex flex-col` |
-| Close `<button>` | `absolute top-4 left-4 w-[44px] h-[44px] flex items-center justify-center text-white` |
-| Counter `<span>` | `absolute top-4 right-4 text-sm text-white` |
-| Image `<img>` | `flex-1 w-full object-contain` |
+**ListHeader** — sticky, `top-0 z-10 bg-cream`:
+- Left: `<IconButton icon={<ChevronLeft />} label="뒤로 가기" onClick={onBack} />`
+- Center: `<IconButton label="이전 달" />` + `<span>` "YYYY년 M월" + `<IconButton label="다음 달" />`
+- Right: `<button aria-label="정렬 변경">` text "최신순" or "오래된순" + `↓` / `↑` arrow
+
+**DiaryListCard** — wraps `<Card className="p-4">` in `<button className="w-full text-left">`:
+- `<MoodIcon id={entry.mood} size={64} className="mx-auto" />`
+- `<p className="text-meta text-sm text-center mt-2">{formatListDate(entry.date)}</p>`
+- Body text section (conditional):
+  - If `text` non-empty: `<p className="text-charcoal line-clamp-3 mt-2">{entry.text}</p>`
+  - If `text` empty AND `photos.length === 0`: `<p className="text-meta italic mt-2">(내용 없음)</p>`
+  - If `text` empty AND `photos.length > 0`: omit body text section entirely
+- `{photos.length > 0 && <PhotoThumbnailStrip photos={entry.photos} />}`
+
+**PhotoThumbnailStrip** — `<div className="flex flex-row gap-2 mt-3">`:
+- Up to 3 `<img src={photo.dataUrl} alt="첨부 사진" className="w-16 h-16 object-cover rounded-xl" loading="lazy" />`
+- If `photos.length > 3`: `<div className="w-16 h-16 bg-[#EBEBEB] rounded-xl flex items-center justify-center text-charcoal text-sm font-medium" data-testid="photo-overflow-badge">+{photos.length - 3}</div>`
+
+**Card tap button**: `aria-label` formatted as "YYYY년 M월 D일 일기 보기" — built from `entry.date` using `Intl.DateTimeFormat('ko-KR', {year:'numeric', month:'long', day:'numeric'})`.
+
+---
+
+## Month Label Display
+
+The center header shows "YYYY년 M월" (e.g. "2026년 5월"):
+```ts
+const [y, m] = activeMonth.split('-');
+const label = `${y}년 ${Number(m)}월`;
+```
 
 ---
 
 ## Accessibility Spec
 
-- `<dialog>` has implicit `role="dialog"` from the HTML element — no extra `role` attribute.
-- Close `<button>`: `aria-label="닫기"` + `data-testid="photo-viewer-close"`. First focusable element in DOM so `showModal()` auto-focus lands here.
-- Image: `<img alt="사진 {currentIndex + 1}" data-testid="photo-viewer-img">`.
-- Counter: `<span data-testid="photo-viewer-counter" aria-live="polite">`. Content `"2 / 5"` (no Korean suffix).
-- ESC key close: handled automatically by `useDialogControl` via the `cancel` event listener.
-- Body scroll lock: automatic via `showModal()` top-layer.
+| Element | A11y |
+|---|---|
+| Back button | `aria-label="뒤로 가기"` |
+| Prev month | `aria-label="이전 달"` |
+| Next month | `aria-label="다음 달"` |
+| Sort toggle | `aria-label="정렬 변경"` |
+| Card button | `aria-label="YYYY년 M월 D일 일기 보기"` |
+| Photo img | `alt="첨부 사진"` |
+| Empty CTA | `<button>캘린더로 가기</button>` |
+| Overflow badge | `data-testid="photo-overflow-badge"` |
 
 ---
 
 ## Edge Case Resolutions
 
-1. **PhotoViewer props exact shape** — `{photos, open, initialIndex, onClose}`. Internal `currentIndex` state initialized from `initialIndex` via useEffect on each open.
-2. **useSwipe API** — `{onSwipeLeft, onSwipeRight, onSwipeVertical, threshold?=50, slopPx?=5}` returning `{onPointerDown, onPointerMove, onPointerUp, onPointerCancel}`.
-3. **usePhotoViewer API** — `{viewerOpen, viewerInitialIndex, openViewer(id), closeViewer()}`. Falls back to index 0 on unknown id.
-4. **Reset currentIndex on open** — `useEffect([open, initialIndex])` clamps and resets.
-5. **Boundary behavior** — left swipe (next) `Math.min(i+1, photos.length-1)`; right swipe (prev) `Math.max(i-1, 0)`; vertical swipe calls `onClose`.
-6. **Empty photos defensive** — `photos.length === 0` renders empty dialog node (ref attached, no content). In practice never reached because PhotoCarousel returns null when empty.
-7. **Test selectors** — `data-testid="photo-viewer-close"`, `data-testid="photo-viewer-img"`, `data-testid="photo-viewer-counter"`.
-8. **Pointer capture release** — auto-released on pointerup; no explicit `releasePointerCapture` call. Wrap `setPointerCapture` in try/catch for happy-dom.
-9. **Editor.tsx regression** — existing 15 tests unaffected because `<PhotoViewer open={false}>` will not trigger `showModal` calls in `useDialogControl`.
-10. **Single-photo case** — swipe handlers attached but bounded clamps prevent any change.
+1. **Page orchestration**: `page.tsx` owns state (useSearchParams, sort useState, useRouter). No separate `ListScreen.tsx` file.
+2. **Sort toggle UX**: text + arrow icon, single button, `aria-label="정렬 변경"`.
+3. **Date format**: `formatListDate(date)` returns "2026.05.22 토요일" via Intl.DateTimeFormat weekday.
+4. **+N overflow cell**: `bg-[#EBEBEB]` with `text-charcoal text-sm font-medium`. Same 64×64 size as thumbnails.
+5. **Photo thumbnail alt**: "첨부 사진" (matches REQ-011).
+6. **Photo strip layout**: `flex flex-row gap-2`, no scroll (truncate at 3 + badge).
+7. **Header positioning**: sticky `top-0 z-10 bg-cream`.
+8. **Empty body + photos present**: omit body text section. Only "(내용 없음)" when both empty.
+9. **Card spacing**: `space-y-3` on the container div.
+10. **Test selectors**: aria-labels above + `data-testid="photo-overflow-badge"`.
+11. **Suspense fallback**: `<div className="text-center text-meta py-8">불러오는 중…</div>`.
+12. **Hydration safety**: gate render on `isReady`; show "불러오는 중…" until storage read completes.
 
 ---
 
@@ -189,112 +251,85 @@ export function PhotoViewer({ photos, open, initialIndex, onClose }: PhotoViewer
 
 | Element | Locator |
 |---|---|
-| Dialog | implicit `role="dialog"` from `<dialog>` |
-| Close button | `aria-label="닫기"` or `data-testid="photo-viewer-close"` |
-| Image | `data-testid="photo-viewer-img"` |
-| Counter | `data-testid="photo-viewer-counter"` |
+| Back button | `getByRole('button', {name:'뒤로 가기'})` |
+| Prev/Next month | `getByRole('button', {name:'이전 달'})` / `'다음 달'` |
+| Sort toggle | `getByRole('button', {name:'정렬 변경'})` |
+| Card buttons | `getByRole('button', {name:/일기 보기/})` |
+| Overflow badge | `getByTestId('photo-overflow-badge')` |
+| Empty state | `getByText('이 달에는 작성된 일기가 없어요')` |
+| Loading | `getByText('불러오는 중…')` |
 
-Unit test matrix:
+Unit test cases (12):
+1. Month filter — only May entries with `?month=2026-05`
+2. Default month — current month when no param
+3. Sort desc default
+4. Sort asc after click
+5. +N badge for 5 photos
+6. "(내용 없음)" when text empty AND no photos
+7. Body text omitted when text empty BUT photos present
+8. Empty month state visible
+9. Card tap calls router.push with /diary/[date]
+10. Next month nav (push with new month)
+11. Prev month year rollover (2026-01 → 2025-12)
+12. isReady=false shows loading placeholder
 
-**`useSwipe.test.ts` (7 cases)**:
-1. Left swipe (dx<-50) → onSwipeLeft
-2. Right swipe (dx>+50) → onSwipeRight
-3. Vertical down (dy>+50) → onSwipeVertical
-4. Vertical up (dy<-50) → onSwipeVertical
-5. Sub-threshold (|dx|=30) → no callback
-6. Axis-lock — x locked first, subsequent y movement ignored
-7. pointercancel resets state cleanly
-
-**`usePhotoViewer.test.ts` (4 cases)**:
-1. Initial closed state
-2. openViewer with matching id sets correct index
-3. openViewer with unknown id falls back to 0
-4. closeViewer flips state
-
-**`PhotoViewer.test.tsx` (7 cases)** — same showModal mock pattern:
-1. open=false, showModal not called
-2. open=true initialIndex=1, image src is photos[1].dataUrl
-3. Counter "2 / 3"
-4. Close button click calls onClose
-5. Swipe left advances index, image src updates
-6. Swipe right at index 0 stays at 0
-7. Vertical swipe calls onClose
-
-**`Editor.test.tsx` extension (2 cases)**:
-8. Tap thumbnail → showModal called
-9. Click close → close mock called
-
-**E2E (optional, 1 case)**: tap thumbnail → viewer visible → click ✕ → editor visible.
+E2E (optional): seed entries → navigate to /list → tap card → editor opens → back returns to list with same state.
 
 ---
 
 ## File Budget
 
-| File | Status | Target lines |
-|---|---|---|
-| `src/lib/hooks/useSwipe.ts` | NEW | ~50 |
-| `src/lib/hooks/usePhotoViewer.ts` | NEW | ~25 |
-| `src/app/diary/[date]/_components/PhotoViewer.tsx` | NEW | ~80 |
-| `src/lib/hooks/__tests__/useSwipe.test.ts` | NEW | ~80 |
-| `src/lib/hooks/__tests__/usePhotoViewer.test.ts` | NEW | ~40 |
-| `src/app/diary/[date]/__tests__/PhotoViewer.test.tsx` | NEW | ~120 |
-| `src/app/diary/[date]/_components/Editor.tsx` | MODIFY | ~255 (was 243; pre-accepted) |
-
-`PhotoCarousel.tsx` MUST NOT be modified (already at 96-line budget limit).
+| File | Target lines |
+|---|---|
+| `page.tsx` | ~75 |
+| `ListHeader.tsx` | ~60 |
+| `DiaryListCard.tsx` | ~70 |
+| `PhotoThumbnailStrip.tsx` | ~30 |
+| `formatListDate.ts` | ~15 |
+| `ListScreen.test.tsx` | ~200 (test file, OK over 100) |
 
 ---
 
 ## Implementation Order
 
-1. `useSwipe.ts` + tests
-2. `usePhotoViewer.ts` + tests
-3. `PhotoViewer.tsx` + tests
-4. `Editor.tsx` integration + 2 new test cases
-5. Run full unit suite (must be 265 + new cases)
-6. Optional E2E
+1. `src/lib/utils/formatListDate.ts`
+2. `src/app/list/_components/PhotoThumbnailStrip.tsx`
+3. `src/app/list/_components/DiaryListCard.tsx`
+4. `src/app/list/_components/ListHeader.tsx`
+5. `src/app/list/page.tsx`
+6. `src/app/list/__tests__/ListScreen.test.tsx`
+7. Run typecheck, lint, test
 
 ---
 
 ## Backward Compatibility
 
-- `onThumbnailTap` is already `(id: string) => void` and stubbed `() => {}` in `Editor.tsx`. Changing to `openViewer` is a no-op from the carousel's perspective.
-- `useDialogControl` API unchanged.
-- `<PhotoCarousel>` unchanged.
-- All existing Editor behavior unchanged.
+- Existing stub at `src/app/list/page.tsx` has no tests/callers — safe to replace.
+- CalendarScreen pushes bare `Routes.list` — list page defaults to current month when `?month` absent. No CalendarScreen change required.
+- No localStorage schema change.
 
 ---
 
 ## Performance Considerations
 
-- All pointer-event state uses `useRef` (no re-renders during drag).
-- `photos` prop is the same `state.photos` reference — no extra allocation.
-- Images already in memory as base64 dataUrl strings — switching is a string swap, no fetch.
-- `useEffect` for index reset runs only when `open` or `initialIndex` changes.
-
----
-
-## Infra Considerations
-
-None. Client-only component. `"use client"` directive needed on `PhotoViewer.tsx`.
+- `loading="lazy"` on all photo `<img>` tags
+- `useDiaries` reads once on mount; filter and sort are in-memory and instantaneous for typical diary volumes
+- `key={activeMonth}` on list container triggers natural unmount/mount on month change
 
 ---
 
 ## Risks and Tradeoffs
 
-| Risk | Mitigation |
-|---|---|
-| `onDialogClick` omission: swipe ending on black backdrop could call `onClose` if `onDialogClick` is accidentally spread | Design explicitly omits `onDialogClick`. Code review checklist. |
-| `dialog::backdrop` visible during animation | Inner `<div bg-black>` masks backdrop. Harmless. |
-| `PhotoCarousel.tsx` at 96 lines | Zero lines added to this file. |
-| Diagonal swipe dual-fires | Axis-lock at first move exceeding slopPx; test case #6. |
-| `Editor.tsx` grows to ~255 | Accepted for coordinator file. `usePhotoViewer` extraction limits growth. |
-| `setPointerCapture` may throw in happy-dom | Wrap in try/catch in `useSwipe`. |
+1. `<button>` wrapping `<Card>`: needs `w-full text-left` to prevent browser-default centering.
+2. Month not passed from calendar's list button — accepted UX gap; list defaults to current month.
+3. No live storage subscription — accepted for MVP.
+4. `formatListDate` must use `new Date(isoDate + 'T00:00:00')` to avoid UTC shift.
 
 ---
 
 ## Open Questions
 
-All resolved by pre-decisions. None remain.
+None. All resolved by pre-decisions.
 
 ---
 

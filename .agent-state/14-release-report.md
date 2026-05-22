@@ -2,155 +2,209 @@
 
 ## Summary
 
-REQ-012 (사진 전체화면 뷰어) adds a full-screen photo viewer modal to the diary editor. When a user short-taps a `PhotoCarousel` thumbnail, a `<dialog>`-based full-screen viewer opens on a pure-black background. The viewer supports left/right pointer swipe to navigate photos and vertical swipe or the ✕ close button (or ESC) to dismiss. No backend, database, routing, or dependency changes are required. The feature is purely display-only and zero-impact on autosave.
+REQ-013 (일기 리스트 화면) replaces the 8-line stub at `src/app/list/page.tsx` with a fully
+functional diary list screen. The screen displays one calendar month of diary entries as
+vertically scrollable cards, with a sticky header containing back navigation, month navigator,
+and sort toggle. Implementation is pure composition over existing design-system primitives
+(`Card`, `MoodIcon`, `EmptyState`, `IconButton`) with no new external dependencies.
 
-All 13 required gate reports are present and end with PASS, plus both optional reports (11-performance, 12-infra) also PASS. Two production-code defects were found and fixed during Phase 10 verification before all gates passed. 285 unit tests + 7 E2E tests all pass.
+All ten required gate reports are present and PASS. 301 unit tests green, 8/8 E2E specs green,
+TypeScript clean, ESLint clean.
+
+---
 
 ## Files Changed
 
-### New source files
-- `src/lib/hooks/useSwipe.ts` — pointer-event gesture hook (axis-lock, threshold, setPointerCapture try/catch), 82 lines
-- `src/lib/hooks/usePhotoViewer.ts` — open/close/index state hook, 29 lines
-- `src/app/diary/[date]/_components/PhotoViewer.tsx` — full-screen `<dialog>` viewer component, 106 lines
+### New production files
+
+| File | Lines | Description |
+|---|---|---|
+| `src/lib/utils/formatListDate.ts` | 15 | "YYYY.MM.DD 요일" formatter, UTC-safe |
+| `src/app/list/_components/PhotoThumbnailStrip.tsx` | 39 | Max-3 thumbnails + +N overflow badge |
+| `src/app/list/_components/DiaryListCard.tsx` | 52 | Single card: MoodIcon + date + text + photos |
+| `src/app/list/_components/ListHeader.tsx` | 75 | Sticky header: back + month nav + sort toggle |
+| `src/app/list/page.tsx` | 83 | Replaced stub: Suspense wrapper + orchestration |
 
 ### New test files
-- `src/lib/hooks/__tests__/useSwipe.test.ts` — 7 unit cases (SW1–SW7)
-- `src/lib/hooks/__tests__/usePhotoViewer.test.ts` — 4 unit cases (PV1–PV4)
-- `src/app/diary/[date]/__tests__/PhotoViewer.test.tsx` — 7 unit cases (PVC1–PVC7)
 
-### New E2E files
-- `e2e/photo-viewer.spec.ts` — 1 spec (PV-E1): tap thumbnail → viewer visible → 닫기 → dismissed
+| File | Cases | Description |
+|---|---|---|
+| `src/lib/utils/__tests__/formatListDate.test.ts` | 4 | FLD1–FLD4 weekday mapping |
+| `src/app/list/__tests__/ListScreen.test.tsx` | 12 | LS1–LS12 component behaviour |
+| `e2e/list.spec.ts` | 1 | LE1 seed → list → tap → editor |
 
-### Modified source files
-- `src/app/diary/[date]/_components/Editor.tsx` — added `usePhotoViewer` hook call; wired `onThumbnailTap` to `openViewer`; mounted `<PhotoViewer>` unconditionally (243 → 253 lines)
+### Modified agent-state reports
 
-### Modified test files
-- `src/app/diary/[date]/__tests__/Editor.test.tsx` — +2 integration cases (C-viewer-1, C-viewer-2)
+All `.agent-state/00–13` reports updated for REQ-013 scope.
+`.agent-state/security-report.md` mirror updated.
+`.agent-state/requirements/REQ-013.md` status → DONE.
+`.agent-state/requirements/index.md` REQ-013 row → DONE.
 
-### Agent state files
-- `.agent-state/00-git-safety.md` through `.agent-state/13-e2e-report.md` — all REQ-012 cycle reports (updated in place)
-- `.agent-state/security-report.md` — short-name mirror of 10-security-report.md (updated)
-- `.agent-state/requirements/REQ-012.md` — status flipped to DONE
-- `.agent-state/requirements/index.md` — REQ-012 row updated to DONE
-
-### Unchanged files (confirmed)
-- `src/app/diary/[date]/_components/PhotoCarousel.tsx` — NOT modified (96 lines, budget protected)
+---
 
 ## Gate Status
 
 | Gate | Report | Verdict |
 |---|---|---|
-| Requirement intake | 01-requirement-intake.md | PASS |
-| Architecture | 02-architecture-report.md | PASS |
-| Technical design | 03-technical-design.md | PASS |
-| API contract | 04-api-contract.md | PASS |
-| DB / migration | 05-db-migration-report.md | PASS (no schema changes; display-only) |
-| Test plan | 06-test-plan.md | PASS |
-| Test report | 08-test-report.md | PASS |
-| Code review | 09-code-review-report.md | PASS |
-| Security review | 10-security-report.md | PASS (3 LOW informational, no required fixes) |
-| Performance | 11-performance-report.md | PASS |
-| Infra | 12-infra-report.md | PASS |
-| E2E | 13-e2e-report.md | PASS |
+| Requirement intake | `01-requirement-intake.md` | PASS |
+| Architecture | `02-architecture-report.md` | PASS |
+| Technical design | `03-technical-design.md` | PASS |
+| API contract | `04-api-contract.md` | PASS |
+| DB / migration | `05-db-migration-report.md` | PASS (no schema change) |
+| Test plan | `06-test-plan.md` | PASS |
+| Test report | `08-test-report.md` | PASS |
+| Code review | `09-code-review-report.md` | PASS |
+| Security review | `10-security-report.md` | PASS |
+| E2E | `13-e2e-report.md` | PASS |
+| Performance | `11-performance-report.md` | PASS |
+| Infra | `12-infra-report.md` | PASS |
+
+---
 
 ## Tests Run
 
-- Unit / integration (Vitest): 285 tests across 41 files — all PASS
-- TypeScript compile (`tsc --noEmit`): 0 errors — PASS
-- ESLint (`npm run lint`): 0 warnings, 0 errors — PASS
-- E2E (Playwright, Chromium): 7 specs — all PASS (23 s)
+```
+npx vitest run --reporter=basic   →  43 files, 301/301 PASS  (9.96s)
+npx tsc --noEmit                  →  clean
+npm run lint                      →  clean
+npm run test:e2e                  →  8/8 PASS (24.8s)
+```
+
+New tests: 4 unit (formatListDate) + 12 component (ListScreen) + 1 E2E (list.spec) = 17 new cases.
+Pre-existing: 285 unit + 7 E2E — all passing, no regression.
+
+---
 
 ## Review Status
 
-Code review — PASS. No blocking issues. Three non-blocking suggestions deferred: focus-management sequencing comment (NB-1), `useSwipe.ts` size overage acknowledged (NB-2), empty-photos bulletproof guard deferred (NB-3). Two nits (N1–N2 type inconsistency, N3 className duplication) noted but non-blocking. All five required invariants verified PASS.
+Code review PASS. No blocking issues.
+
+Three non-blocking suggestions deferred per policy:
+
+1. NB1: `DiaryListCard` and `PhotoThumbnailStrip` missing explicit `"use client"` — runtime correct
+   because they inherit client boundary from `page.tsx`; cosmetic consistency issue only.
+2. NB2: Sort-button touch target uses inline `style={{ minHeight: 44 }}` instead of Tailwind class.
+3. NB3: `key={activeMonth}` placed on inner `<div>` has no React remount effect; sort reset not
+   triggered on month change. Matches the spec ("정렬 상태는 세션 내 유지") so no user-visible bug.
+
+---
 
 ## Security Status
 
-Security review — PASS. No Critical, High, or Medium issues. Three LOW informational items accepted as residual risk: L-1 (read-time `data:image/` re-validation gap — write-time guard is sufficient for current trust model), L-2 (in-memory base64 retention — pre-existing design choice), L-3 (intentional omission of backdrop-click-to-close). No required fixes.
+Security review PASS. No critical, high, or medium issues.
+
+Two accepted low-severity residual risks (both pre-existing in the app's design):
+
+- L1: `?month` query param not sanitised beyond string equality comparison — cosmetically harmless,
+  no XSS path, self-contained to local session.
+- L2: `photo.dataUrl` not re-validated at render time — single-user personal app, MIME guard fires
+  at write time (REQ-011). No cross-user exploitation path.
+
+---
 
 ## E2E Status
 
-7/7 Playwright specs pass (Chromium, Desktop Chrome, port 3001, single worker, 23 s). New spec PV-E1 covers: viewer not visible on load → tap thumbnail → viewer visible → click 닫기 → viewer dismissed. Swipe-left/right navigation covered by unit tests only (pointer-gesture automation deferred as brittle). Vertical-swipe-to-close covered by unit test PVC7. Firefox/WebKit deferred for MVP.
+E2E PASS. `e2e/list.spec.ts` (LE1) verified: seed 2 entries → `/list` → 2 cards visible → tap
+first card → URL transitions to `/diary/<date>` → editor textarea visible.
+
+8/8 Playwright Chromium specs pass. Safari/Firefox deferred (MVP scope).
+
+---
 
 ## Performance / Infra Status
 
-Performance — PASS. Zero React re-renders during drag (all gesture state in refs). Image swaps are synchronous attribute mutations against pre-decoded bitmaps (no network fetch). `{open && (...)}` DOM gate keeps closed-viewer cost minimal. Two non-blocking improvement notes deferred: `onSwipeLeft` ref-based stability option and `useEffect` dep array comment for in-place photo mutation edge case.
+Performance PASS. In-memory filter + sort over max 31 entries per month, `loading="lazy"` on all
+photo thumbnails. No useMemo yet (acceptable at this dataset size; deferred NB).
 
-Infra — PASS. No changes to `package.json`, `.env*`, `playwright.config.ts`, Next.js routes, or server components. All new code is statically bundled client-side.
+Infra PASS. No new dependencies, no env vars, no deployment config changes. Pure client-side
+feature bundled with existing Next.js build.
+
+---
 
 ## Commit Message
 
 ```
-feat: full-screen photo viewer with swipe (REQ-012)
+feat: diary list screen with month nav (REQ-013)
 
-- Add PhotoViewer dialog, useSwipe gesture hook, and usePhotoViewer state hook
-- Wire PhotoCarousel onThumbnailTap to open viewer at the correct index
-- Swipe left/right to navigate; swipe up/down or ✕ button to close
+- Replace /list stub with full list screen: sticky header (back, month
+  nav, sort toggle), per-month card grid (MoodIcon + date + body + photos)
+- Add formatListDate utility and PhotoThumbnailStrip component
+- 301 unit tests pass; 8/8 Playwright E2E specs pass
 
 Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 ```
+
+---
 
 ## PR Body
 
 ```md
 ## Summary
 
-- New `PhotoViewer` component: full-screen `<dialog>` over the editor on a pure-black background, showing the tapped photo with `object-fit: contain` and a top-right "N / M" counter
-- New `useSwipe` hook: axis-locked pointer-event gesture handling (left/right for navigation, vertical for close), with `setPointerCapture` for reliable out-of-element tracking
-- New `usePhotoViewer` hook: open/close/index state management isolated from Editor
-- `Editor.tsx` wired: `onThumbnailTap={() => {}}` stub replaced with `openViewer`; `<PhotoViewer>` mounted unconditionally
+- Replaces the placeholder at `src/app/list/page.tsx` with a fully functional diary list screen.
+- Sticky header: back button, month navigator (prev/next with year rollover), sort toggle (newest / oldest).
+- Card grid: one card per diary entry — 64px MoodIcon, date label ("YYYY.MM.DD 요일"), 3-line body clamp, photo thumbnail strip (max 3 + "+N" overflow badge).
+- Empty-month state with "캘린더로 가기" CTA; loading skeleton while `useDiaries` hydrates.
 
 ## Acceptance Criteria
 
-- [x] Short tap on carousel thumbnail opens full-screen viewer at the correct index
-- [x] Pure-black background, `object-fit: contain`, `100dvh` height
-- [x] Top-right counter label e.g. "2 / 5"
-- [x] Swipe left → next photo (bounded at last); swipe right → previous photo (bounded at first)
-- [x] Swipe up/down → close viewer
-- [x] Top-left ✕ button (44×44 touch target, `aria-label="닫기"`) → close viewer
-- [x] ESC key closes (native `<dialog>` cancel event)
-- [x] Viewer is a modal — not in browser history stack
-- [x] Body scroll locked while viewer open (native `showModal()`)
+- [x] Back button calls `router.back()`.
+- [x] Month nav defaults to current month; prev/next push `?month=YYYY-MM`; year rollover works.
+- [x] Sort toggle switches between newest-first and oldest-first; resets on page reload.
+- [x] Only entries for the active month are shown (`date.slice(0,7)` prefix match).
+- [x] Card shows MoodIcon (64px), formatted date, body text (3-line clamp or "(내용 없음)"), photo strip.
+- [x] Card tap navigates to `/diary/[date]`; back returns to list.
+- [x] Empty month renders "이 달에는 작성된 일기가 없어요" + CTA; month nav stays functional.
 
 ## Technical Notes
 
-- Two defects found and fixed during verification: (1) `{open && (...)}` render gate required for reliable Playwright visibility detection; (2) `e.stopPropagation()` on close-button `onPointerDown` required to prevent `setPointerCapture` on the swipe container from consuming the click.
-- `useDialogControl` reused from design-system (same as BottomSheet, ConfirmDialog, MoodPickerSheet).
-- `onDialogClick` intentionally omitted from `<dialog>` spread — prevents accidental close when swipe ends on backdrop.
-- `PhotoCarousel.tsx` is untouched (96 lines, budget protected).
+- Pure composition of existing primitives (`Card`, `MoodIcon`, `EmptyState`, `IconButton`). Zero new external dependencies.
+- `formatListDate` uses `new Date(isoDate + 'T00:00:00')` to avoid UTC-shift and `Intl.DateTimeFormat('ko-KR', { weekday: 'long' })` for the weekday label.
+- `<Suspense>` wraps `ListPageContent` (required by Next.js 15 App Router for `useSearchParams`).
+- Three deferred non-blocking code-review items: explicit `"use client"` on sub-components, Tailwind class for sort-button min-height, `key` placement on month-change container.
 
 ## API / Interface Changes
 
-Internal TypeScript contracts only — no network boundary. New interfaces: `SwipeOptions`, `SwipeHandlers` (useSwipe), `UsePhotoViewerReturn` (usePhotoViewer), `PhotoViewerProps` (PhotoViewer). No existing prop signatures changed.
+No HTTP endpoints. Four new internal TypeScript interfaces (`ListHeader`, `DiaryListCard`, `PhotoThumbnailStrip`, `formatListDate`) — all client-side. `Routes.listWithFilter` and `useDiaries` signatures unchanged.
 
 ## Data / Migration Notes
 
-No schema changes. Feature is display-only; reads `state.photos` already stored by REQ-011. Zero new `localStorage` keys.
+No localStorage schema change. Read-only consumption of existing `ddalkkak:diaries:v1`.
 
 ## Tests
 
-285 unit/integration tests (Vitest, 41 files), 0 failures. 7 E2E specs (Playwright, Chromium), 0 failures. TypeScript and ESLint clean.
+- 4 unit cases for `formatListDate` (FLD1–FLD4).
+- 12 component cases for `ListScreen` (LS1–LS12): month filter, default month, sort order, +N badge, empty-body fallback, empty month state, card tap routing, month nav, year rollover, loading state.
+- 1 E2E case (`e2e/list.spec.ts` LE1): seed → list → card tap → editor.
+- 301/301 Vitest green; 8/8 Playwright green; TypeScript + ESLint clean.
 
 ## Security Review
 
-PASS — no Critical/High/Medium issues. Three LOW informational items accepted (read-time MIME re-validation gap, in-memory base64 retention, intentional no-backdrop-close). No required fixes.
+PASS. No XSS paths (all user text rendered as React text nodes). No secrets. Two accepted low residual risks noted in `10-security-report.md` (both pre-existing in app design).
 
 ## E2E Evidence
 
-PV-E1: diary entry with 2 pre-seeded photos → viewer not visible on load → tap first thumbnail → viewer visible → click 닫기 → viewer dismissed. All 6 pre-existing specs remain green.
+`npm run test:e2e` → 8/8 PASS (24.8s, Chromium). `e2e/list.spec.ts` LE1 passed.
 
 ## Risk / Rollback Plan
 
-No server-side changes. Rollback = revert the 3 new files and the Editor.tsx + Editor.test.tsx deltas. Non-blocking deferred items: read-time `data:image/` re-validation guard (security L-1 recommendation), `useSwipe.ts` comment on `onPointerCancel` signature, empty-photos bulletproof guard.
+Low risk. Pure additive change — replaces a stub with no existing callers or tests. Roll back by reverting `src/app/list/` and `src/lib/utils/formatListDate.ts`. No data migration required.
 ```
+
+---
 
 ## Remaining Risks
 
-1. `PhotoViewer.tsx` at 106 lines is 6 lines over the 100-line soft cap — acceptable per CLAUDE.md exception (inline SVG and `{open && ...}` fix are not candidates for extraction).
-2. Read-time `data:image/` re-validation not added to `PhotoViewer` (security L-1 recommendation deferred) — negligible risk given single write path through REQ-011's `addPhotoFromFile` guard.
-3. `onPointerCancel` implementation signature `() => void` does not match contract `(e: React.PointerEvent) => void` — TypeScript accepts narrower assignee; no behavioral impact.
-4. Swipe-left/right E2E not covered (pointer-gesture automation deferred as brittle); unit tests PVC4–PVC6 provide coverage.
-5. Firefox/WebKit E2E coverage deferred for MVP.
+1. Deferred NB1: `DiaryListCard` / `PhotoThumbnailStrip` lack explicit `"use client"`. No runtime
+   impact today; would break if either is ever moved into a Server Component tree without
+   re-parenting under a client boundary. Low probability, easy fix.
+2. Deferred NB3: `key={activeMonth}` on non-list `<div>` has no remount effect. Sort state does
+   NOT reset on month change — this is intentional per spec ("세션 내 유지") but worth revisiting
+   if the spec changes.
+3. E2E Chromium-only. Safari/Firefox coverage deferred to a future CI expansion.
+4. No `useMemo` on `filtered`/`sorted`. Negligible at current dataset size (≤31 entries/month).
+
+---
 
 ## Verdict
 PASS

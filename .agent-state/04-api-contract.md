@@ -1,173 +1,198 @@
-# API / Interface Contract — REQ-012
+# API / Interface Contract — REQ-013
 
 ## Summary
 
-REQ-012 adds a full-screen photo viewer to the diary editor. Three new internal interfaces are introduced: the `useSwipe` gesture hook, the `usePhotoViewer` state-management hook, and the `<PhotoViewer>` component. No HTTP endpoints, no storage keys, no routing changes, and no existing prop signatures change.
+REQ-013 replaces the 8-line stub at `src/app/list/page.tsx` with a functional diary list screen. Four new internal TypeScript interfaces are introduced (`ListHeader`, `DiaryListCard`, `PhotoThumbnailStrip`, and the `formatListDate` utility). All interfaces are frontend-only and client-side. No HTTP endpoints, no new storage keys, and no existing signatures change.
 
 ---
 
 ## Contract Type
 
-Internal TypeScript component and hook interfaces (frontend-only, client-side).
+Internal TypeScript component and utility interfaces (frontend-only, client-side).
 
 ---
 
 ## Interfaces
 
-### 1. `useSwipe(options) → SwipeHandlers`
+### 1. `formatListDate(isoDate: string): string`
 
-**File:** `src/lib/hooks/useSwipe.ts`
+**File:** `src/lib/utils/formatListDate.ts`
 
 ```ts
-export interface SwipeOptions {
-  onSwipeLeft: () => void;      // triggered when dx < -threshold, axis locked to x
-  onSwipeRight: () => void;     // triggered when dx > +threshold, axis locked to x
-  onSwipeVertical: () => void;  // triggered when |dy| > threshold, axis locked to y
-  threshold?: number;           // default 50 px displacement
-  slopPx?: number;              // default 5 px before axis is locked
-}
-
-export interface SwipeHandlers {
-  onPointerDown: (e: React.PointerEvent) => void;
-  onPointerMove: (e: React.PointerEvent) => void;
-  onPointerUp: (e: React.PointerEvent) => void;
-  onPointerCancel: (e: React.PointerEvent) => void;
-}
-
-export function useSwipe(options: SwipeOptions): SwipeHandlers
+export function formatListDate(isoDate: string): string
 ```
 
-**Caller responsibilities:**
-- Spread all four handlers onto a single DOM element that the user swipes.
-- Pass stable callbacks or accept that options are stored in a ref (callbacks are never stale).
-- Do not pass `undefined` for the three required callbacks.
+**Input:** ISO 8601 date string in "YYYY-MM-DD" format (e.g., `"2026-05-22"`).
+**Output:** Korean-formatted date string in "YYYY.MM.DD 요일" format (e.g., `"2026.05.22 토요일"`).
+
+**Caller responsibilities:** Pass well-formed "YYYY-MM-DD". Never pass full ISO timestamps.
 
 **Callee guarantees:**
-- Returned handlers are referentially stable (via `useCallback`).
-- All pointer-event state is stored in `useRef`; no re-renders occur during a drag.
-- Axis lock is set once per gesture and never changes mid-gesture.
-- Callbacks fire only on `pointerup`, never on `pointermove`.
-- `pointercancel` resets state and fires no callbacks.
-- `setPointerCapture` is called inside a `try/catch` (safe under happy-dom).
-
-**Invariants:**
-- Exactly one of `onSwipeLeft`, `onSwipeRight`, `onSwipeVertical`, or nothing fires per gesture.
-- Sub-threshold displacement produces no callback.
-- Diagonal motion: whichever axis first exceeds `slopPx` wins; the other axis is ignored for the remainder of that gesture.
+- Parses via `new Date(isoDate + 'T00:00:00')` to avoid UTC offset shifting.
+- Builds "YYYY.MM.DD" from string slices.
+- Appends weekday via `Intl.DateTimeFormat('ko-KR', { weekday: 'long' })`.
+- Never throws.
 
 ---
 
-### 2. `usePhotoViewer(photos) → state + handlers`
+### 2. `<ListHeader>` component
 
-**File:** `src/lib/hooks/usePhotoViewer.ts`
+**File:** `src/app/list/_components/ListHeader.tsx`
+
+```ts
+export interface ListHeaderProps {
+  month: string;                          // "YYYY-MM"
+  sort: 'asc' | 'desc';
+  onBack: () => void;
+  onMonthChange: (month: string) => void;
+  onSortToggle: () => void;
+}
+export function ListHeader(props: ListHeaderProps): JSX.Element
+```
+
+**Caller responsibilities:**
+- `month` must be valid "YYYY-MM"; component formats label as `"YYYY년 M월"`.
+- Wire `onMonthChange` to `router.push(Routes.listWithFilter({month}))`.
+- Wire `onBack` to `router.back()`.
+- Wire `onSortToggle` to `useState<'asc'|'desc'>` toggle.
+
+**Callee guarantees:**
+- Sticky `top-0 z-10 bg-cream`.
+- Left: `<IconButton aria-label="뒤로 가기" onClick={onBack} />`.
+- Center: `<IconButton aria-label="이전 달" />` + `<span>{label}</span>` + `<IconButton aria-label="다음 달" />`. Prev passes `addMonths(month, -1)`; next passes `addMonths(month, +1)`.
+- Right: `<button aria-label="정렬 변경">` showing `"최신순 ↓"` (desc) or `"오래된순 ↑"` (asc).
+- 44×44 min touch targets.
+
+---
+
+### 3. `<DiaryListCard>` component
+
+**File:** `src/app/list/_components/DiaryListCard.tsx`
+
+```ts
+import type { DiaryEntry } from '@/lib/storage';
+
+export interface DiaryListCardProps {
+  entry: DiaryEntry;
+  onTap: () => void;
+}
+export function DiaryListCard(props: DiaryListCardProps): JSX.Element
+```
+
+**Caller responsibilities:**
+- Pass complete `DiaryEntry` from `useDiaries().entries`.
+- Wire `onTap` to `router.push(Routes.diary(entry.date))`.
+- Stable `key={entry.date}` in list.
+
+**Callee guarantees:**
+- Wraps `<Card>` inside `<button className="w-full text-left">` with `aria-label="YYYY년 M월 D일 일기 보기"` (via `Intl.DateTimeFormat('ko-KR')` on `entry.date + 'T00:00:00'`).
+- `<MoodIcon id={entry.mood} size={64} className="mx-auto" />` at top.
+- `<p className="text-meta text-sm text-center mt-2">{formatListDate(entry.date)}</p>` below.
+- Body text rules (evaluated in order):
+  1. `entry.text` non-empty → `<p className="text-charcoal line-clamp-3 mt-2">{entry.text}</p>`
+  2. Text empty AND `photos.length === 0` → `<p className="text-meta italic mt-2">(내용 없음)</p>`
+  3. Text empty AND `photos.length > 0` → no body text element
+- `{photos.length > 0 && <PhotoThumbnailStrip photos={entry.photos} />}` at bottom.
+
+---
+
+### 4. `<PhotoThumbnailStrip>` component
+
+**File:** `src/app/list/_components/PhotoThumbnailStrip.tsx`
 
 ```ts
 import type { Photo } from '@/lib/storage';
 
-export function usePhotoViewer(photos: Photo[]): {
-  viewerOpen: boolean;
-  viewerInitialIndex: number;
-  openViewer: (id: string) => void;
-  closeViewer: () => void;
-}
-```
-
-**Caller responsibilities:**
-- Pass the same `photos` array reference that is rendered by `<PhotoCarousel>` (no duplication).
-- Call `openViewer(id)` with a valid photo `id` from that array (unknown ids fall back to index 0).
-- Call `closeViewer()` to dismiss; do not mutate `viewerOpen` directly.
-
-**Callee guarantees:**
-- Initial state: `viewerOpen = false`, `viewerInitialIndex = 0`.
-- `openViewer`: sets `viewerInitialIndex` to `photos.findIndex(p => p.id === id)`, clamped to `0` for unknown ids; sets `viewerOpen = true`.
-- `closeViewer`: sets `viewerOpen = false`.
-- Both action functions are referentially stable (`useCallback`).
-
-**Invariants:**
-- `viewerInitialIndex` is always in `[0, photos.length - 1]` when `viewerOpen` is `true`.
-- When `photos` is empty, `viewerInitialIndex` is `0` (defensive fallback; viewer should not be opened in this state in practice).
-
----
-
-### 3. `<PhotoViewer>` component
-
-**File:** `src/app/diary/[date]/_components/PhotoViewer.tsx`
-
-```ts
-import type { Photo } from '@/lib/storage';
-
-export interface PhotoViewerProps {
+export interface PhotoThumbnailStripProps {
   photos: Photo[];
-  open: boolean;
-  initialIndex: number;
-  onClose: () => void;
 }
-
-export function PhotoViewer(props: PhotoViewerProps): React.ReactElement
+export function PhotoThumbnailStrip(props: PhotoThumbnailStripProps): JSX.Element
 ```
 
 **Caller responsibilities:**
-- Mount `<PhotoViewer>` unconditionally in the DOM (not inside a conditional render); `open` controls visibility via `useDialogControl`.
-- Place it after `<PhotoCarousel>` and before `<Toast>` in `Editor.tsx`.
-- Pass `initialIndex` within `[0, photos.length - 1]`; out-of-range values are clamped internally.
-- Wire `onClose` to `closeViewer` from `usePhotoViewer`.
+- Pass full `entry.photos`; strip truncates internally.
+- Do not call when `photos.length === 0` (DiaryListCard gates).
 
 **Callee guarantees:**
-- Uses `useDialogControl(open, onClose)` — same hook pattern as `MoodPickerSheet`. The `<dialog>` `showModal()`/`close()` lifecycle is managed internally.
-- `currentIndex` is reset on every `open` transition via `useEffect([open, initialIndex])`, clamped to `[0, photos.length - 1]`.
-- Left swipe increments `currentIndex` (capped at `photos.length - 1`); right swipe decrements (floored at `0`).
-- Vertical swipe calls `onClose`.
-- ESC key calls `onClose` via the `cancel` event in `useDialogControl`.
-- When `photos.length === 0`, renders an empty closed `<dialog>` (ref attached; no visible content). No crash.
-- `onDialogClick` from `useDialogControl` is intentionally NOT spread on `<dialog>` to avoid accidental close when swipe ends over the backdrop.
-- The `"use client"` directive is present at the top of the file.
-
-**Test selectors (callee guarantees these):**
-
-| Element | Locator |
-|---|---|
-| Dialog | `role="dialog"` (implicit from `<dialog>`) |
-| Close button | `aria-label="닫기"`, `data-testid="photo-viewer-close"` |
-| Image | `data-testid="photo-viewer-img"` |
-| Counter | `data-testid="photo-viewer-counter"` |
+- `<div className="flex flex-row gap-2 mt-3">`.
+- Up to 3 `<img src={photo.dataUrl} alt="첨부 사진" className="w-16 h-16 object-cover rounded-xl" loading="lazy" />`.
+- When `photos.length > 3`: 4th overflow badge `<div className="w-16 h-16 bg-[#EBEBEB] rounded-xl flex items-center justify-center text-charcoal text-sm font-medium" data-testid="photo-overflow-badge">+{photos.length - 3}</div>`.
+- No scrolling; max 4 visible cells.
 
 ---
 
-## Storage Contracts
+## Storage Reads
 
-Zero storage writes. Zero new storage keys. The viewer reads `photos` (already in `state.photos` from the existing `ddalkkak:diaries:v1` localStorage entry) and never writes to any store. This is confirmed by the purely display-only nature of REQ-012 and the absence of any `localStorage` calls in any of the three new files.
+`useDiaries()` from `@/lib/storage/useDiaries`:
+
+```ts
+function useDiaries(): { entries: DiaryEntry[]; isReady: boolean }
+```
+
+- Read-only. Zero writes. No new keys.
+- `isReady` is `false` on initial render, `true` after first effect.
+- `page.tsx` gates card rendering on `isReady`; shows `"불러오는 중…"` placeholder until ready.
+- Filter: `entries.filter(e => e.date.slice(0, 7) === activeMonth)`.
+- Sort: `localeCompare` on `entry.date` (ISO strings sort correctly).
+
+---
+
+## Routing & Query Params
+
+| Route | Builder | Notes |
+|---|---|---|
+| `/diary/[date]` | `Routes.diary(date)` | Card tap target |
+| `/list` | `Routes.list` | Bare; defaults month to today |
+| `/list?month=YYYY-MM` | `Routes.listWithFilter({month})` | Month nav pushes this |
+
+- `useSearchParams().get('month')` provides the active month; defaults to current month when absent.
+- Sort is local `useState<'asc'|'desc'>('desc')`, session-only, never persisted.
+- `<Suspense>` boundary required around `useSearchParams` consumer per Next.js 15 App Router.
 
 ---
 
 ## Korean Strings
 
-| Location | String | Usage |
-|---|---|---|
-| Close button `aria-label` | `닫기` | Accessibility label |
-| Image `alt` attribute | `사진 {currentIndex + 1}` | e.g., `사진 1`, `사진 3` |
-| Counter `<span>` content | `{currentIndex + 1} / {photos.length}` | e.g., `2 / 5` — numeric only, no Korean suffix |
-
-No other UI strings introduced.
+| Use | String |
+|---|---|
+| Back button aria | `뒤로 가기` |
+| Prev/Next month aria | `이전 달` / `다음 달` |
+| Sort toggle aria | `정렬 변경` |
+| Sort label (desc) | `최신순 ↓` |
+| Sort label (asc) | `오래된순 ↑` |
+| Header center label | `YYYY년 M월` |
+| Card aria-label | `YYYY년 M월 D일 일기 보기` |
+| Empty body fallback | `(내용 없음)` |
+| Card date | `YYYY.MM.DD 요일` |
+| Img alt | `첨부 사진` |
+| Empty month title | `이 달에는 작성된 일기가 없어요` |
+| Empty month CTA | `캘린더로 가기` |
+| Loading placeholder | `불러오는 중…` |
 
 ---
 
 ## Caller Invariants
 
-1. `usePhotoViewer` and `<PhotoViewer>` must receive the same `photos` array (same reference from `state.photos`).
-2. `openViewer` must only be called from `PhotoCarousel`'s `onThumbnailTap` callback.
-3. `<PhotoViewer>` must be mounted unconditionally; the `open` prop drives show/hide internally.
-4. Swipe handlers from `useSwipe` must be spread on the inner container `<div>`, not on `<dialog>` itself.
-5. `initialIndex` passed to `<PhotoViewer>` must equal `viewerInitialIndex` from `usePhotoViewer`.
+1. `useDiaries` must be called inside a `"use client"` component.
+2. `<Suspense>` wraps the page content using `useSearchParams`.
+3. `DiaryListCard.onTap` must use `router.push(Routes.diary(entry.date))`.
+4. `PhotoThumbnailStrip` only rendered when `entry.photos.length > 0`.
+5. `formatListDate` only receives "YYYY-MM-DD" strings.
+6. Sort state never written to localStorage.
+7. `MoodIcon` is the sole mood-rendering boundary.
+8. `Card` from design-system is the sole card surface.
 
 ---
 
 ## Backward Compatibility
 
-- `PhotoCarousel.onThumbnailTap` is already typed as `(id: string) => void` and stubbed `() => {}` in `Editor.tsx`. REQ-012 replaces the stub with `openViewer` — no prop signature change at the carousel boundary.
-- `useDialogControl` API is unchanged.
-- `PhotoCarousel.tsx` is not modified.
-- All 15 existing `Editor.test.tsx` cases are unaffected because `<PhotoViewer open={false}>` does not call `showModal` in `useDialogControl`.
-- No new optional or required props are added to any existing component.
+- Stub at `src/app/list/page.tsx` has no callers — safe to replace.
+- `CalendarScreen` pushes bare `Routes.list` → defaults to current month. No change required.
+- `Routes.listWithFilter` `sort` param supported but not consumed by REQ-013.
+- `useDiaries` signature unchanged.
+- `Routes.diary(date)` signature unchanged.
+- No new design-system primitives.
+- No localStorage schema change.
 
 ---
 

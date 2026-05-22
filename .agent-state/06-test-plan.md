@@ -2,176 +2,141 @@
 
 ## Summary
 
-REQ-012 adds a full-screen photo viewer modal to the diary editor. Three new units require test coverage: the `useSwipe` gesture hook, the `usePhotoViewer` state-management hook, and the `<PhotoViewer>` dialog component. Two additional cases extend the existing `Editor.test.tsx`. One optional E2E case covers the end-to-end tap-to-view-to-close flow. Total new cases: 22 (21 unit + 1 E2E).
-
-All unit tests use Vitest 2 with `// @vitest-environment happy-dom`. Pointer-event gesture tests follow the same `renderHook` + `makePointerEvent` pattern established in `useLongPress.test.ts`. Dialog tests follow the `showModal`/`close` prototype-mock pattern established in `MoodPickerSheet.test.tsx` and `Editor.test.tsx`.
+REQ-013 adds the diary list screen: a monthly card-list view with month navigation, sort toggle, photo thumbnails, and an empty state. Three new test files cover all acceptance criteria: a pure unit test for the `formatListDate` utility, a happy-dom component test for the list screen, and one Playwright E2E smoke test. Total new: 17 cases (4 unit + 12 component + 1 E2E).
 
 ---
 
 ## Unit Tests
 
-### File 1 — `src/lib/hooks/__tests__/useSwipe.test.ts` (7 cases)
+### File: `src/lib/utils/__tests__/formatListDate.test.ts`
 
-Uses `renderHook` from `@testing-library/react`. Pointer events dispatched via a helper `makePointerEvent(type, overrides)` that mirrors the pattern in `useLongPress.test.ts`. No timers needed.
+Framework: Vitest (no DOM needed, no `@vitest-environment` directive required).
 
-| ID | Description | Assertion |
-|----|-------------|-----------|
-| SW1 | dx < -50 fires `onSwipeLeft` | pointerDown(x=0) → pointerMove(dx=-6 to lock x) → pointerMove(x=-51) → pointerUp → `onSwipeLeft` called once; others not called |
-| SW2 | dx > +50 fires `onSwipeRight` | pointerDown(x=0) → pointerMove(x=51) → pointerUp → `onSwipeRight` called once |
-| SW3 | dy > +50 fires `onSwipeVertical` | pointerDown(y=0) → pointerMove(y=51) → pointerUp → `onSwipeVertical` called once |
-| SW4 | dy < -50 fires `onSwipeVertical` | pointerDown(y=0) → pointerMove(y=-51) → pointerUp → `onSwipeVertical` called once |
-| SW5 | sub-threshold `|dx|=30` → no callback | pointerDown → pointerMove(x=-30) → pointerUp → all three callbacks untouched |
-| SW6 | axis-lock — x locks first; subsequent large y ignored | pointerDown → pointerMove(dx=6, dy=2) locks x → pointerMove(dy=200) → pointerUp with dx=-60 → `onSwipeLeft` fires; `onSwipeVertical` not called |
-| SW7 | `pointercancel` resets; next gesture works normally | pointerDown → pointerCancel → no callback; then fresh pointerDown → pointerMove(dx=-60) → pointerUp → `onSwipeLeft` fires |
+| ID | Input | Expected output | What it proves |
+|----|-------|-----------------|----------------|
+| FLD1 | `"2026-05-22"` | `"2026.05.22 토요일"` | Saturday mapping + dot separator |
+| FLD2 | `"2026-01-01"` | `"2026.01.01 목요일"` | Thursday mapping + January leading zero |
+| FLD3 | `"2026-03-07"` | `"2026.03.07 토요일"` | Month and day leading zeros preserved |
+| FLD4 | `"2026-05-25"` | `"2026.05.25 월요일"` | Monday (non-weekend weekday) renders correctly |
 
-Implementation note: `renderHook` returns `result.current` containing `{onPointerDown, onPointerMove, onPointerUp, onPointerCancel}`. Events are passed as `fakeEvent as unknown as React.PointerEvent`. Wrap each handler call in `act()`.
-
----
-
-### File 2 — `src/lib/hooks/__tests__/usePhotoViewer.test.ts` (4 cases)
-
-Uses `renderHook` and `act`. No DOM needed; node environment sufficient but happy-dom is fine for consistency.
-
-| ID | Description | Assertion |
-|----|-------------|-----------|
-| PV1 | Initial state is closed at index 0 | `viewerOpen === false`, `viewerInitialIndex === 0` |
-| PV2 | `openViewer(id)` finds correct index | 3-photo array, call `openViewer(photos[1].id)` → `viewerOpen === true`, `viewerInitialIndex === 1` |
-| PV3 | `openViewer(unknownId)` falls back to 0 | call `openViewer('no-such-id')` → `viewerInitialIndex === 0`, `viewerOpen === true` |
-| PV4 | `closeViewer()` flips open to false | open then close → `viewerOpen === false` |
-
----
-
-### File 3 — `src/app/diary/[date]/__tests__/PhotoViewer.test.tsx` (7 cases)
-
-Environment: `// @vitest-environment happy-dom`. Mock `HTMLDialogElement.prototype.showModal` and `.close` in `beforeEach`/`afterEach` (identical boilerplate to `Editor.test.tsx`). Import `makePhoto` from `@/lib/storage/__tests__/fixtures`. Import `PhotoViewer` from `@/app/diary/[date]/_components/PhotoViewer`.
-
-Local helper:
-```ts
-function swipe(el: Element, axis: 'x' | 'y', delta: number) {
-  fireEvent.pointerDown(el, { clientX: 0, clientY: 0, pointerId: 1 });
-  fireEvent.pointerMove(el, {
-    clientX: axis === 'x' ? delta : 0,
-    clientY: axis === 'y' ? delta : 0,
-    pointerId: 1,
-  });
-  fireEvent.pointerUp(el, {
-    clientX: axis === 'x' ? delta : 0,
-    clientY: axis === 'y' ? delta : 0,
-    pointerId: 1,
-  });
-}
-```
-
-| ID | Description | Assertion |
-|----|-------------|-----------|
-| PVC1 | `open=false` → `showModal` never called | render `<PhotoViewer open={false} ...>` → `showModalMock` call count 0 |
-| PVC2 | `open=true, initialIndex=1`, 3 photos → correct image and counter | `data-testid="photo-viewer-img"` src equals `photos[1].dataUrl`; `data-testid="photo-viewer-counter"` text is `"2 / 3"` |
-| PVC3 | Close button click calls `onClose` | find button with `aria-label="닫기"`, `fireEvent.click` → `onClose` spy called once |
-| PVC4 | Left swipe advances to next photo | open at index 0, swipe x=-60 on inner container → `data-testid="photo-viewer-img"` src becomes `photos[1].dataUrl` |
-| PVC5 | Right swipe at index 0 stays at 0 | swipe x=+60 at index 0 → image src unchanged (`photos[0].dataUrl`) |
-| PVC6 | Swipe left then right returns to first photo | open at index 0, swipe left → index 1, swipe right → image src back to `photos[0].dataUrl` |
-| PVC7 | Vertical swipe calls `onClose` | swipe y=+60 on inner container → `onClose` spy called once |
-
-Query strategy: because happy-dom does not expose `<dialog>` in the a11y tree without the `open` attribute, use `document.querySelector('[data-testid="photo-viewer-img"]')` and `document.querySelector('[data-testid="photo-viewer-counter"]')` directly — same pattern as `PhotoCarousel.test.tsx`. Swipe events are dispatched on the inner container `<div>` identified by `data-testid="photo-viewer-container"` (implementor must guarantee this testid).
-
----
-
-### File 4 — `src/app/diary/[date]/__tests__/Editor.test.tsx` (extend +2 cases)
-
-Add to the existing `describe` block. Reuses `renderEditor`, `makePhoto`, `readDiariesMock`, `showModalMock`, and `closeMock` already in scope.
-
-| ID | Description | Assertion |
-|----|-------------|-----------|
-| C-viewer-1 | Short-tap thumbnail → `showModal` called for PhotoViewer | seed diary with 1 photo via `readDiariesMock.mockReturnValue([makeDiary({ photos: [makePhoto()] })])`; `renderEditor`; capture `showModalMock.mock.calls.length` after load; locate `data-testid="photo-thumb-{id}"`; fireEvent.pointerDown then pointerUp (< 500ms); assert call count increased by 1 |
-| C-viewer-2 | Click viewer close button → `closeMock` called | from C-viewer-1 state; find `aria-label="닫기"`; `fireEvent.click`; assert `closeMock` called |
-
-Note: `showModal` is called once for `MoodPickerSheet` on initial editor load. Snapshot the count after `renderEditor` completes and assert `+1` after the thumbnail tap to avoid coupling to MoodPickerSheet behavior.
+All four cases use hardcoded expected strings; no `vi.useFakeTimers` needed because the function takes an explicit date string.
 
 ---
 
 ## Integration Tests
 
-Not applicable. PhotoViewer is display-only with no storage writes. All storage integration is covered by existing tests.
+### File: `src/app/list/__tests__/ListScreen.test.tsx`
+
+Framework: Vitest 2, `@testing-library/react@^16`, `@vitest-environment happy-dom`.
+
+Mocks required (declared at module scope, before dynamic imports):
+- `vi.mock('next/navigation', …)` — reuse existing pattern from `CalendarScreen.test.tsx`.
+- `vi.mock('@/lib/storage/useDiaries', () => ({ useDiaries: vi.fn() }))`.
+
+`setupNextNavigation` already exports `mockRouter`, `mockUseRouter`, `mockUseSearchParams`, `resetNavigationMocks`. For `?month` tests the mock needs a custom `URLSearchParams`; override `mockUseSearchParams` locally per test using `vi.spyOn` or a module-level variable pattern matching `CalendarScreen.test.tsx`.
+
+Dynamic imports after mocks (matching existing style):
+```ts
+const { useDiaries } = await import('@/lib/storage/useDiaries');
+const useDiariesMock = useDiaries as ReturnType<typeof vi.fn>;
+// import page component after mocks are in place
+```
+
+`beforeEach`: `resetNavigationMocks()` + `useDiariesMock.mockReturnValue({ entries: [], isReady: true })`.
+`afterEach`: `cleanup()`.
+
+#### Test fixture helpers (defined once at top of file)
+
+```ts
+function makeEntry(date: string, overrides = {}): DiaryEntry {
+  return { date, mood: 'joy', text: '내용', photos: [], ...overrides };
+}
+```
+
+#### Cases
+
+| ID | Description | Setup | Assertion |
+|----|-------------|-------|-----------|
+| LS1 | Month filter: only May entries shown with `?month=2026-05` | 2 May entries + 1 April entry; `mockUseSearchParams` returns `new URLSearchParams('month=2026-05')` | `getByRole('button', {name:/일기 보기/})` count = 2; April entry not found |
+| LS2 | Default month = current month when `?month` absent | `vi.useFakeTimers()` + `vi.setSystemTime(new Date('2026-05-15'))`; 1 May entry + 1 June entry; `mockUseSearchParams` returns `new URLSearchParams()` | Only May card visible; June card absent; `afterEach` restores timers |
+| LS3 | Sort desc (default): newest entry first | 2 May entries dated `2026-05-01` and `2026-05-20`; `?month=2026-05` | First card aria-label contains `"2026년 5월 20일"` |
+| LS4 | Sort asc after clicking sort toggle | Same 2 entries as LS3 | `fireEvent.click(getByRole('button', {name:'정렬 변경'}))` → first card aria-label contains `"2026년 5월 1일"` |
+| LS5 | +N badge for 5 photos | Entry with 5 `Photo` objects; `?month=2026-05` | `getByTestId('photo-overflow-badge')` text = `"+2"`; `getAllByAltText('첨부 사진')` length = 3 |
+| LS6 | "(내용 없음)" when text empty AND no photos | `makeEntry('2026-05-10', {text:'', photos:[]})` | `getByText('(내용 없음)')` visible |
+| LS7 | Body text omitted when text empty AND photos present | `makeEntry('2026-05-10', {text:'', photos:[fakePhoto()]})` | `queryByText('(내용 없음)')` = null; `getByAltText('첨부 사진')` present |
+| LS8 | Empty month shows CTA "캘린더로 가기" | No entries for `?month=2026-05` | `getByText('이 달에는 작성된 일기가 없어요')` visible; `getByRole('button', {name:'캘린더로 가기'})` visible |
+| LS9 | Card tap calls `router.push("/diary/[date]")` | 1 May entry; `?month=2026-05` | `fireEvent.click(getByRole('button', {name:/일기 보기/}))` → `expect(mockRouter.push).toHaveBeenCalledWith('/diary/2026-05-10')` |
+| LS10 | Next month nav pushes `?month=2026-06` | `?month=2026-05` | `fireEvent.click(getByRole('button', {name:'다음 달'}))` → `mockRouter.push` called with string containing `month=2026-06` |
+| LS11 | Prev month from 2026-01 rolls back to 2025-12 | `?month=2026-01` | `fireEvent.click(getByRole('button', {name:'이전 달'}))` → `mockRouter.push` called with string containing `month=2025-12` |
+| LS12 | `isReady=false` shows loading placeholder | `useDiariesMock.mockReturnValue({entries:[], isReady:false})` | `getByText('불러오는 중…')` visible; no card buttons present |
 
 ---
 
 ## E2E Tests
 
-### File — `e2e/photo-viewer.spec.ts` (1 case, recommended)
+### File: `e2e/list.spec.ts`
 
-| ID | Description |
-|----|-------------|
-| PV-E1 | Seed entry with 2 photos → navigate to editor → tap thumbnail → assert viewer image visible → click `닫기` → viewer dismissed |
+Framework: Playwright Chromium. Uses existing `seedDiariesScript` helper.
 
-Implementation:
-- Construct the diary entry inline with two photo objects (`id`, `dataUrl`, `width`, `height`, `addedAt`) — do not import fixtures (unavailable in browser context).
-- `await page.addInitScript(seedDiariesScript([entry]))` before `page.goto('/diary/2026-05-01')`.
-- Assert `page.getByTestId('photo-viewer-img')` is not visible before tap.
-- Click `page.getByTestId('photo-thumb-{photos[0].id}')`.
-- Assert `page.getByTestId('photo-viewer-img')` is visible.
-- Click `page.getByRole('button', { name: '닫기' })`.
-- Assert `page.getByTestId('photo-viewer-img')` is not visible.
+| ID | Steps | Assertions |
+|----|-------|------------|
+| LE1 | Seed 2 current-month entries via `page.addInitScript(seedDiariesScript([e1, e2]))`; `page.goto('/list')`; verify 2 card buttons visible (aria-label `/일기 보기/`); click first card; assert URL matches `/diary/YYYY-MM-DD`; assert editor textarea visible | `toHaveURL(/\/diary\//)`; `getByPlaceholder('오늘 어떤 하루였나요?')` visible |
+
+Photo entries not required for LE1 — keep the seed minimal (`mood`, `date`, `text`, `photos: []`).
 
 ---
 
 ## Regression Tests
 
-Existing 265 unit tests must pass without modification:
-
-- All 15 `Editor.test.tsx` cases remain green — `<PhotoViewer open={false}>` must not call `showModal`.
-- All 8 `PhotoCarousel.test.tsx` cases remain green — `PhotoCarousel.tsx` is not modified.
-- `useDialogControl.test.ts` 6 cases unaffected.
+No existing tests are directly affected. The `src/app/list/page.tsx` stub currently has no test coverage; replacing it cannot break existing passing tests.
 
 ---
 
 ## Security-Relevant Tests
 
-Not applicable. `dataUrl` strings are already stored in localStorage and never sent to any endpoint. No new XSS surface: images rendered via `<img src={dataUrl}>`, identical to `PhotoCarousel`.
+Not applicable for this feature (read-only local storage rendering; no auth, no API calls, no user input sanitisation concerns beyond existing storage layer).
 
 ---
 
 ## Fixtures / Mocks Needed
 
-| Mock / Fixture | Location | Notes |
-|---|---|---|
-| `makePhoto()` | `src/lib/storage/__tests__/fixtures.ts` | Already exists; reuse directly |
-| `HTMLDialogElement.prototype.showModal` | Per-file `beforeEach` | Same pattern as `Editor.test.tsx` and `MoodPickerSheet.test.tsx` |
-| `HTMLDialogElement.prototype.close` | Restored in `afterEach` | Same pattern |
-| `makePointerEvent(type, overrides)` | Local helper in `useSwipe.test.ts` | Mirrors `useLongPress.test.ts` |
-| `swipe(el, axis, delta)` | Local helper in `PhotoViewer.test.tsx` | Dispatches pointerDown/Move/Up sequence |
-| Inline photo objects | `e2e/photo-viewer.spec.ts` | `{id, dataUrl, width, height, addedAt}` constructed inline |
+| Item | Source | Notes |
+|------|--------|-------|
+| `mockRouter`, `mockUseRouter`, `mockUseSearchParams`, `resetNavigationMocks` | `src/lib/navigation/__tests__/setupNextNavigation.ts` | Already exists; no changes needed |
+| `useDiaries` mock | `vi.mock('@/lib/storage/useDiaries', …)` | Per-test `.mockReturnValue()` |
+| `makeEntry(date, overrides)` factory | Inline in `ListScreen.test.tsx` | ~5 lines |
+| `fakePhoto()` factory | Inline in `ListScreen.test.tsx` | Returns `{ id: 'p1', dataUrl: 'data:image/png;base64,AA==' }` |
+| `seedDiariesScript` | `e2e/_helpers/seedDiaries.ts` | Already exists |
+| `vi.setSystemTime` for LS2 | Vitest built-in | Restore in `afterEach` with `vi.useRealTimers()` |
+| Custom `URLSearchParams` per test | `new URLSearchParams('month=...')` | Passed inline to `mockUseSearchParams` via `vi.spyOn` override |
 
 ---
 
 ## Commands to Run
 
 ```bash
-# Full unit suite (existing 265 + new 21 = ~286)
-npx vitest run
+# Unit + component tests
+npm run test -- --reporter=verbose src/lib/utils/__tests__/formatListDate.test.ts
+npm run test -- --reporter=verbose src/app/list/__tests__/ListScreen.test.tsx
 
-# Targeted runs during development
-npx vitest run src/lib/hooks/__tests__/useSwipe.test.ts
-npx vitest run src/lib/hooks/__tests__/usePhotoViewer.test.ts
-npx vitest run "src/app/diary/\[date\]/__tests__/PhotoViewer.test.tsx"
-npx vitest run "src/app/diary/\[date\]/__tests__/Editor.test.tsx"
+# Full suite (regression guard)
+npm test
 
-# Type-check
-npx tsc --noEmit
+# Type check
+npm run typecheck
 
-# E2E (requires dev server on port 3000)
-npx playwright test e2e/photo-viewer.spec.ts
+# E2E
+npm run test:e2e -- e2e/list.spec.ts
 ```
 
 ---
 
 ## Not Applicable Tests
 
-- **Pinch-zoom**: explicitly v2 per REQ-012 Non-Goals.
-- **Photo sharing**: explicitly v2.
-- **Backend / API endpoints**: none introduced.
-- **Database / new storage keys**: none introduced.
-- **Auth / security flows**: none introduced.
-- **Performance profiling**: viewer is a string-swap on an in-memory base64 value; no fetch, no allocation boundary to test.
+- **API / HTTP tests**: no backend endpoints introduced.
+- **Database / migration tests**: localStorage schema unchanged.
+- **Performance tests**: in-memory filter/sort on typical diary volumes; no measurement needed.
+- **Auth / permission tests**: app has no auth layer in MVP.
 
 ---
 

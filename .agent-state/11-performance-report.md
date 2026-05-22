@@ -1,61 +1,57 @@
-# Performance Review Report — REQ-012
+# Performance Review Report — REQ-013
 
 ## Summary
 
-REQ-012 adds a display-only full-screen photo viewer (tap-to-open, swipe-to-navigate, swipe/button-to-close). The feature is entirely client-side, involves no queries, no network calls, no pagination, and no background jobs. All render-critical paths are correctly bounded. No blocking performance issues were found.
+REQ-013 is a pure client-side list screen. All data work is in-memory filter and sort over a `useDiaries` snapshot. The dataset is bounded by nature (one entry per calendar day, maximum 31 per month). No queries, no network calls, no background jobs, and no external APIs are involved. Performance risk is structurally low.
 
 ## Scope
 
-Files reviewed:
-
-- `src/lib/hooks/useSwipe.ts`
-- `src/lib/hooks/usePhotoViewer.ts`
-- `src/app/diary/[date]/_components/PhotoViewer.tsx`
-- `.agent-state/03-technical-design.md`
-- `.agent-state/07-implementation-report.md`
-- `.agent-state/09-code-review-report.md`
+Files examined:
+- `src/app/list/page.tsx`
+- `src/app/list/_components/DiaryListCard.tsx`
+- `src/app/list/_components/PhotoThumbnailStrip.tsx`
+- `src/lib/storage/useDiaries.ts`
+- Agent state files: 03-technical-design, 07-implementation-report, 09-code-review-report
 
 ## Findings
 
-### 1. useSwipe — zero re-renders during drag
+**1. filter + sort re-runs every render**
 
-`startX`, `startY`, `lockedAxis`, and `active` are all `useRef`. `onPointerMove` only writes to those refs; it never calls `setState`. All four handlers are stable via `useCallback` with empty dep arrays (callbacks are read from `optionsRef.current` at call time, not captured). The options object itself is written to `optionsRef.current = options` on every render — a single ref assignment, not a new closure. Drag interactions produce zero React re-renders. This is correct.
+`page.tsx` lines 26-33 compute `filtered` and `sorted` inline on every render, with no `useMemo`. For the real-world dataset (diary entries are per-day, so at most ~31 items per month and almost certainly under a few hundred total across all time) the filter is O(n) and the sort is O(k log k) where k <= 31. Both operations complete in microseconds and pose no measurable cost. `useMemo` would be correct style but is not blocking here.
 
-### 2. Image swap cost — negligible
+**2. `useDiaries` reads storage once on mount**
 
-`<img src={photo.dataUrl}>` swaps the `src` attribute when `currentIndex` changes. The photos are already decoded `base64` strings held in memory via `localStorage`. There is no network fetch. The browser's image decode cache retains the decoded bitmap for the same `src` string across renders. For a photo viewer bounded by the 10-photo-per-entry limit, switching images is a synchronous attribute mutation with a pre-decoded bitmap lookup. Cost is negligible.
+`useEffect([], [])` fires once, sets state once. No per-render storage hit. Correct pattern.
 
-### 3. DOM gate — correct
+**3. Base64 photo thumbnails**
 
-The inner content (button, img, counter, container div) is wrapped in `{open && (...)}`. When `open` is `false` the children are not in the DOM. The only elements present when closed are the outer `<dialog>` element itself and its `ref`. This is the minimum possible DOM cost for a mounted-but-closed modal.
+Each `DiaryListCard` can render up to 3 `<img>` tags with base64 `dataUrl` src values. The browser decodes the image data to a bitmap once and caches it. All thumbnail `<img>` elements use `loading="lazy"`, which defers off-screen image decoding. The thumbnail dimensions are constrained to 64x64 px by Tailwind classes. The `photos.slice(0, 3)` cap in `PhotoThumbnailStrip` ensures a hard upper bound of 3 decodes per card.
 
-### 4. PhotoViewer is mounted always — cost verified
+Memory consideration: if a user has 31 entries in a month each with 3 large base64 photos, all of that data is loaded into `entries` in one shot. With REQ-011's 150KB per-photo cap and 10-photo per-entry cap, the worst-case month corpus is ~31 × 10 × 150KB ≈ ~46MB. This is bounded by the localStorage 5MB cap in practice. Not new risk.
 
-`<PhotoViewer>` is unconditionally mounted in `Editor.tsx`. When `open=false` the component renders only the bare `<dialog ref={ref} className="...">` shell (the `{open && (...)}` gate eliminates all inner nodes). All hooks (`useDialogControl`, `useSwipe`, `useState`, `useEffect`, `useCallback`) still run, but their steady-state cost is negligible: refs are read, no state transitions are triggered, no effects fire (all effects are gated on `open` changing). This is correct and consistent with the existing `MoodPickerSheet` and `ConfirmDialog` patterns in this codebase.
+**4. `Intl.DateTimeFormat` instance hoisted to module scope**
 
-### 5. usePhotoViewer — state changes bounded
+`DiaryListCard.tsx` line 13-17 creates `DATE_FMT` once at module load. Correct pattern.
 
-`usePhotoViewer` holds two `useState` values: `viewerOpen` and `viewerInitialIndex`. Both change only on open and close transitions (user-driven, not on every render). `openViewer` is memoized with `[photos]` as its dep array. Since `photos` is `state.photos` from the reducer, it only changes reference when photos are actually added or deleted, not on unrelated Editor state changes (mood, text, etc.). `closeViewer` is memoized with an empty dep array. No spurious re-renders.
+**5. `key={activeMonth}` on a non-list `<div>`**
 
-### 6. useEffect for currentIndex reset — bounded
+Noted by code review NB-3. The `key` has no remount effect in this position. No performance consequence.
 
-The `useEffect` in `PhotoViewer.tsx` has deps `[open, initialIndex, photos.length]`. It runs only when one of those three changes. `photos.length` changes only on photo add/delete; `open` changes on open/close; `initialIndex` changes on thumbnail tap. The effect body calls `setCurrentIndex` only when `open === true`, avoiding a redundant state write on close. This is the minimum viable reset strategy.
+**6. No virtualization**
 
-### 7. onSwipeLeft dependency — correct
+Correct tradeoff. At max 31 cards per month, DOM node count is small.
 
-`onSwipeLeft` is memoized with `[photos.length]`. This is intentional: it needs `photos.length` to compute the upper bound for `Math.min(i + 1, photos.length - 1)`. The functional updater form `setCurrentIndex(i => ...)` is used correctly, but `photos.length` must be captured in the closure since it is not accessible from the updater alone. The dep array is precise.
+**7. Inline arrow functions as `onTap` props**
 
-### 8. Payload size — bounded by PRD constraint
+`page.tsx` line 67 creates a new function per card per render. At 31 items this is unmeasurable overhead. Not blocking.
 
-Photos are stored as base64 `dataUrl` strings in `localStorage` under the `ddalkkak:diaries:v1` key. `localStorage` is browser-limited to ~5 MB total; per-photo cap is 150 KB (REQ-011 `MAX_PHOTO_DATAURL_BYTES`). The viewer renders one image at a time. There is no bulk payload at render time — only the active `photo.dataUrl` string is referenced in the `src` attribute. No large payload risk.
+**8. `new Date(entry.date + 'T00:00:00')` called per render**
 
-### 9. N+1 risks — none
+Single cheap Date construction per card render. Non-issue.
 
-There are no data-fetching calls in this feature. All data is already in the reducer state. The `openViewer(id)` call does a single `Array.findIndex` over `state.photos` — O(n) where n is bounded to 10 by `MAX_PHOTOS_PER_ENTRY`.
+**9. `today` and `currentMonth` recomputed every render**
 
-### 10. Observability
-
-This is a display-only modal with no async operations. No observability instrumentation is required or expected.
+`page.tsx` lines 19-20 create a `new Date()` and build `currentMonth` on every render. Negligible.
 
 ## Blocking Issues
 
@@ -63,9 +59,9 @@ None.
 
 ## Non-Blocking Suggestions
 
-1. `onSwipeLeft` closing over `photos.length` via `useCallback([photos.length])` while using a functional updater `setCurrentIndex(i => ...)` is slightly inconsistent — the functional form was chosen precisely to avoid needing the current value of `currentIndex`, but `photos.length` is still needed in the closure. This is correct as written but could alternatively use a ref for `photos.length` to keep the handler permanently stable. Style preference, not a correctness or performance concern.
+1. **Memoize `filtered` and `sorted` with `useMemo`.** Wrap `page.tsx` lines 26-33 in a single `useMemo` keyed on `[entries, activeMonth, sort]`. Eliminates redundant filter+sort on sort-toggle re-renders. Not blocking at this dataset size but is correct hygiene.
 
-2. The `useEffect` dep array includes `photos.length` but not `photos` itself. If a photo's `dataUrl` changed in-place at the same index (not currently possible via the reducer, which only appends or deletes), `currentIndex` would not reset. Safe given the current reducer design but worth a comment.
+2. **Consider memoizing `DiaryListCard` with `React.memo` if photo count grows.** Not needed today (31 cards, 3 photos max), but worth noting if photo limits change.
 
 ## Verdict
 PASS

@@ -1,16 +1,18 @@
-# Security Review Report — REQ-012
+# Security Review Report — REQ-013
 
 ## Summary
 
-REQ-012 adds a pure client-side, display-only photo viewer (`useSwipe`, `usePhotoViewer`, `PhotoViewer`) that renders photos already stored in `localStorage` as `data:image/` base64 strings. No server communication, authentication, or new dependencies are introduced. The attack surface of this feature is extremely narrow: the only user-controlled value rendered is `photo.dataUrl`, which is gated by REQ-011's `addPhotoFromFile` MIME-prefix guard before it ever reaches storage.
+REQ-013 adds a pure client-side, display-only diary list screen at `/list`. It reads entries via `useDiaries`, renders them as cards, and does not write to any storage. The attack surface is minimal: URL query-parameter consumption, text rendering from localStorage data, and `<img src>` from base64 data URLs. All six items requested for verification check out clean. No critical or high issues found.
 
 ## Scope
 
-- `src/lib/hooks/useSwipe.ts`
-- `src/lib/hooks/usePhotoViewer.ts`
-- `src/app/diary/[date]/_components/PhotoViewer.tsx`
-- `src/lib/storage/photoBase64.ts` (REQ-011 trust boundary, read-only reference)
-- `src/app/diary/[date]/_components/Editor.tsx` (integration delta only)
+Files reviewed:
+- `src/lib/utils/formatListDate.ts`
+- `src/app/list/_components/PhotoThumbnailStrip.tsx`
+- `src/app/list/_components/DiaryListCard.tsx`
+- `src/app/list/_components/ListHeader.tsx`
+- `src/app/list/page.tsx`
+- `src/lib/storage/photoBase64.ts` (REQ-011 MIME guard, read for context)
 
 ## Critical Issues
 
@@ -26,31 +28,48 @@ None.
 
 ## Low Issues
 
-**L-1. `data:image/` MIME guard is enforced only at write time (REQ-011); the viewer has no independent read-time re-validation.**
+**L1 — `?month` parameter is unsanitized before URL re-emission.**
 
-Line 45 of `photoBase64.ts` enforces `dataUrl.startsWith('data:image/')` before persisting to `localStorage`. `PhotoViewer.tsx` line 98 renders the stored value directly via `<img src={photo.dataUrl}>` without re-checking. This is architecturally correct for a trusted same-origin `localStorage` store (no cross-origin writes are possible), but if the storage schema were ever migrated or patched by another code path that bypasses `addPhotoFromFile`, a `data:text/html` or `javascript:` payload could reach the `src` attribute. The current codebase has no such bypass path. Risk is negligible in the current design; worth noting if the storage layer is extended later.
+Severity: Low.
 
-Recommendation: A one-line guard at read time (`if (!photo.dataUrl.startsWith('data:image/')) return null`) inside `PhotoViewer` would make the component independently safe regardless of upstream assumptions, at near-zero cost.
+`activeMonth = searchParams.get('month') ?? currentMonth` is passed directly to `Routes.listWithFilter({ month: m })` via `onMonthChange`. The value is also compared against `e.date.slice(0, 7)` using strict string equality, and split on `'-'` in `addMonths()` to construct a `Date`. No output escaping is needed because the value is never rendered as HTML and Next.js router's `router.push` encodes query parameters before writing them to the address bar. However, a crafted `?month` value (e.g., a very long string or non-date garbage) could produce a nonsensical `Date` object in `addMonths`. This is a cosmetic/UX edge case with no exploitable consequence: the list will simply render an empty month. Risk is self-contained to the local browser session.
 
-**L-2. `{open && (...)}` gate removes the `<img>` from the React tree when the viewer is closed, but `photo.dataUrl` (a potentially large string) remains in memory as part of `state.photos`.**
+**L2 — `photo.dataUrl` rendered in `<img src>` without re-validation at render time.**
 
-This is not a new exposure introduced by REQ-012 — the same data already resided in `PhotoCarousel` thumbnails. No additional leakage surface. Noted for completeness.
+Severity: Low (accepted by design per REQ-011).
 
-**L-3. `onDialogClick` intentionally omitted.**
-
-The `useDialogControl` hook exposes an `onDialogClick` handler that other dialogs (`ConfirmDialog`, `BottomSheet`) spread onto `<dialog>` to enable backdrop-click-to-close. `PhotoViewer.tsx` line 17 explicitly omits this, preventing accidental close via swipe-ending-on-backdrop. This is a correct deliberate UX and security-neutral choice — no new attack surface is created by keeping the dialog open on backdrop click.
+`PhotoThumbnailStrip` passes `photo.dataUrl` directly to `<img src>`. The MIME guard in `photoBase64.ts` (`!dataUrl.startsWith('data:image/')`) fires at write time when the photo is added. Data stored in `localStorage` before REQ-011 was deployed, or manually crafted by a user editing their own `localStorage`, could theoretically contain a non-image data URL. Because this app has no authentication, no multi-user isolation, and no server, the only person who can manipulate `localStorage` is the user themselves — so there is no cross-user exploitation path.
 
 ## Commands Run
 
-```bash
-git diff HEAD~1 HEAD -- src/
-rg -n "dangerouslySetInnerHTML|innerHTML|eval\(|new Function" [new files]
-rg -n "password|secret|token|api_key|private_key|apiKey|API_KEY" [new files]
-rg -n "fetch\(|XMLHttpRequest|WebSocket|import\(" [new files]
-rg -n "console\.log|console\.error|console\.warn" [new files]
-rg -n "data:image/" PhotoViewer.tsx
-cat package.json
 ```
+rg "dangerouslySetInnerHTML|innerHTML|eval\(|new Function" src/app/list/ src/lib/utils/formatListDate.ts
+rg "password|secret|token|api_key|private_key|apiKey" src/app/list/ src/lib/utils/formatListDate.ts
+rg "photo\.dataUrl|dataUrl" src/app/list/
+npm audit --audit-level=high
+git diff HEAD~1 -- src/app/list/ src/lib/utils/formatListDate.ts
+```
+
+## Checklist Results
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Authentication checks | N/A — personal local app, no auth layer |
+| 2 | Authorization checks | N/A — single-user, no server |
+| 3 | IDOR risks | None — all data is owned by the local user |
+| 4 | Tenant/user isolation | N/A — single-user localStorage |
+| 5 | Input validation | `?month` consumed as string only; used in strict equality filter and `Date` constructor. No XSS path. |
+| 6 | Injection risks | No SQL, no server. Text body rendered as React text node (`{entry.text}`), never as HTML. |
+| 7 | XSS and unsafe rendering | No `dangerouslySetInnerHTML`. No `innerHTML`. Text content rendered via React's safe text interpolation. |
+| 8 | CSRF-sensitive mutations | No writes on this screen. |
+| 9 | Secret leakage | No secrets, tokens, or API keys in any new file. |
+| 10 | Sensitive data logging | No `console.log` of entry content. |
+| 11 | File upload / path traversal | No file upload. `loading="lazy"` on `<img>` only. |
+| 12 | SSRF risks | No HTTP calls. |
+| 13 | Dependency vulnerabilities | `npm audit` reports 0 high/critical issues introduced by this REQ. |
+| 14 | Internal error disclosure | No server, no error boundary added. |
+| 15 | Insecure defaults | None. Sort defaults to `'desc'`; month defaults to current month. Both safe. |
+| 16 | Permission changes | None. |
 
 ## Required Fixes
 
@@ -58,33 +77,9 @@ None.
 
 ## Accepted Residual Risks
 
-**L-1 accepted:** The `data:image/` prefix is validated at the storage write boundary by REQ-011. Re-validation at the viewer is a defense-in-depth improvement that may be deferred; the current trust model (same-origin `localStorage`, single write path) is sound for the current application scope.
+1. **Self-XSS via manually crafted `localStorage`** — a user who edits their own `ddalkkak:diaries:v1` key to insert a `javascript:` or `data:text/html` photo URL could trigger unexpected browser behavior. Accepted because: (a) personal single-user app with no cross-user data path, (b) the MIME guard at write time blocks normal ingestion paths, (c) requires intentional self-sabotage. Mitigation path for a future multi-user version: re-validate `startsWith('data:image/')` at render time.
 
-**L-2 accepted:** In-memory retention of base64 image data is inherent to the localStorage-based storage design chosen at the architecture level. Not a REQ-012 concern.
-
-**L-3 accepted:** Intentional by spec (PRD §2.1, REQ-012 design). Documented in code with a comment.
-
-## Security Checklist Result
-
-| Item | Result |
-|---|---|
-| Authentication checks | N/A — fully client-side, no auth layer |
-| Authorization / resource ownership | N/A — single-user localStorage |
-| IDOR risks | None — no server-side IDs, no cross-user data |
-| Tenant / user isolation | N/A |
-| Input validation | dataUrl validated at write time by REQ-011; viewer reads from trusted store |
-| Injection risks | No `innerHTML`, no `eval`, no `new Function` anywhere in new files or production code |
-| XSS / unsafe rendering | `<img src={photo.dataUrl}>` is safe for `data:image/` URIs; no HTML string interpolation |
-| CSRF | No mutations via network requests; no state-changing server calls |
-| Secret leakage | No secrets, tokens, or API keys in any new file |
-| Sensitive data logging | No `console.log` calls in new files |
-| File upload / path traversal | File upload handled by REQ-011; viewer is display-only |
-| SSRF | No outbound network requests |
-| Dependency vulnerabilities | No new dependencies added |
-| Internal error disclosure | `try/catch` in `useSwipe` for `setPointerCapture` swallows silently — correct |
-| Rate limiting / abuse | N/A — no server calls |
-| Insecure defaults | None identified |
-| Permission changes | None |
+2. **`?month` accepts arbitrary strings** — cosmetically harmless in the current pure client-side design. Not exploitable.
 
 ## Verdict
 PASS
