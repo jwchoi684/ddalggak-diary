@@ -17,6 +17,8 @@ import { EditorBody } from './EditorBody';
 import { EditorToolbar } from './EditorToolbar';
 import { EditorMoreMenu } from './EditorMoreMenu';
 import { PhotoCarousel } from './PhotoCarousel';
+import { PhotoViewer } from './PhotoViewer';
+import { usePhotoViewer } from '@/lib/hooks/usePhotoViewer';
 
 interface EditorProps {
   date: string; // ISO "YYYY-MM-DD" — validated upstream in page.tsx
@@ -31,6 +33,7 @@ export function Editor({ date }: EditorProps) {
   const [currentDate, setCurrentDate] = useState(date);
 
   const [state, dispatch] = useEditorState(currentDate);
+  const { viewerOpen, viewerInitialIndex, openViewer, closeViewer } = usePhotoViewer(state.photos);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const pendingCursorPos = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -187,7 +190,14 @@ export function Editor({ date }: EditorProps) {
       <PhotoCarousel
         photos={state.photos}
         onDelete={(id) => dispatch({ type: 'DELETE_PHOTO', id })}
-        onThumbnailTap={() => {}}
+        onThumbnailTap={openViewer}
+      />
+
+      <PhotoViewer
+        photos={state.photos}
+        open={viewerOpen}
+        initialIndex={viewerInitialIndex}
+        onClose={closeViewer}
       />
 
       <Toast message={toast.message} open={toast.open} onClose={toast.hide} />

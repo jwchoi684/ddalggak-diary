@@ -1,60 +1,61 @@
-# Performance Review Report — REQ-011
+# Performance Review Report — REQ-012
 
 ## Summary
 
-REQ-011 adds base64 photo attachment to the client-side diary editor. The feature touches localStorage read/write on every autosave, carousel rendering, pointer-event handling, and the FileReader/Image decode pipeline. All identified costs are proportionate for a single-user, mobile-first, localStorage-backed app. No blocking performance issues were found.
+REQ-012 adds a display-only full-screen photo viewer (tap-to-open, swipe-to-navigate, swipe/button-to-close). The feature is entirely client-side, involves no queries, no network calls, no pagination, and no background jobs. All render-critical paths are correctly bounded. No blocking performance issues were found.
 
 ## Scope
 
-Files examined:
+Files reviewed:
 
-- `src/lib/storage/photoBase64.ts`
-- `src/lib/storage/diaries.ts`
-- `src/lib/storage/limits.ts`
-- `src/lib/storage/index.ts`
-- `src/app/diary/[date]/_components/PhotoCarousel.tsx`
-- `src/lib/hooks/useLongPress.ts`
+- `src/lib/hooks/useSwipe.ts`
+- `src/lib/hooks/usePhotoViewer.ts`
+- `src/app/diary/[date]/_components/PhotoViewer.tsx`
 - `.agent-state/03-technical-design.md`
 - `.agent-state/07-implementation-report.md`
 - `.agent-state/09-code-review-report.md`
 
 ## Findings
 
-### 1. upsertDiary read-all/write-all cost with photos included
+### 1. useSwipe — zero re-renders during drag
 
-`upsertDiary` calls `readDiaries()` (JSON.parse of the entire diaries key) then `writeAllDiaries()` (JSON.stringify of the entire array). With photos included, a single autosave on an entry with 10 photos at 150 KB each serializes a 1.5 MB base64 payload as a JSON string inside a larger JSON array. At a 1-second debounce rate, this fires at most once per second during active photo operations and at keystroke-debounce rate during text entry.
+`startX`, `startY`, `lockedAxis`, and `active` are all `useRef`. `onPointerMove` only writes to those refs; it never calls `setState`. All four handlers are stable via `useCallback` with empty dep arrays (callbacks are read from `optionsRef.current` at call time, not captured). The options object itself is written to `optionsRef.current = options` on every render — a single ref assignment, not a new closure. Drag interactions produce zero React re-renders. This is correct.
 
-For a single-user app with a realistic diary corpus (e.g., 365 entries, one with 10 photos), the entire diaries key can approach 2–3 MB. JSON.parse and JSON.stringify of a 2 MB string on a mid-range mobile device takes roughly 5–15 ms synchronously on the main thread. This is perceptible if it coincides with a frame, but the debounced trigger means it does not happen per-keystroke — only after the 1-second idle. This cost is acceptable for MVP. The documented risk (PRD §3.9, design report, implementation report) is acknowledged. No architectural change is warranted at this scale.
+### 2. Image swap cost — negligible
 
-Observation: because photos are stored as base64 strings inside JSON, the effective serialization cost is higher than binary storage would be (roughly 1.37x overhead from base64 encoding). At 10 photos this yields ~2 MB of JSON data inside the broader key. Still within the browser's single-call synchronous budget for a personal-use app.
+`<img src={photo.dataUrl}>` swaps the `src` attribute when `currentIndex` changes. The photos are already decoded `base64` strings held in memory via `localStorage`. There is no network fetch. The browser's image decode cache retains the decoded bitmap for the same `src` string across renders. For a photo viewer bounded by the 10-photo-per-entry limit, switching images is a synchronous attribute mutation with a pre-decoded bitmap lookup. Cost is negligible.
 
-### 2. autosaveValue recomputation per photo mutation
+### 3. DOM gate — correct
 
-`autosaveValue` is a `useMemo` depending on `[state.mood, state.text, state.textAlign, state.photos]`. Each `ADD_PHOTO` or `DELETE_PHOTO` dispatch creates a new array reference, triggering the memo and starting the 1-second debounce. This is correct and intentional. During text typing, `state.photos` is a stable reference (same array, not re-created), so photo inclusion in the memo does not add any per-keystroke cost beyond what existed before.
+The inner content (button, img, counter, container div) is wrapped in `{open && (...)}`. When `open` is `false` the children are not in the DOM. The only elements present when closed are the outer `<dialog>` element itself and its `ref`. This is the minimum possible DOM cost for a mounted-but-closed modal.
 
-### 3. Carousel render cost (up to 10 img elements)
+### 4. PhotoViewer is mounted always — cost verified
 
-Each `<Thumb>` renders one `<img src={photo.dataUrl}>`. The browser decodes a base64 image once on first paint and caches the decoded bitmap. Subsequent renders of the same `src` string do not re-decode. With up to 10 images at 88x88 px display size (the source may be larger), the combined GPU upload cost is negligible. The carousel is conditionally rendered (`photos.length > 0`) so the zero-photo case has zero DOM overhead. No virtualization is needed at 10 items.
+`<PhotoViewer>` is unconditionally mounted in `Editor.tsx`. When `open=false` the component renders only the bare `<dialog ref={ref} className="...">` shell (the `{open && (...)}` gate eliminates all inner nodes). All hooks (`useDialogControl`, `useSwipe`, `useState`, `useEffect`, `useCallback`) still run, but their steady-state cost is negligible: refs are read, no state transitions are triggered, no effects fire (all effects are gated on `open` changing). This is correct and consistent with the existing `MoodPickerSheet` and `ConfirmDialog` patterns in this codebase.
 
-### 4. document.pointerdown listener per Thumb
+### 5. usePhotoViewer — state changes bounded
 
-Each `Thumb` attaches a `document.pointerdown` handler only when `isActive === true` (a `useEffect` with `[isActive, onActivate]` dependency). Since `activeId` is a single string in `PhotoCarousel`, at most one `Thumb` has `isActive === true` at any time, meaning at most one `document.pointerdown` listener is active globally. The effect cleanup removes the listener when `isActive` becomes false or when the component unmounts. Listener cost is negligible.
+`usePhotoViewer` holds two `useState` values: `viewerOpen` and `viewerInitialIndex`. Both change only on open and close transitions (user-driven, not on every render). `openViewer` is memoized with `[photos]` as its dep array. Since `photos` is `state.photos` from the reducer, it only changes reference when photos are actually added or deleted, not on unrelated Editor state changes (mood, text, etc.). `closeViewer` is memoized with an empty dep array. No spurious re-renders.
 
-### 5. useLongPress setTimeout per thumbnail
+### 6. useEffect for currentIndex reset — bounded
 
-A single `setTimeout(500ms)` is created on `pointerDown` and cleared on `pointerUp`, `pointerMove` (beyond slop), `pointerCancel`, or `pointerLeave`. The `useEffect` cleanup in `useLongPress` calls `cancel()` on unmount, preventing leaks when the carousel is unmounted while a press is in flight. One timer per active press — no accumulation.
+The `useEffect` in `PhotoViewer.tsx` has deps `[open, initialIndex, photos.length]`. It runs only when one of those three changes. `photos.length` changes only on photo add/delete; `open` changes on open/close; `initialIndex` changes on thumbnail tap. The effect body calls `setCurrentIndex` only when `open === true`, avoiding a redundant state write on close. This is the minimum viable reset strategy.
 
-### 6. FileReader + Image decode pipeline
+### 7. onSwipeLeft dependency — correct
 
-`readAsDataUrl` is async (browser off-main-thread); the main thread is not blocked during file reading. The subsequent `getDimensions` call (setting `img.src = dataUrl`) schedules a microtask for the `onload` callback once the browser decodes the already-loaded base64 string. This is a one-time cost per photo add, not on any hot path. The MIME-type prefix guard (`data:image/`) fires synchronously before the `Image` decode step, short-circuiting invalid files cheaply.
+`onSwipeLeft` is memoized with `[photos.length]`. This is intentional: it needs `photos.length` to compute the upper bound for `Math.min(i + 1, photos.length - 1)`. The functional updater form `setCurrentIndex(i => ...)` is used correctly, but `photos.length` must be captured in the closure since it is not accessible from the updater alone. The dep array is precise.
 
-### 7. Size guard ordering
+### 8. Payload size — bounded by PRD constraint
 
-The size check (`dataUrl.length > MAX_PHOTO_DATAURL_BYTES`) fires after the MIME guard but before `getDimensions`. This is the correct order: a non-image file is rejected cheaply, then an oversized file is rejected without triggering the Image decode, and only valid small images proceed to dimension extraction. No wasted work.
+Photos are stored as base64 `dataUrl` strings in `localStorage` under the `ddalkkak:diaries:v1` key. `localStorage` is browser-limited to ~5 MB total; per-photo cap is 150 KB (REQ-011 `MAX_PHOTO_DATAURL_BYTES`). The viewer renders one image at a time. There is no bulk payload at render time — only the active `photo.dataUrl` string is referenced in the `src` attribute. No large payload risk.
 
-### 8. localStorage quota boundary
+### 9. N+1 risks — none
 
-10 photos × 150 KB = 1.5 MB per entry (base64 string length). The 5 MB total localStorage cap leaves approximately 3.5 MB for all other diary entries and conversations. A user with several photo-heavy entries could approach the quota. The `saveFn` try/catch on `QuotaExceededError` surfaces a Korean toast and skips `MARK_SAVED`. This is the only guard; there is no proactive quota check or automatic compression. This is a known, accepted risk per PRD §3.9.
+There are no data-fetching calls in this feature. All data is already in the reducer state. The `openViewer(id)` call does a single `Array.findIndex` over `state.photos` — O(n) where n is bounded to 10 by `MAX_PHOTOS_PER_ENTRY`.
+
+### 10. Observability
+
+This is a display-only modal with no async operations. No observability instrumentation is required or expected.
 
 ## Blocking Issues
 
@@ -62,11 +63,9 @@ None.
 
 ## Non-Blocking Suggestions
 
-1. **Consider a proactive quota estimate before committing the write.** Currently the app discovers quota exhaustion only after `localStorage.setItem` throws. A pre-write estimate (`navigator.storage.estimate()` is async and not available in all environments, but a rough heuristic of `existingDataSize + newPhotoSize > threshold` could provide an earlier, friendlier warning before the user adds a photo that will fail to save). This is a v2 improvement; the current try/catch guard is acceptable for MVP.
+1. `onSwipeLeft` closing over `photos.length` via `useCallback([photos.length])` while using a functional updater `setCurrentIndex(i => ...)` is slightly inconsistent — the functional form was chosen precisely to avoid needing the current value of `currentIndex`, but `photos.length` is still needed in the closure. This is correct as written but could alternatively use a ref for `photos.length` to keep the handler permanently stable. Style preference, not a correctness or performance concern.
 
-2. **`upsertDiary` deserializes the entire corpus on every autosave.** For future REQs that increase photo counts or add more per-entry data, consider indexing the diary array by `id` in a separate key (or switching to IndexedDB, already noted as a v2 plan). No action needed now, but this is the single most impactful future optimization given that JSON.parse of a large blob is the dominant cost on the save path.
-
-3. **`onThumbnailTap={() => {}}` inline arrow in `Editor.tsx`** causes `shortTap` (a `useCallback([onThumbnailTap])` inside `PhotoCarousel`) to re-create on every `Editor` render. This has no user-visible cost today because the callback is a no-op, but when REQ-012 wires a real callback, the pattern should be changed to `useCallback(() => {}, [])` at the call site. Flag for REQ-012 implementor.
+2. The `useEffect` dep array includes `photos.length` but not `photos` itself. If a photo's `dataUrl` changed in-place at the same index (not currently possible via the reducer, which only appends or deletes), `currentIndex` would not reset. Safe given the current reducer design but worth a comment.
 
 ## Verdict
 PASS

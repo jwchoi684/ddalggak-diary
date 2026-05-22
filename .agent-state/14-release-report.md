@@ -2,47 +2,39 @@
 
 ## Summary
 
-REQ-011 (사진 추가 / 카로젤 / 길게 누름 삭제) adds photo attachment to the diary editor. A hidden `<input type="file">` is triggered by the gallery icon stub in `EditorToolbar`. The selected image is read as a base64 data URL via a new `addPhotoFromFile` storage utility and appended to `DiaryEntry.photos`. A horizontally scrolling `PhotoCarousel` of 80–96 px thumbnails appears below the mood header; it is completely hidden when the photos array is empty. A 500 ms long-press on any thumbnail (implemented via a new `useLongPress` hook) shows a per-photo delete overlay with haptic feedback; tapping elsewhere dismisses it. A hard cap of 10 photos is enforced at the add path and reflected by `galleryDisabled` on `EditorToolbar`. All photo mutations flow through the existing REQ-009 autosave pipeline (`useEditorState` reducer + `useAutosave`). No new dependencies and no backend changes.
+REQ-012 (사진 전체화면 뷰어) adds a full-screen photo viewer modal to the diary editor. When a user short-taps a `PhotoCarousel` thumbnail, a `<dialog>`-based full-screen viewer opens on a pure-black background. The viewer supports left/right pointer swipe to navigate photos and vertical swipe or the ✕ close button (or ESC) to dismiss. No backend, database, routing, or dependency changes are required. The feature is purely display-only and zero-impact on autosave.
 
-All 13 required gate reports are present and end with `PASS`. Cycle history: code review cycle 2, security hardening pass (L-1 applied as cycle 3 fix). 263 unit tests + 6 E2E tests all pass.
+All 13 required gate reports are present and end with PASS, plus both optional reports (11-performance, 12-infra) also PASS. Two production-code defects were found and fixed during Phase 10 verification before all gates passed. 285 unit tests + 7 E2E tests all pass.
 
 ## Files Changed
 
 ### New source files
-- `src/lib/storage/photoBase64.ts` — `addPhotoFromFile` utility (FileReader → base64, size guard, MIME guard, dimension extraction)
-- `src/lib/hooks/useLongPress.ts` — `useLongPress` hook (500 ms timer, 5 px slop cancel, unmount cleanup)
-- `src/app/diary/[date]/_components/PhotoCarousel.tsx` — horizontal scrolling carousel with per-Thumb long-press overlay
+- `src/lib/hooks/useSwipe.ts` — pointer-event gesture hook (axis-lock, threshold, setPointerCapture try/catch), 82 lines
+- `src/lib/hooks/usePhotoViewer.ts` — open/close/index state hook, 29 lines
+- `src/app/diary/[date]/_components/PhotoViewer.tsx` — full-screen `<dialog>` viewer component, 106 lines
 
 ### New test files
-- `src/lib/storage/__tests__/photoBase64.test.ts` — 6 unit cases (PB1–PB6 + PB7 MIME-prefix guard)
-- `src/lib/hooks/__tests__/useLongPress.test.ts` — 6 unit cases (LP1–LP6)
-- `src/app/diary/[date]/__tests__/PhotoCarousel.test.tsx` — 8 cases (PC1–PC8, PC8 added in cycle 2 for B-1 regression)
+- `src/lib/hooks/__tests__/useSwipe.test.ts` — 7 unit cases (SW1–SW7)
+- `src/lib/hooks/__tests__/usePhotoViewer.test.ts` — 4 unit cases (PV1–PV4)
+- `src/app/diary/[date]/__tests__/PhotoViewer.test.tsx` — 7 unit cases (PVC1–PVC7)
 
 ### New E2E files
-- `e2e/photos.spec.ts` — 2 specs: PE1 (add → autosave → reload persistence), PE2 (10-photo cap disables gallery)
-- `e2e/fixtures/1x1.png` — minimal PNG fixture for PE1
+- `e2e/photo-viewer.spec.ts` — 1 spec (PV-E1): tap thumbnail → viewer visible → 닫기 → dismissed
 
 ### Modified source files
-- `src/lib/hooks/useEditorState.ts` — adds `photos: Photo[]` to `EditorState`; adds `ADD_PHOTO` / `DELETE_PHOTO` reducer actions; updates `LOAD_ENTRY` and `MARK_SAVED`
-- `src/lib/hooks/useHorizontalDatePicker.ts` — extends `AutosaveValue` type with `photos: Photo[]`
-- `src/app/diary/[date]/_components/Editor.tsx` — wires gallery file input, dispatches `ADD_PHOTO` / `DELETE_PHOTO`, passes `photos` to `autosaveValue`, passes `galleryDisabled` to `EditorToolbar`, renders `PhotoCarousel`
-- `src/app/diary/[date]/_components/EditorToolbar.tsx` — adds `galleryDisabled?: boolean` prop; applies disabled state and ARIA label to gallery button
+- `src/app/diary/[date]/_components/Editor.tsx` — added `usePhotoViewer` hook call; wired `onThumbnailTap` to `openViewer`; mounted `<PhotoViewer>` unconditionally (243 → 253 lines)
 
 ### Modified test files
-- `src/app/diary/[date]/__tests__/Editor.test.tsx` — 4 new photo integration cases (C-photo-1..4)
-- `src/lib/hooks/__tests__/useEditorState.test.ts` — 3 new reducer cases (ES-photo-1..3)
-- `src/lib/hooks/__tests__/useHorizontalDatePicker.test.ts` — updated all 4 test call sites to include `photos: []` in `autosaveValue`
-- `src/lib/storage/__tests__/fixtures.ts` — adds `makePhoto` factory
-
-### Modified E2E / config files
-- `e2e/_helpers/seedDiaries.ts` — adds `seedDiariesOnceScript` helper (seeds only when key absent, preventing reload from wiping saved state)
-- `playwright.config.ts` — port 3000 → 3001 (VS Code conflict), `workers: 1`, `fullyParallel: false`, `expect.timeout: 15_000`, `wait: { stdout: /Ready in/ }`
+- `src/app/diary/[date]/__tests__/Editor.test.tsx` — +2 integration cases (C-viewer-1, C-viewer-2)
 
 ### Agent state files
-- `.agent-state/00-git-safety.md` through `.agent-state/14-release-report.md` — all REQ-011 cycle reports
-- `.agent-state/requirements/REQ-011.md` — status flipped to DONE
-- `.agent-state/requirements/index.md` — REQ-011 row updated to DONE
-- `.agent-state/security-report.md` — short-name mirror of 10-security-report.md
+- `.agent-state/00-git-safety.md` through `.agent-state/13-e2e-report.md` — all REQ-012 cycle reports (updated in place)
+- `.agent-state/security-report.md` — short-name mirror of 10-security-report.md (updated)
+- `.agent-state/requirements/REQ-012.md` — status flipped to DONE
+- `.agent-state/requirements/index.md` — REQ-012 row updated to DONE
+
+### Unchanged files (confirmed)
+- `src/app/diary/[date]/_components/PhotoCarousel.tsx` — NOT modified (96 lines, budget protected)
 
 ## Gate Status
 
@@ -52,50 +44,48 @@ All 13 required gate reports are present and end with `PASS`. Cycle history: cod
 | Architecture | 02-architecture-report.md | PASS |
 | Technical design | 03-technical-design.md | PASS |
 | API contract | 04-api-contract.md | PASS |
-| DB / migration | 05-db-migration-report.md | PASS (no schema changes needed) |
+| DB / migration | 05-db-migration-report.md | PASS (no schema changes; display-only) |
 | Test plan | 06-test-plan.md | PASS |
 | Test report | 08-test-report.md | PASS |
-| Code review | 09-code-review-report.md | PASS (cycle 2) |
-| Security review | 10-security-report.md | PASS (L-1 hardening applied) |
+| Code review | 09-code-review-report.md | PASS |
+| Security review | 10-security-report.md | PASS (3 LOW informational, no required fixes) |
 | Performance | 11-performance-report.md | PASS |
 | Infra | 12-infra-report.md | PASS |
 | E2E | 13-e2e-report.md | PASS |
 
 ## Tests Run
 
-- Unit / integration (Vitest): 263 tests, 38 files — all PASS
-- TypeScript compile: 0 errors — PASS
-- ESLint: 0 warnings, 0 errors — PASS
-- E2E (Playwright, Chromium): 6 specs — all PASS (22.5 s)
-
-Note: The context brief mentioned 265 unit tests; the test report records 263. The discrepancy is 2 tests. The test report is the authoritative source (cycle 2, verified against actual vitest output). PB7 (MIME-prefix guard) is confirmed present in the report's coverage table but was counted within the 263 total — no missing tests.
+- Unit / integration (Vitest): 285 tests across 41 files — all PASS
+- TypeScript compile (`tsc --noEmit`): 0 errors — PASS
+- ESLint (`npm run lint`): 0 warnings, 0 errors — PASS
+- E2E (Playwright, Chromium): 7 specs — all PASS (23 s)
 
 ## Review Status
 
-Code review cycle 2 — PASS. One blocking issue (B-1: shared overlayRef across Thumb instances) resolved in cycle 2 via per-instance `overlayRef` + `useEffect`. Two non-blocking suggestions deferred: `onPointerLeave`/`onPointerCancel` not setting `didCancel` (low probability, no contract impact) and `onThumbnailTap={() => {}}` inline arrow (flagged for REQ-012 implementor).
+Code review — PASS. No blocking issues. Three non-blocking suggestions deferred: focus-management sequencing comment (NB-1), `useSwipe.ts` size overage acknowledged (NB-2), empty-photos bulletproof guard deferred (NB-3). Two nits (N1–N2 type inconsistency, N3 className duplication) noted but non-blocking. All five required invariants verified PASS.
 
 ## Security Status
 
-Security review — PASS. No Critical / High / Medium issues. L-1 (missing MIME-prefix guard on dataUrl) was applied as a one-line fix to `photoBase64.ts` before the final test cycle. L-2 (`new Function` in `seedDiaries.ts`) is a negligible maintenance note with no required fix.
+Security review — PASS. No Critical, High, or Medium issues. Three LOW informational items accepted as residual risk: L-1 (read-time `data:image/` re-validation gap — write-time guard is sufficient for current trust model), L-2 (in-memory base64 retention — pre-existing design choice), L-3 (intentional omission of backdrop-click-to-close). No required fixes.
 
 ## E2E Status
 
-6/6 Playwright specs pass (Chromium, Desktop Chrome, port 3001, single worker). PE1 covers add → autosave → reload persistence. PE2 covers 10-photo cap enforcing `disabled` state on the gallery button. Long-press delete overlay not covered by E2E (reliable 500 ms pointer simulation deferred to REQ-012 cycle; covered by unit tests PC3–PC5). Firefox/WebKit deferred.
+7/7 Playwright specs pass (Chromium, Desktop Chrome, port 3001, single worker, 23 s). New spec PV-E1 covers: viewer not visible on load → tap thumbnail → viewer visible → click 닫기 → viewer dismissed. Swipe-left/right navigation covered by unit tests only (pointer-gesture automation deferred as brittle). Vertical-swipe-to-close covered by unit test PVC7. Firefox/WebKit deferred for MVP.
 
 ## Performance / Infra Status
 
-Performance — PASS. All costs proportionate for single-user localStorage-backed MVP. Dominant cost is `upsertDiary` read-all/write-all with up to 1.5 MB base64 payload; acceptable at 1-second debounce rate. Three non-blocking improvement notes deferred: proactive quota estimate, upsertDiary corpus indexing (v2 plan), `onThumbnailTap` `useCallback` at REQ-012 call site.
+Performance — PASS. Zero React re-renders during drag (all gesture state in refs). Image swaps are synchronous attribute mutations against pre-decoded bitmaps (no network fetch). `{open && (...)}` DOM gate keeps closed-viewer cost minimal. Two non-blocking improvement notes deferred: `onSwipeLeft` ref-based stability option and `useEffect` dep array comment for in-place photo mutation edge case.
 
-Infra — PASS. No deployment artifact changes. `playwright.config.ts` port change (3000 → 3001) is test-only and has no production impact. `wait: { stdout: /Ready in/ }` flagged as relying on an undocumented Next.js log string; acceptable risk for local dev E2E.
+Infra — PASS. No changes to `package.json`, `.env*`, `playwright.config.ts`, Next.js routes, or server components. All new code is statically bundled client-side.
 
 ## Commit Message
 
 ```
-feat: photo carousel with long-press delete (REQ-011)
+feat: full-screen photo viewer with swipe (REQ-012)
 
-- Add PhotoCarousel, useLongPress hook, and addPhotoFromFile utility
-- Wire ADD_PHOTO / DELETE_PHOTO through useEditorState → autosave pipeline
-- Enforce 10-photo cap; E2E: add → autosave → reload persistence (PE1/PE2)
+- Add PhotoViewer dialog, useSwipe gesture hook, and usePhotoViewer state hook
+- Wire PhotoCarousel onThumbnailTap to open viewer at the correct index
+- Swipe left/right to navigate; swipe up/down or ✕ button to close
 
 Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 ```
@@ -105,64 +95,62 @@ Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 ```md
 ## Summary
 
-- Activates the gallery icon stub in `EditorToolbar` to open a native file picker (`accept="image/*"`)
-- New `addPhotoFromFile` utility reads the selected file as base64, validates MIME prefix, enforces 150 KB per-photo size cap, and extracts dimensions
-- New `PhotoCarousel` renders a horizontally scrolling row of 80–96 px square thumbnails; hidden when photos array is empty
-- New `useLongPress` hook (500 ms timer, 5 px slop) drives per-thumbnail delete overlay with haptic feedback
-- All photo mutations flow through the existing REQ-009 autosave pipeline — no new persistence code
+- New `PhotoViewer` component: full-screen `<dialog>` over the editor on a pure-black background, showing the tapped photo with `object-fit: contain` and a top-right "N / M" counter
+- New `useSwipe` hook: axis-locked pointer-event gesture handling (left/right for navigation, vertical for close), with `setPointerCapture` for reliable out-of-element tracking
+- New `usePhotoViewer` hook: open/close/index state management isolated from Editor
+- `Editor.tsx` wired: `onThumbnailTap={() => {}}` stub replaced with `openViewer`; `<PhotoViewer>` mounted unconditionally
 
 ## Acceptance Criteria
 
-- [x] Gallery icon tap → file picker (`accept="image/*"`)
-- [x] Selected image stored as base64 in `DiaryEntry.photos`
-- [x] Carousel: horizontal scroll, 80–96 px square, 8 px gap; hidden when empty
-- [x] Long-press 500 ms → "삭제" overlay + `navigator.vibrate(50)`
-- [x] Tap delete → photo removed from array; overlay hidden
-- [x] Tap elsewhere → overlay dismissed
-- [x] 10-photo cap: gallery button disabled, "최대 10장" toast on attempt
-- [x] Photo changes autosave via REQ-009 path
+- [x] Short tap on carousel thumbnail opens full-screen viewer at the correct index
+- [x] Pure-black background, `object-fit: contain`, `100dvh` height
+- [x] Top-right counter label e.g. "2 / 5"
+- [x] Swipe left → next photo (bounded at last); swipe right → previous photo (bounded at first)
+- [x] Swipe up/down → close viewer
+- [x] Top-left ✕ button (44×44 touch target, `aria-label="닫기"`) → close viewer
+- [x] ESC key closes (native `<dialog>` cancel event)
+- [x] Viewer is a modal — not in browser history stack
+- [x] Body scroll locked while viewer open (native `showModal()`)
 
 ## Technical Notes
 
-- `addPhotoFromFile` guards MIME prefix (`data:image/`) and byte length before `getDimensions`
-- `useLongPress` resets `didCancel` on each `pointerDown`; scroll-slop (5 px) cancels the timer without triggering `onShortTap`
-- `PhotoCarousel` uses per-`Thumb` `overlayRef` + `useEffect` for global `document.pointerdown` dismiss; at most one listener active at a time
-- `AutosaveValue` type extended with `photos: Photo[]` in `useHorizontalDatePicker.ts`; all call sites updated
+- Two defects found and fixed during verification: (1) `{open && (...)}` render gate required for reliable Playwright visibility detection; (2) `e.stopPropagation()` on close-button `onPointerDown` required to prevent `setPointerCapture` on the swipe container from consuming the click.
+- `useDialogControl` reused from design-system (same as BottomSheet, ConfirmDialog, MoodPickerSheet).
+- `onDialogClick` intentionally omitted from `<dialog>` spread — prevents accidental close when swipe ends on backdrop.
+- `PhotoCarousel.tsx` is untouched (96 lines, budget protected).
 
 ## API / Interface Changes
 
-Internal TypeScript contracts only — no network boundary. See `04-api-contract.md` for full interface table.
+Internal TypeScript contracts only — no network boundary. New interfaces: `SwipeOptions`, `SwipeHandlers` (useSwipe), `UsePhotoViewerReturn` (usePhotoViewer), `PhotoViewerProps` (PhotoViewer). No existing prop signatures changed.
 
 ## Data / Migration Notes
 
-No schema changes. `Photo` type and `DiaryEntry.photos: Photo[]` were defined in REQ-002. `upsertDiary` round-trips the full object through JSON; photos persist without migration.
+No schema changes. Feature is display-only; reads `state.photos` already stored by REQ-011. Zero new `localStorage` keys.
 
 ## Tests
 
-263 unit/integration tests (Vitest), 0 failures. 6 E2E specs (Playwright / Chromium), 0 failures. TypeScript and ESLint clean.
+285 unit/integration tests (Vitest, 41 files), 0 failures. 7 E2E specs (Playwright, Chromium), 0 failures. TypeScript and ESLint clean.
 
 ## Security Review
 
-PASS — no Critical/High/Medium issues. L-1 MIME-prefix guard applied. Residual risks (localStorage quota, advisory `accept` attribute, global pointer listener) documented and accepted for MVP.
+PASS — no Critical/High/Medium issues. Three LOW informational items accepted (read-time MIME re-validation gap, in-memory base64 retention, intentional no-backdrop-close). No required fixes.
 
 ## E2E Evidence
 
-PE1: add photo → wait autosave debounce → reload → carousel still visible (persistence confirmed).
-PE2: entry seeded with 10 photos → gallery button is `disabled`.
-All 4 pre-existing specs remain green.
+PV-E1: diary entry with 2 pre-seeded photos → viewer not visible on load → tap first thumbnail → viewer visible → click 닫기 → viewer dismissed. All 6 pre-existing specs remain green.
 
 ## Risk / Rollback Plan
 
-No server-side changes. Rollback = revert source files listed in implementation report. `playwright.config.ts` can independently revert to port 3000 if `wait.stdout` pattern causes CI hangs. Deferred items for REQ-012: full-screen viewer, `onThumbnailTap` wiring, long-press E2E coverage.
+No server-side changes. Rollback = revert the 3 new files and the Editor.tsx + Editor.test.tsx deltas. Non-blocking deferred items: read-time `data:image/` re-validation guard (security L-1 recommendation), `useSwipe.ts` comment on `onPointerCancel` signature, empty-photos bulletproof guard.
 ```
 
 ## Remaining Risks
 
-1. `onPointerLeave` / `onPointerCancel` do not set `didCancel.current` — low-probability edge case (stylus drift + subsequent `pointerUp` on same element). No user-visible impact identified; deferred per code review non-blocking #1.
-2. `onThumbnailTap={() => {}}` inline arrow causes `shortTap` `useCallback` to recreate on every `Editor` render. Harmless today (no-op); must be fixed to `useCallback(() => {}, [])` when REQ-012 wires a real callback.
-3. `wait: { stdout: /Ready in/ }` in `playwright.config.ts` relies on an undocumented Next.js log string. If changed in a Next.js upgrade, E2E suite will time out (120 s) rather than fail fast. Low risk; documented.
-4. `Editor.tsx` at 243 lines remains over the 100-line file budget (pre-existing). Flagged for extraction before REQ-012.
-5. Firefox / WebKit E2E coverage deferred to a later cycle.
+1. `PhotoViewer.tsx` at 106 lines is 6 lines over the 100-line soft cap — acceptable per CLAUDE.md exception (inline SVG and `{open && ...}` fix are not candidates for extraction).
+2. Read-time `data:image/` re-validation not added to `PhotoViewer` (security L-1 recommendation deferred) — negligible risk given single write path through REQ-011's `addPhotoFromFile` guard.
+3. `onPointerCancel` implementation signature `() => void` does not match contract `(e: React.PointerEvent) => void` — TypeScript accepts narrower assignee; no behavioral impact.
+4. Swipe-left/right E2E not covered (pointer-gesture automation deferred as brittle); unit tests PVC4–PVC6 provide coverage.
+5. Firefox/WebKit E2E coverage deferred for MVP.
 
 ## Verdict
 PASS

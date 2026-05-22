@@ -387,6 +387,46 @@ describe('Editor', () => {
     expect(document.body.textContent).toContain('최대 10장입니다');
   });
 
+  it('C-viewer-1: short-tap thumbnail → showModal called for PhotoViewer', async () => {
+    vi.useFakeTimers();
+    const photo = makePhoto();
+    readDiariesMock.mockReturnValue([makeDiary({ date: '2026-05-15', mood: 'joy', photos: [photo] })]);
+    await renderEditor();
+
+    const countBefore = showModalMock.mock.calls.length;
+
+    const thumb = document.querySelector(`[data-testid="photo-thumb-${photo.id}"]`)!;
+    expect(thumb).not.toBeNull();
+    fireEvent.pointerDown(thumb, { clientX: 0, clientY: 0 });
+    act(() => { vi.advanceTimersByTime(200); });
+    fireEvent.pointerUp(thumb, { clientX: 0, clientY: 0 });
+    await act(async () => {});
+
+    expect(showModalMock.mock.calls.length).toBe(countBefore + 1);
+  });
+
+  it('C-viewer-2: click viewer close button → closeMock called', async () => {
+    vi.useFakeTimers();
+    const photo = makePhoto();
+    readDiariesMock.mockReturnValue([makeDiary({ date: '2026-05-15', mood: 'joy', photos: [photo] })]);
+    await renderEditor();
+
+    const thumb = document.querySelector(`[data-testid="photo-thumb-${photo.id}"]`)!;
+    fireEvent.pointerDown(thumb, { clientX: 0, clientY: 0 });
+    act(() => { vi.advanceTimersByTime(200); });
+    fireEvent.pointerUp(thumb, { clientX: 0, clientY: 0 });
+    await act(async () => {});
+
+    const closeBtn = document.querySelector('[data-testid="photo-viewer-close"]') as HTMLButtonElement;
+    expect(closeBtn).not.toBeNull();
+
+    const countBefore = closeMock.mock.calls.length;
+    fireEvent.click(closeBtn);
+    await act(async () => {});
+
+    expect(closeMock.mock.calls.length).toBe(countBefore + 1);
+  });
+
   it('C-photo-4: upsertDiary throws → toast "저장에 실패했어요" and MARK_SAVED not dispatched', async () => {
     const entry = makeDiary({ date: '2026-05-15', mood: 'joy', text: 'original' });
     readDiariesMock.mockReturnValue([entry]);

@@ -1,479 +1,300 @@
-# Technical Design — REQ-011: 사진 추가 / 카로젤 / 길게 누름 삭제
+# Technical Design — REQ-012: 사진 전체화면 뷰어
 
 ## Summary
 
-REQ-011 adds photo attachment to the diary editor: a hidden file input activated by the existing gallery button, a `FileReader`-based base64 encoding utility, a horizontally scrolling thumbnail carousel with per-photo long-press-to-delete overlay, and plumbing to route all photo mutations through the existing REQ-009 autosave pipeline. No new dependencies are introduced. No backend or DB changes.
+REQ-012 adds a full-screen photo viewer modal to the diary editor. When a user short-taps a `PhotoCarousel` thumbnail, a `<dialog>`-based full-screen viewer opens over the editor on a pure-black background. The viewer supports left/right pointer swipe to navigate photos, vertical swipe or ✕ button (or ESC) to close. No backend, database, or routing changes are required. The feature is entirely display-only and zero-impact on autosave.
 
 ---
 
 ## Implementation Strategy
 
-Work in strict bottom-up dependency order: storage utility first, hook second, component third, editor wiring last. Each layer is independently testable before the next is written.
+Three new files; one file edited.
+
+1. `src/lib/hooks/useSwipe.ts` — gesture hook (no React component, pure pointer-event logic).
+2. `src/lib/hooks/usePhotoViewer.ts` — state-management hook for open/close/index.
+3. `src/app/diary/[date]/_components/PhotoViewer.tsx` — `<dialog>`-based full-screen viewer component.
+4. `src/app/diary/[date]/_components/Editor.tsx` — wire `onThumbnailTap` and mount `<PhotoViewer>`.
 
 ---
 
-## Overview
-
-The feature has four layers:
-
-1. **Storage utility** (`photoBase64.ts`): FileReader + Image dimension extraction + size/count guards.
-2. **Long-press hook** (`useLongPress.ts`): pointer-event timer with slop cancellation.
-3. **Carousel component** (`PhotoCarousel.tsx`): thumbnails + per-photo delete overlay.
-4. **Editor wiring** (`Editor.tsx`, `useEditorState.ts`, `EditorToolbar.tsx`, `useHorizontalDatePicker.ts`): state actions, autosave integration, hidden file input, JSX placement.
-
----
-
-## Component / File Map (final list)
-
-**New files:**
-
-| Path | Purpose |
-|---|---|
-| `src/lib/storage/photoBase64.ts` | `addPhotoFromFile()` — FileReader, Image dimension read, size/count guard |
-| `src/lib/hooks/useLongPress.ts` | `useLongPress()` — 500 ms pointer-event hook with slop |
-| `src/app/diary/[date]/_components/PhotoCarousel.tsx` | Carousel + overlay |
-| `src/lib/storage/__tests__/photoBase64.test.ts` | Unit tests with mocked FileReader + Image |
-| `src/lib/hooks/__tests__/useLongPress.test.ts` | Unit tests with fake timers + pointer events |
-| `src/app/diary/[date]/__tests__/PhotoCarousel.test.tsx` | Render tests |
-
-**Modified files:**
-
-| Path | Change summary |
-|---|---|
-| `src/lib/hooks/useEditorState.ts` | Add `photos: Photo[]` to state + `ADD_PHOTO`/`DELETE_PHOTO` actions |
-| `src/lib/hooks/useHorizontalDatePicker.ts` | Add `photos: Photo[]` to `AutosaveValue` type |
-| `src/app/diary/[date]/_components/Editor.tsx` | Wire file input, photo handlers, carousel mount, try/catch on saveFn |
-| `src/app/diary/[date]/_components/EditorToolbar.tsx` | Add `galleryDisabled?: boolean` prop |
-
----
-
-## Data Flow Diagram (text)
+## Component / File Map
 
 ```
-User taps gallery button
-  → inputRef.current.click()
-    → onChange fires with File
-      → addPhotoFromFile(file, currentPhotoCount)
-          → reject if count >= 10  → toast "최대 10장입니다"
-          → read dataUrl via FileReader
-          → reject if dataUrl.length > MAX_PHOTO_DATAURL_BYTES → toast "파일이 너무 큽니다"
-          → extract width/height via new Image()
-          → return Photo object
-        → dispatch({ type: 'ADD_PHOTO', photo })
-          → state.photos grows by 1
-            → autosaveValue changes (photos included)
-              → useAutosave debounces → saveFn(v)
-                → upsertDiary({ ...v.photos })
-                → try/catch QuotaExceededError → toast error
-
-User long-presses thumbnail (≥500 ms, no slop)
-  → useLongPress onLongPress fires
-    → navigator.vibrate(50)
-    → setActiveId(photo.id)  ← local state in PhotoCarousel
-      → overlay renders on that thumbnail
-        → document pointerdown listener attaches
-
-User taps "삭제" in overlay
-  → dispatch({ type: 'DELETE_PHOTO', id })
-    → state.photos filtered
-      → overlay dismisses (activeId cleared)
-        → autosave debounce fires → saveFn
-
-User taps outside overlay
-  → document pointerdown, !overlayRef.contains(e.target)
-    → setActiveId(null)
-      → overlay dismisses, listener removed
+src/
+  lib/hooks/
+    useSwipe.ts                             # new — gesture hook
+    usePhotoViewer.ts                       # new — viewer open/close/index state
+  app/diary/[date]/
+    _components/
+      PhotoViewer.tsx                       # new — full-screen <dialog> viewer
+      Editor.tsx                            # edited — wire hook + mount viewer
+    __tests__/
+      PhotoViewer.test.tsx                  # new — 7 unit cases
+  lib/hooks/
+    __tests__/
+      useSwipe.test.ts                      # new — 7 unit cases
+      usePhotoViewer.test.ts                # new — 4 unit cases
 ```
 
 ---
 
 ## Exact Function Signatures
 
-```typescript
-// src/lib/storage/photoBase64.ts
+### `useSwipe.ts`
 
-export interface AddPhotoResult {
-  ok: true;
-  photo: Photo;
-}
-export interface AddPhotoError {
-  ok: false;
-  reason: 'count_exceeded' | 'size_exceeded' | 'load_failed';
-}
-export type AddPhotoOutcome = AddPhotoResult | AddPhotoError;
-
-/** Reads file as base64 data URL, extracts dimensions, validates limits.
- *  currentPhotoCount is checked before FileReader is even started.
- *  Returns a resolved Promise always (no thrown exceptions from this fn).
- *  ImageCtor is injectable for tests (defaults to globalThis.Image).
- */
-export async function addPhotoFromFile(
-  file: File,
-  currentPhotoCount: number,
-  ImageCtor?: typeof Image,
-): Promise<AddPhotoOutcome>;
-```
-
-```typescript
-// src/lib/hooks/useLongPress.ts
-
-export interface LongPressOptions {
-  onLongPress: () => void;
-  delayMs?: number;       // default 500
-  slopPx?: number;        // default 5
+```ts
+export interface SwipeOptions {
+  onSwipeLeft: () => void;     // dx < -threshold and axis locked to x
+  onSwipeRight: () => void;    // dx > +threshold and axis locked to x
+  onSwipeVertical: () => void; // |dy| > threshold and axis locked to y
+  threshold?: number;          // default 50 (px displacement)
+  slopPx?: number;             // default 5 (px before axis is locked)
 }
 
-export interface LongPressHandlers {
+export interface SwipeHandlers {
   onPointerDown: (e: React.PointerEvent) => void;
-  onPointerUp: (e: React.PointerEvent) => void;
   onPointerMove: (e: React.PointerEvent) => void;
+  onPointerUp: (e: React.PointerEvent) => void;
   onPointerCancel: (e: React.PointerEvent) => void;
-  onPointerLeave: (e: React.PointerEvent) => void;
 }
 
-/** Returns pointer-event handlers to spread onto the target element. */
-export function useLongPress(options: LongPressOptions): LongPressHandlers;
+export function useSwipe(options: SwipeOptions): SwipeHandlers
 ```
 
-```typescript
-// src/app/diary/[date]/_components/PhotoCarousel.tsx
+Internal mechanics (refs, not state — no re-render during drag):
+- `startX`, `startY` — coordinates at `pointerdown`.
+- `lockedAxis: 'x' | 'y' | null` — set once the first `pointermove` exceeds `slopPx` on either axis; the larger delta wins; never changes after lock.
+- `active: boolean` — true from `pointerdown` until `pointerup` / `pointercancel`.
+- On `pointerdown`: capture via `e.currentTarget.setPointerCapture(e.pointerId)` (wrap in try/catch for happy-dom); record `startX`/`startY`; reset `lockedAxis` and `active=true`.
+- On `pointermove`: if not active, return. If `lockedAxis` is null and displacement exceeds `slopPx`, lock to axis with larger absolute delta. No callback fired on move — callbacks fire only on `pointerup`.
+- On `pointerup`: if not active, return. Set `active=false`. If axis locked to `'x'`: fire `onSwipeLeft` if dx < -threshold, `onSwipeRight` if dx > +threshold. If axis locked to `'y'`: fire `onSwipeVertical` if |dy| > threshold. Pointer capture auto-releases on pointerup.
+- On `pointercancel`: set `active=false`, reset `lockedAxis`. No callback.
+- All handlers stable via `useCallback`. Options wrapped in a ref so callbacks are never stale without needing to be in dep arrays.
 
-export interface PhotoCarouselProps {
+### `usePhotoViewer.ts`
+
+```ts
+export function usePhotoViewer(photos: Photo[]): {
+  viewerOpen: boolean;
+  viewerInitialIndex: number;
+  openViewer: (id: string) => void;
+  closeViewer: () => void;
+}
+```
+
+- `const [viewerOpen, setViewerOpen] = useState(false)`
+- `const [viewerInitialIndex, setViewerInitialIndex] = useState(0)`
+- `openViewer(id)`: `const idx = photos.findIndex(p => p.id === id); setViewerInitialIndex(idx >= 0 ? idx : 0); setViewerOpen(true)`. Wrapped in `useCallback([photos])`.
+- `closeViewer()`: `setViewerOpen(false)`. Wrapped in `useCallback([])`.
+
+### `PhotoViewer.tsx`
+
+```ts
+export interface PhotoViewerProps {
   photos: Photo[];
-  onDelete: (id: string) => void;
-  /** Reserved for REQ-012. Default: () => {} */
-  onThumbnailTap?: (id: string) => void;
+  open: boolean;
+  initialIndex: number;
+  onClose: () => void;
 }
 
-export function PhotoCarousel(props: PhotoCarouselProps): React.ReactElement | null;
+export function PhotoViewer({ photos, open, initialIndex, onClose }: PhotoViewerProps): React.ReactElement
 ```
+
+- Internal: `const [currentIndex, setCurrentIndex] = useState(initialIndex)`.
+- Reset on each open:
+  ```ts
+  useEffect(() => {
+    if (open) setCurrentIndex(Math.max(0, Math.min(initialIndex, photos.length - 1)));
+  }, [open, initialIndex]);
+  ```
+- Dialog control: `const { ref } = useDialogControl(open, onClose)`. `onDialogClick` is intentionally NOT spread onto `<dialog>` (per architecture risk #1).
+- Empty photos: if `photos.length === 0`, render `<dialog ref={ref} className="..." />` (empty closed dialog) so the ref is still attached but no content is shown.
+- Swipe callbacks (stable via `useCallback`):
+  - `onSwipeLeft`: `setCurrentIndex(i => Math.min(i + 1, photos.length - 1))`
+  - `onSwipeRight`: `setCurrentIndex(i => Math.max(i - 1, 0))`
+  - `onSwipeVertical`: `onClose`
+- Spread `useSwipe({ onSwipeLeft, onSwipeRight, onSwipeVertical })` onto the inner container `<div>`, NOT on `<dialog>`.
 
 ---
 
-## Editor.tsx Integration Delta (pseudocode)
+## Editor.tsx Integration Delta
 
-```
-// New refs/state (add near top of Editor function body):
-const fileInputRef = useRef<HTMLInputElement>(null);
-const isProcessing = useRef(false);
+```diff
++ import { usePhotoViewer } from '@/lib/hooks/usePhotoViewer';
++ import { PhotoViewer } from './PhotoViewer';
 
-// Update autosaveValue:
-const autosaveValue = useMemo(
-  () => ({ mood: state.mood, text: state.text, textAlign: state.textAlign, photos: state.photos }),
-  [state.mood, state.text, state.textAlign, state.photos],
-);
-
-// Update saveFn — change photos: [] to photos: v.photos, add try/catch:
-const saveFn = useCallback(
-  (v: typeof autosaveValue) => {
-    if (!v.mood) return;
-    const id = state.persistedId ?? generateId();
-    const createdAt = state.persistedCreatedAt ?? new Date().toISOString();
-    try {
-      upsertDiary({
-        id, date: currentDate, mood: v.mood, text: v.text, textAlign: v.textAlign,
-        photos: v.photos, createdAt, updatedAt: new Date().toISOString(),
-      });
-    } catch {
-      toast.show('저장에 실패했어요. 다시 시도해주세요.');
-      return;
-    }
-    dispatch({ type: 'MARK_SAVED', id, createdAt });
-  },
-  [state.persistedId, state.persistedCreatedAt, currentDate, dispatch, toast],
-);
-
-// New handlers:
-function handleGalleryTap() {
-  if (isProcessing.current || state.photos.length >= MAX_PHOTOS_PER_ENTRY) {
-    if (state.photos.length >= MAX_PHOTOS_PER_ENTRY) toast.show('최대 10장입니다');
-    return;
-  }
-  fileInputRef.current?.click();
-}
-
-async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-  const file = e.target.files?.[0];
-  if (fileInputRef.current) fileInputRef.current.value = '';  // reset immediately
-  if (!file) return;
-  isProcessing.current = true;
-  const result = await addPhotoFromFile(file, state.photos.length);
-  isProcessing.current = false;
-  if (!result.ok) {
-    if (result.reason === 'count_exceeded') toast.show('최대 10장입니다');
-    else if (result.reason === 'size_exceeded') toast.show('파일이 너무 큽니다');
-    else toast.show('사진을 불러오지 못했어요');
-    return;
-  }
-  dispatch({ type: 'ADD_PHOTO', photo: result.photo });
-}
-
-// JSX — hidden file input added after <main> open tag (or just before closing </main>):
-<input
-  ref={fileInputRef}
-  type="file"
-  accept="image/*"
-  className="sr-only"
-  aria-hidden="true"
-  tabIndex={-1}
-  onChange={handleFileChange}
-/>
-
-// JSX — PhotoCarousel placement: between <EditorBody> and <Toast>:
-<EditorBody ... />
-
-{state.photos.length > 0 && (
-  <PhotoCarousel
-    photos={state.photos}
-    onDelete={(id) => dispatch({ type: 'DELETE_PHOTO', id })}
-    onThumbnailTap={() => {}}
-  />
-)}
-
-<Toast ... />
-
-// EditorToolbar: add galleryDisabled prop:
-<EditorToolbar
-  ...
-  onGalleryTap={handleGalleryTap}
-  galleryDisabled={state.photos.length >= MAX_PHOTOS_PER_ENTRY}
-/>
+  export function Editor({ date }: EditorProps) {
+    ...
++   const { viewerOpen, viewerInitialIndex, openViewer, closeViewer } =
++     usePhotoViewer(state.photos);
+    ...
+    <PhotoCarousel
+      photos={state.photos}
+      onDelete={(id) => dispatch({ type: 'DELETE_PHOTO', id })}
+-     onThumbnailTap={() => {}}
++     onThumbnailTap={openViewer}
+    />
+    ...
++   <PhotoViewer
++     photos={state.photos}
++     open={viewerOpen}
++     initialIndex={viewerInitialIndex}
++     onClose={closeViewer}
++   />
 ```
 
-Note on placement: `<PhotoCarousel>` is placed between `<EditorBody>` and `<Toast>` in the JSX. `<Toast>` sits before `<EditorToolbar>` in the current source, which means the visual order from top to bottom is: header → body → carousel → toast (hidden when closed) → toolbar.
+`<PhotoViewer>` is mounted always — `useDialogControl` drives `showModal`/`close` internally based on the `open` prop. Placement: after `<PhotoCarousel>`, before `<Toast>`.
 
 ---
 
-## useEditorState Integration Delta
+## Visual Spec
 
-```typescript
-// Add to imports:
-import type { Photo } from '@/lib/storage';
-
-// Add to EditorState:
-photos: Photo[];
-
-// Add to EditorAction union:
-| { type: 'ADD_PHOTO'; photo: Photo }
-| { type: 'DELETE_PHOTO'; id: string }
-
-// Add to INITIAL_STATE:
-photos: [],
-
-// LOAD_ENTRY case: after destructuring entry fields, add:
-photos: action.entry.photos ?? [],
-
-// ADD_PHOTO case (new):
-case 'ADD_PHOTO':
-  return { ...state, photos: [...state.photos, action.photo] };
-
-// DELETE_PHOTO case (new):
-case 'DELETE_PHOTO':
-  return { ...state, photos: state.photos.filter((p) => p.id !== action.id) };
-
-// MARK_SAVED: no change — snapshot remains { mood, text, textAlign }. Photos are NOT
-// in the dirty snapshot. Photo changes trigger autosave via autosaveValue membership,
-// not via isDirty.
-```
-
----
-
-## AutosaveValue Type Change
-
-```typescript
-// src/lib/hooks/useHorizontalDatePicker.ts
-// Add Photo import:
-import type { Photo } from '@/lib/storage';
-
-// Extend AutosaveValue:
-export type AutosaveValue = {
-  mood: MoodId | undefined;
-  text: string;
-  textAlign: 'left' | 'center';
-  photos: Photo[];          // NEW
-};
-```
-
-The `handleDateSelect` callback already passes `autosaveValue` to `saveFn`. With `photos` included, a date-switch saves the current photos correctly. No other logic in `useHorizontalDatePicker.ts` needs to change.
-
----
-
-## Visual Spec (sizes, colors using tokens)
-
-**Carousel container:**
-- `overflow-x: auto` + `scroll-snap-type: x mandatory`
-- `no-scrollbar` utility class (reused from `HorizontalDatePicker`)
-- `WebkitOverflowScrolling: 'touch'`
-- `padding: 4px` (all sides) to avoid clipping shadow
-- horizontal gap: `8px`
-- background: `bg-cream` (matches editor background)
-- hidden entirely when `photos.length === 0` — conditional render
-
-**Each thumbnail:**
-- Size: `88px × 88px` (fixed; midpoint of 80–96 range)
-- `border-radius: 12px`
-- `object-fit: cover`
-- `scroll-snap-align: start`
-- `flex-shrink: 0`
-- rendered as `<img src={photo.dataUrl} alt="첨부 사진" />`
-
-**Delete overlay (per thumbnail):**
-- Absolutely positioned over thumbnail, same 88×88 container
-- Background: `rgba(0, 0, 0, 0.45)` (dark scrim — NOT brand peach)
-- `border-radius: 12px` (matches thumbnail)
-- Centered "삭제" button: `44×44` min touch target, white text `text-white`, `text-sm font-medium`
-- `role="button"` + `aria-label="사진 삭제"`
-
-**Gallery button disabled state (EditorToolbar):**
-- `disabled` HTML attribute on the `<button>`
-- `opacity-50 cursor-not-allowed` Tailwind classes added when `galleryDisabled` is true
+| Element | Tailwind / style |
+|---|---|
+| `<dialog>` | `p-0 m-0 border-none bg-transparent max-w-none max-h-none w-full h-full` — reset all browser dialog defaults |
+| Container `<div>` | `w-full h-[100dvh] bg-black flex flex-col` |
+| Close `<button>` | `absolute top-4 left-4 w-[44px] h-[44px] flex items-center justify-center text-white` |
+| Counter `<span>` | `absolute top-4 right-4 text-sm text-white` |
+| Image `<img>` | `flex-1 w-full object-contain` |
 
 ---
 
 ## Accessibility Spec
 
-- Hidden file input: `aria-hidden="true"` + `tabIndex={-1}` + `className="sr-only"` — keyboard users cannot focus it accidentally.
-- Gallery button: existing `aria-label="갤러리"` preserved. When disabled: `aria-disabled="true"` (set by native `disabled` attribute).
-- Each carousel thumbnail `<img>`: `alt="첨부 사진"` (generic; specific alt text is v2).
-- Delete overlay button: `role="button"` + `aria-label="사진 삭제"` + `44×44` touch target.
-- Carousel container: `role="list"` with each thumbnail wrapper `role="listitem"`.
-- Toast for errors: existing `<Toast>` with default `role="status"`. For MVP this is acceptable; a future pass may split an `role="alert"` toast for errors.
-
----
-
-## Error Handling Spec
-
-| Scenario | Guard location | User-facing message | Action |
-|---|---|---|---|
-| `photos.length >= 10` | `handleGalleryTap` (before click) and inside `addPhotoFromFile` | `"최대 10장입니다"` | toast, no file picker |
-| `dataUrl.length > MAX_PHOTO_DATAURL_BYTES` | `addPhotoFromFile` after FileReader resolves | `"파일이 너무 큽니다"` | toast, photo not added |
-| Image load fails (`img.onerror`) | `addPhotoFromFile` dimension extraction | `"사진을 불러오지 못했어요"` | toast, photo not added |
-| `QuotaExceededError` from `upsertDiary` | `saveFn` try/catch in `Editor.tsx` | `"저장에 실패했어요. 다시 시도해주세요."` | toast, MARK_SAVED not dispatched |
-| FileReader error event | `addPhotoFromFile` `reader.onerror` | returns `{ ok: false, reason: 'load_failed' }` | caller shows generic error toast |
-| `isProcessing.current === true` | `handleGalleryTap` | silent — no duplicate dialog | guard only |
+- `<dialog>` has implicit `role="dialog"` from the HTML element — no extra `role` attribute.
+- Close `<button>`: `aria-label="닫기"` + `data-testid="photo-viewer-close"`. First focusable element in DOM so `showModal()` auto-focus lands here.
+- Image: `<img alt="사진 {currentIndex + 1}" data-testid="photo-viewer-img">`.
+- Counter: `<span data-testid="photo-viewer-counter" aria-live="polite">`. Content `"2 / 5"` (no Korean suffix).
+- ESC key close: handled automatically by `useDialogControl` via the `cancel` event listener.
+- Body scroll lock: automatic via `showModal()` top-layer.
 
 ---
 
 ## Edge Case Resolutions
 
-1. **PhotoCarousel mount location**: between `<EditorBody>` and `<Toast>` in `Editor.tsx` JSX.
-
-2. **File input element**: hidden `<input type="file" accept="image/*">` in `Editor.tsx` with `fileInputRef`. After each selection, `fileInputRef.current.value = ''` is reset at the top of `handleFileChange` before any async work, ensuring same-file re-select works.
-
-3. **Photo width/height extraction**: `addPhotoFromFile` creates `new (ImageCtor ?? globalThis.Image)()`, sets `img.src = dataUrl`, resolves on `img.onload` reading `naturalWidth`/`naturalHeight`, rejects on `img.onerror`. Injectable constructor for unit tests.
-
-4. **Specific overlay UI**: dark scrim `rgba(0,0,0,0.45)` positioned absolute over the 88×88 thumbnail container with matching `border-radius: 12px`. Centered "삭제" button with `min-h-[44px] min-w-[44px]`, `text-white`, `role="button"`, `aria-label="사진 삭제"`.
-
-5. **Carousel thumbnail size**: `88px × 88px`, `8px` gap between thumbnails, `4px` padding on scroll container, `object-fit: cover`, `border-radius: 12px`.
-
-6. **Carousel container hidden**: `{state.photos.length > 0 && <div ...>...</div>}` — conditional render, zero DOM nodes when empty.
-
-7. **Reducer test coverage**: ADD_PHOTO appends to array; DELETE_PHOTO filters by id; LOAD_ENTRY spreads `entry.photos ?? []`; MARK_SAVED snapshot remains `{mood, text, textAlign}` — photos NOT in snapshot.
-
-8. **MARK_SAVED and photos**: photos are NOT part of the dirty snapshot. Photos enter autosave via `autosaveValue` membership, which fires the debounce directly. The `isDirty` flag (comparing snapshot to current state) stays text/mood/align only.
-
-9. **useLongPress API**: returns `{ onPointerDown, onPointerUp, onPointerMove, onPointerCancel, onPointerLeave }` to spread. Tracks `startX/startY` from pointerdown. Cancels on move > `slopPx` (default 5).
-
-10. **Tap-outside listener cleanup**: `document.addEventListener('pointerdown', handler)` is called inside a `useEffect` that depends on `activeId !== null`. Cleanup removes the listener when `activeId` becomes `null` or the component unmounts.
-
-11. **Editor.tsx file size impact**: inline the file-input element and handlers in `Editor.tsx`. No `GalleryInput.tsx` sub-component. Editor projected at ~230 lines — over budget but acceptable for this REQ.
-
-12. **Test strategy for FileReader/Image**: `photoBase64.test.ts` mocks `globalThis.FileReader` with a class whose `readAsDataURL` sets `this.result` then synchronously calls `this.onload({} as ProgressEvent)`. Mocks `globalThis.Image` with a class that synchronously calls `this.onload()` and exposes fixed `naturalWidth`/`naturalHeight`. `PhotoCarousel.test.tsx` renders with pre-seeded `Photo[]` props — no FileReader involvement.
+1. **PhotoViewer props exact shape** — `{photos, open, initialIndex, onClose}`. Internal `currentIndex` state initialized from `initialIndex` via useEffect on each open.
+2. **useSwipe API** — `{onSwipeLeft, onSwipeRight, onSwipeVertical, threshold?=50, slopPx?=5}` returning `{onPointerDown, onPointerMove, onPointerUp, onPointerCancel}`.
+3. **usePhotoViewer API** — `{viewerOpen, viewerInitialIndex, openViewer(id), closeViewer()}`. Falls back to index 0 on unknown id.
+4. **Reset currentIndex on open** — `useEffect([open, initialIndex])` clamps and resets.
+5. **Boundary behavior** — left swipe (next) `Math.min(i+1, photos.length-1)`; right swipe (prev) `Math.max(i-1, 0)`; vertical swipe calls `onClose`.
+6. **Empty photos defensive** — `photos.length === 0` renders empty dialog node (ref attached, no content). In practice never reached because PhotoCarousel returns null when empty.
+7. **Test selectors** — `data-testid="photo-viewer-close"`, `data-testid="photo-viewer-img"`, `data-testid="photo-viewer-counter"`.
+8. **Pointer capture release** — auto-released on pointerup; no explicit `releasePointerCapture` call. Wrap `setPointerCapture` in try/catch for happy-dom.
+9. **Editor.tsx regression** — existing 15 tests unaffected because `<PhotoViewer open={false}>` will not trigger `showModal` calls in `useDialogControl`.
+10. **Single-photo case** — swipe handlers attached but bounded clamps prevent any change.
 
 ---
 
-## Test Hooks (selectors, aria-labels, data-testids)
+## Test Hooks
 
-| Element | Selector |
+| Element | Locator |
 |---|---|
-| Hidden file input | `document.querySelector('input[type="file"]')` |
-| Gallery button | `aria-label="갤러리"` |
-| Carousel container | `data-testid="photo-carousel"` |
-| Each thumbnail `<img>` | `data-testid="photo-thumb-{id}"` |
-| Delete overlay | `data-testid="delete-overlay-{id}"` |
-| Delete button | `aria-label="사진 삭제"` |
+| Dialog | implicit `role="dialog"` from `<dialog>` |
+| Close button | `aria-label="닫기"` or `data-testid="photo-viewer-close"` |
+| Image | `data-testid="photo-viewer-img"` |
+| Counter | `data-testid="photo-viewer-counter"` |
+
+Unit test matrix:
+
+**`useSwipe.test.ts` (7 cases)**:
+1. Left swipe (dx<-50) → onSwipeLeft
+2. Right swipe (dx>+50) → onSwipeRight
+3. Vertical down (dy>+50) → onSwipeVertical
+4. Vertical up (dy<-50) → onSwipeVertical
+5. Sub-threshold (|dx|=30) → no callback
+6. Axis-lock — x locked first, subsequent y movement ignored
+7. pointercancel resets state cleanly
+
+**`usePhotoViewer.test.ts` (4 cases)**:
+1. Initial closed state
+2. openViewer with matching id sets correct index
+3. openViewer with unknown id falls back to 0
+4. closeViewer flips state
+
+**`PhotoViewer.test.tsx` (7 cases)** — same showModal mock pattern:
+1. open=false, showModal not called
+2. open=true initialIndex=1, image src is photos[1].dataUrl
+3. Counter "2 / 3"
+4. Close button click calls onClose
+5. Swipe left advances index, image src updates
+6. Swipe right at index 0 stays at 0
+7. Vertical swipe calls onClose
+
+**`Editor.test.tsx` extension (2 cases)**:
+8. Tap thumbnail → showModal called
+9. Click close → close mock called
+
+**E2E (optional, 1 case)**: tap thumbnail → viewer visible → click ✕ → editor visible.
 
 ---
 
-## Non-Goals (critical restatements)
-
-- Full-screen photo viewer — REQ-012.
-- Undo toast on delete — deferred (MVP keeps deletion immediate, no undo).
-- Image auto-resize / compression — v2.
-- Multi-file select — single-file only.
-- Camera capture attribute — file picker only.
-- IndexedDB migration — v2.
-- Per-call toast role switching (alert vs status) — single toast instance for MVP.
-
----
-
-## File Budget (lines per file, target)
+## File Budget
 
 | File | Status | Target lines |
 |---|---|---|
-| `src/lib/storage/photoBase64.ts` | NEW | ≤ 60 |
-| `src/lib/hooks/useLongPress.ts` | NEW | ≤ 40 |
-| `src/app/diary/[date]/_components/PhotoCarousel.tsx` | NEW | ≤ 90 |
-| `src/lib/storage/__tests__/photoBase64.test.ts` | NEW | ≤ 80 |
-| `src/lib/hooks/__tests__/useLongPress.test.ts` | NEW | ≤ 70 |
-| `src/app/diary/[date]/__tests__/PhotoCarousel.test.tsx` | NEW | ≤ 80 |
-| `src/lib/hooks/useEditorState.ts` | MODIFY | ~135 (was 110) |
-| `src/lib/hooks/useHorizontalDatePicker.ts` | MODIFY | ~107 (was 103) |
-| `src/app/diary/[date]/_components/Editor.tsx` | MODIFY | ~230 (was 192) |
-| `src/app/diary/[date]/_components/EditorToolbar.tsx` | MODIFY | ~115 (was 108) |
+| `src/lib/hooks/useSwipe.ts` | NEW | ~50 |
+| `src/lib/hooks/usePhotoViewer.ts` | NEW | ~25 |
+| `src/app/diary/[date]/_components/PhotoViewer.tsx` | NEW | ~80 |
+| `src/lib/hooks/__tests__/useSwipe.test.ts` | NEW | ~80 |
+| `src/lib/hooks/__tests__/usePhotoViewer.test.ts` | NEW | ~40 |
+| `src/app/diary/[date]/__tests__/PhotoViewer.test.tsx` | NEW | ~120 |
+| `src/app/diary/[date]/_components/Editor.tsx` | MODIFY | ~255 (was 243; pre-accepted) |
+
+`PhotoCarousel.tsx` MUST NOT be modified (already at 96-line budget limit).
 
 ---
 
 ## Implementation Order
 
-1. `src/lib/storage/photoBase64.ts` — no deps on new code
-2. `src/lib/hooks/useLongPress.ts` — no deps on new code
-3. `src/lib/hooks/useEditorState.ts` — add `photos`, `ADD_PHOTO`, `DELETE_PHOTO`
-4. `src/lib/hooks/useHorizontalDatePicker.ts` — add `photos` to `AutosaveValue`
-5. `src/app/diary/[date]/_components/PhotoCarousel.tsx` — depends on `useLongPress`
-6. `src/app/diary/[date]/_components/EditorToolbar.tsx` — add `galleryDisabled` prop
-7. `src/app/diary/[date]/_components/Editor.tsx` — wire everything together
-8. Tests for all new/modified files
-9. E2E: photo add → save → re-enter → photos present
+1. `useSwipe.ts` + tests
+2. `usePhotoViewer.ts` + tests
+3. `PhotoViewer.tsx` + tests
+4. `Editor.tsx` integration + 2 new test cases
+5. Run full unit suite (must be 265 + new cases)
+6. Optional E2E
 
 ---
 
 ## Backward Compatibility
 
-- `AutosaveValue` gains a required `photos` field. Any call site that constructs this object must now include `photos`. The only call sites are `Editor.tsx` (the `useMemo`) and `useHorizontalDatePicker.ts` (internal — not a public API). No external consumers. No breaking change outside this codebase.
-- `EditorToolbar` gains `galleryDisabled?: boolean` (optional, defaults to `false`). Existing render snapshots may need updating. No behavior change when prop is absent.
-- `useEditorState` gains `photos: Photo[]` in `EditorState`. Existing test fixtures that spread `EditorState` will typecheck correctly because they construct from `useEditorState` return, not manually. `EditorAction` union grows — `default` branch in reducer handles unknown actions safely.
-- `saveFn` no longer hardcodes `photos: []`. This changes the stored value for all saves going forward. Existing localStorage entries have `photos: []` (from `fixtures.ts`) so loaded entries will produce `state.photos = []` correctly via `LOAD_ENTRY`. No migration needed.
+- `onThumbnailTap` is already `(id: string) => void` and stubbed `() => {}` in `Editor.tsx`. Changing to `openViewer` is a no-op from the carousel's perspective.
+- `useDialogControl` API unchanged.
+- `<PhotoCarousel>` unchanged.
+- All existing Editor behavior unchanged.
 
 ---
 
 ## Performance Considerations
 
-- Base64 encoding a 150 KB dataUrl is synchronous inside `FileReader.onload` — but `FileReader.readAsDataURL` itself is async. No main-thread blocking.
-- `Image.onload` for dimension extraction is also async (microtask after dataUrl assignment). Negligible for images already in memory as dataUrl.
-- `autosaveValue` useMemo now depends on `state.photos` (array reference). Every `ADD_PHOTO`/`DELETE_PHOTO` dispatch creates a new array, triggering the memo. This is correct and expected — autosave must fire on photo change. No unnecessary re-renders beyond what the debounce absorbs.
-- Carousel renders only when `photos.length > 0`. Thumbnails are `<img>` elements with `src={dataUrl}` — the browser decodes already-loaded base64; no network request. Performance acceptable for ≤10 images at 150 KB each.
-- Long-press `setTimeout` is a single 500 ms timeout per thumbnail, cleaned up on pointer-up. No memory leak.
+- All pointer-event state uses `useRef` (no re-renders during drag).
+- `photos` prop is the same `state.photos` reference — no extra allocation.
+- Images already in memory as base64 dataUrl strings — switching is a string swap, no fetch.
+- `useEffect` for index reset runs only when `open` or `initialIndex` changes.
+
+---
+
+## Infra Considerations
+
+None. Client-only component. `"use client"` directive needed on `PhotoViewer.tsx`.
 
 ---
 
 ## Risks and Tradeoffs
 
-1. **localStorage quota**: `MAX_PHOTO_DATAURL_BYTES = 150 KB` per photo × 10 = 1.5 MB per entry. Combined with other entries this can approach the 5 MB cap. The try/catch on `saveFn` and the per-photo size limit are the only guards. No automatic resize. Documented risk per PRD §3.9.
-
-2. **`Editor.tsx` at ~230 lines**: Pre-existing over-budget state worsens by ~38 lines. Accepted for this REQ per the pre-decision that inline is preferable to a `GalleryInput.tsx` sub-component. Filed as a flag for the next REQ to extract.
-
-3. **happy-dom mocking complexity**: `globalThis.Image` and `globalThis.FileReader` mock setup is non-trivial but well-understood. The `ImageCtor` injectable parameter in `addPhotoFromFile` keeps the production path clean. Tests must use `// @vitest-environment happy-dom`.
-
-4. **Overlay tap-outside uses document pointerdown**: This listener fires for ALL pointer events globally while overlay is open. The `overlayRef.contains(e.target)` check prevents false dismissals. The listener is removed immediately when `activeId` clears.
-
-5. **REQ-012 coupling**: `onThumbnailTap` prop is a no-op now. When REQ-012 lands, it wires this prop without touching `PhotoCarousel` internals.
+| Risk | Mitigation |
+|---|---|
+| `onDialogClick` omission: swipe ending on black backdrop could call `onClose` if `onDialogClick` is accidentally spread | Design explicitly omits `onDialogClick`. Code review checklist. |
+| `dialog::backdrop` visible during animation | Inner `<div bg-black>` masks backdrop. Harmless. |
+| `PhotoCarousel.tsx` at 96 lines | Zero lines added to this file. |
+| Diagonal swipe dual-fires | Axis-lock at first move exceeding slopPx; test case #6. |
+| `Editor.tsx` grows to ~255 | Accepted for coordinator file. `usePhotoViewer` extraction limits growth. |
+| `setPointerCapture` may throw in happy-dom | Wrap in try/catch in `useSwipe`. |
 
 ---
 
 ## Open Questions
 
-None. All 12 items resolved.
+All resolved by pre-decisions. None remain.
 
 ---
 
