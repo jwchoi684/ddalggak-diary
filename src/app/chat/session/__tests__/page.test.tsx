@@ -71,7 +71,11 @@ beforeEach(() => {
   idCounter = 0;
   mockSearchParamsInstance = new URLSearchParams('personaId=friend');
   mockDiaryEntries = [makeDiaryEntry()];
-  callChatMock.mockResolvedValue({ content: 'AI 응답이에요!' });
+  // callChat now streams: fire onChunk with the full content, then resolve.
+  callChatMock.mockImplementation(({ onChunk }: { onChunk?: (c: string) => void }) => {
+    onChunk?.('AI 응답이에요!');
+    return Promise.resolve({ content: 'AI 응답이에요!' });
+  });
 });
 
 afterEach(() => {
@@ -108,7 +112,10 @@ describe('ActiveChatPage (REQ-017)', () => {
   it('AC3: shows error bubble on API failure and allows retry', async () => {
     callChatMock
       .mockRejectedValueOnce(new Error('네트워크 오류'))
-      .mockResolvedValueOnce({ content: '재시도 성공!' });
+      .mockImplementationOnce(({ onChunk }: { onChunk?: (c: string) => void }) => {
+        onChunk?.('재시도 성공!');
+        return Promise.resolve({ content: '재시도 성공!' });
+      });
 
     render(<ActiveChatPage />);
 

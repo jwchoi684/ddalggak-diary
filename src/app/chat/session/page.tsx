@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { EmptyState } from '@/design-system/EmptyState';
 import { PERSONA_MAP } from '@/design-system/personas';
 import { useDiaries } from '@/lib/storage/useDiaries';
+import { useSettings } from '@/lib/storage/useSettings';
 import type { PersonaId } from '@/lib/storage';
 import { Routes } from '@/lib/navigation';
 import { useChatSession, persistSession } from './_hooks/useChatSession';
@@ -27,6 +28,8 @@ export default function ActiveChatPage() {
   const [personaSheetOpen, setPersonaSheetOpen] = useState(false);
 
   const { entries: diaryEntries, isReady } = useDiaries();
+  const { settings } = useSettings();
+  const userName = typeof settings.userName === 'string' ? settings.userName : undefined;
 
   const startedAtRef = useRef<string>(new Date().toISOString());
   const scrollBottomRef = useRef<HTMLDivElement>(null);
@@ -34,6 +37,7 @@ export default function ActiveChatPage() {
   const { state, conversationId, dispatch, sendMessage, handleRetry } = useChatSession({
     persona: persona!,
     diaryEntries,
+    userName,
     onSessionEnd: () => {},
   });
 
@@ -113,7 +117,7 @@ export default function ActiveChatPage() {
             }}
           />
         ))}
-        {state.isLoading && <LoadingBubble />}
+        {state.isLoading && !state.isStreaming && <LoadingBubble />}
         {state.hasError && <ErrorBubble onRetry={handleRetry} />}
         <div ref={scrollBottomRef} />
       </div>
@@ -124,7 +128,7 @@ export default function ActiveChatPage() {
       )}
       <ChatComposer value={state.input}
         onChange={(v) => dispatch({ type: 'SET_INPUT', payload: v })}
-        onSend={() => sendMessage()} disabled={state.isLoading} />
+        onSend={() => sendMessage()} disabled={state.isLoading || state.isStreaming} />
       <PersonaChangeSheet
         open={personaSheetOpen}
         currentPersonaId={persona.id}

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { LLMMessage } from '@/lib/ai/buildChatMessages';
 
 /**
- * POST /api/chat — serverless proxy for OpenAI Chat Completions.
+ * POST /api/chat — serverless streaming proxy for OpenAI Chat Completions.
  *
  * SECURITY INVARIANTS:
  *   - OPENAI_API_KEY is read from process.env only (server-side).
@@ -10,7 +10,9 @@ import type { LLMMessage } from '@/lib/ai/buildChatMessages';
  *   - If the env var is missing, returns HTTP 500 with a helpful message.
  *
  * Request body: { system: string; messages: LLMMessage[] }
- * Response body: { content: string }
+ * Response (success): text/plain stream — UTF-8 chunks of the assistant message
+ *                     content as it arrives from OpenAI.
+ * Response (error): JSON { error: string } with appropriate status.
  *
  * Model: gpt-4o-mini, temperature: 0.7, max_tokens: 500
  */
@@ -20,17 +22,11 @@ interface RequestBody {
   messages: LLMMessage[];
 }
 
-interface OpenAIChoice {
-  message: {
-    content: string | null;
-  };
+interface OpenAIStreamChunk {
+  choices: Array<{ delta?: { content?: string } }>;
 }
 
-interface OpenAIResponse {
-  choices: OpenAIChoice[];
-}
-
-export async function POST(req: NextRequest): Promise<NextResponse> {
+export async function POST(req: NextRequest): Promise<Response> {
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (!apiKey) {
@@ -54,7 +50,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const { messages } = body;
-
   if (!Array.isArray(messages) || messages.length === 0) {
     return NextResponse.json(
       { error: 'messages 배열이 필요합니다.' },
@@ -75,6 +70,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         messages,
         temperature: 0.7,
         max_tokens: 500,
+        stream: true,
       }),
     });
   } catch (err) {
@@ -85,15 +81,70 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  if (!openAIResponse.ok) {
+  if (!openAIResponse.ok || !openAIResponse.body) {
     return NextResponse.json(
       { error: `OpenAI 오류 (${openAIResponse.status})` },
       { status: 502 },
     );
   }
 
-  const data = (await openAIResponse.json()) as OpenAIResponse;
-  const content = data.choices[0]?.message?.content ?? '';
+  // Pipe OpenAI's SSE stream into a plain-text chunk stream so the client can
+  // read the assistant message as it's generated. We extract `choices[0].delta.content`
+  // from each `data: {...}` line and forward only the content text.
+  const upstream = openAIResponse.body;
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  let sseBuffer = '';
 
-  return NextResponse.json({ content });
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const reader = upstream.getReader();
+      try {
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          sseBuffer += decoder.decode(value, { stream: true });
+
+          // SSE messages are separated by blank lines (\n\n).
+          let sepIdx: number;
+          while ((sepIdx = sseBuffer.indexOf('\n\n')) !== -1) {
+            const rawEvent = sseBuffer.slice(0, sepIdx);
+            sseBuffer = sseBuffer.slice(sepIdx + 2);
+
+            for (const line of rawEvent.split('\n')) {
+              if (!line.startsWith('data:')) continue;
+              const payload = line.slice(5).trim();
+              if (payload === '' || payload === '[DONE]') continue;
+              try {
+                const json = JSON.parse(payload) as OpenAIStreamChunk;
+                const piece = json.choices?.[0]?.delta?.content;
+                if (typeof piece === 'string' && piece.length > 0) {
+                  controller.enqueue(encoder.encode(piece));
+                }
+              } catch {
+                // skip malformed lines silently
+              }
+            }
+          }
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'stream error';
+        controller.error(new Error(message));
+        return;
+      } finally {
+        reader.releaseLock();
+      }
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      'X-Accel-Buffering': 'no',
+    },
+  });
 }

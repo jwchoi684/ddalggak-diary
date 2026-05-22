@@ -1,12 +1,13 @@
 "use client";
 
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { exportBackup, validateBackup, applyBackup } from '@/lib/backup/backup';
 import type { BackupV1 } from '@/lib/backup/backup';
 import { Toast } from '@/design-system/Toast';
 import { useToast } from '@/design-system/useToast';
 import { IconButton } from '@/design-system/IconButton';
+import { useSettings } from '@/lib/storage/useSettings';
 
 // ─── Icon ─────────────────────────────────────────────────────────────────────
 
@@ -95,6 +96,19 @@ export default function SettingsPage() {
 
   const [pendingBackup, setPendingBackup] = useState<BackupV1 | null>(null);
 
+  // User name (REQ-USER-NAME). Local draft state mirrors storage; saved on blur or 저장 tap.
+  const { settings, update: updateSettings } = useSettings();
+  const [userNameDraft, setUserNameDraft] = useState<string>('');
+  useEffect(() => {
+    if (typeof settings.userName === 'string') setUserNameDraft(settings.userName);
+  }, [settings.userName]);
+
+  function handleSaveUserName() {
+    const trimmed = userNameDraft.trim();
+    updateSettings({ userName: trimmed.length > 0 ? trimmed : undefined });
+    toast.show('이름을 저장했어요');
+  }
+
   function handleExport() {
     exportBackup();
     toast.show('백업 파일을 저장했어요');
@@ -140,7 +154,40 @@ export default function SettingsPage() {
         <h1 className="text-xl font-bold text-charcoal ml-2">설정</h1>
       </header>
 
-      <main className="px-4 pt-4 pb-8 space-y-4">
+      <main className="px-4 pt-4 pb-8 space-y-6">
+        <section>
+          <h2 className="text-sm font-medium text-meta mb-3 uppercase tracking-wide">
+            내 정보
+          </h2>
+          <div className="bg-paper rounded-[var(--radius-card-lg)] p-4"
+            style={{ boxShadow: 'var(--shadow-card)' }}>
+            <label htmlFor="user-name-input" className="block text-charcoal text-sm font-medium mb-2">
+              이름
+            </label>
+            <input
+              id="user-name-input"
+              type="text"
+              value={userNameDraft}
+              onChange={(e) => setUserNameDraft(e.target.value)}
+              placeholder="AI가 부를 이름을 입력하세요"
+              maxLength={30}
+              data-testid="user-name-input"
+              className="w-full min-h-[44px] px-3 rounded-lg border border-meta/30 bg-cream text-charcoal text-sm focus:outline-none focus:ring-2 focus:ring-peach"
+            />
+            <button
+              type="button"
+              data-testid="user-name-save"
+              onClick={handleSaveUserName}
+              className="mt-3 min-h-[44px] px-4 rounded-lg bg-peach text-charcoal text-sm font-medium"
+            >
+              저장
+            </button>
+            <p className="text-meta text-xs mt-2 leading-relaxed">
+              비워두면 일반 호칭으로 부릅니다. AI 채팅의 페르소나가 이 이름으로 말을 걸어요.
+            </p>
+          </div>
+        </section>
+
         <section>
           <h2 className="text-sm font-medium text-meta mb-3 uppercase tracking-wide">
             데이터 백업

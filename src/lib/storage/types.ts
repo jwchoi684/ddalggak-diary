@@ -174,5 +174,11 @@ export interface SearchConversation {
  *   }
  */
 export interface Settings {
+  /**
+   * User's preferred display name (REQ-USER-NAME). Optional.
+   * Injected into AI chat system prompt so personas address the user by name.
+   * Trimmed at write time; absent/empty → personas use generic Korean address.
+   */
+  userName?: string;
   [key: string]: unknown;
 }
