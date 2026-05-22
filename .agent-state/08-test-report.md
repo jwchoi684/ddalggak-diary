@@ -1,14 +1,6 @@
-# Test Report — REQ-017
-
-- 373/373 unit tests pass (57 files; +23 new for REQ-017)
-- 8/8 E2E pass — no regression
-- 0 typecheck errors
-- 0 lint errors
-
-Key tests:
-- BCM1 ISOLATION verified
-- RC1 API key only in outgoing header, never in response
-- AC6 0-message session not persisted
-
+# Test Report — REQ-018
+- 378/378 unit pass (58 files)
+- 8/8 E2E pass
+- typecheck/lint clean
 ## Verdict
 PASS

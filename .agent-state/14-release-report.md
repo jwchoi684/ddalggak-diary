@@ -1,8 +1,4 @@
-# Release — REQ-017
-
-All gates PASS. AI chat session + LLM proxy shipped. 373/373 unit + 8/8 E2E.
-
-Build tier: Option B (serverless proxy). OPENAI_API_KEY required at deployment.
-
+# Release — REQ-018
+All gates PASS. /chat/[id] read-only view shipped. 378/378 unit + 8/8 E2E.
 ## Verdict
 PASS

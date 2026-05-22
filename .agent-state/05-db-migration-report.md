@@ -1,6 +1,4 @@
-# DB / Migration — REQ-017
-
-Writes to existing `ddalkkak:conversations:v1` key via `upsertConversation`. No schema change. `SearchConversation` already has fields used.
-
+# DB — REQ-018
+Reads existing conversations; deletes via `removeConversation`. No schema change.
 ## Verdict
-PASS — N/A (no new keys, no schema change)
+PASS — N/A

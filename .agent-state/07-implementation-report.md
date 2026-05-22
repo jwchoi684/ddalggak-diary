@@ -1,97 +1,78 @@
-# Frontend Implementation — REQ-016 + REQ-017
+# Frontend Implementation — REQ-018
 
 ## Summary
 
-REQ-016: Persona picker page (`/chat/new`) — already complete.
-REQ-017: Active AI chat session screen (`/chat/session?personaId=X`) + LLM proxy — implemented in this session.
+REQ-018: Read-only past conversation view (mode D) at `/chat/[id]`.
 
-Build tier: **Option B** (Next.js API route as serverless proxy). `OPENAI_API_KEY` is read exclusively from `process.env` server-side. It never appears in client code or HTTP responses.
+The screen shows a closed conversation's messages without any input element in the DOM. It provides a delete action via `ConfirmDialog` and a "새 대화 시작" bottom banner. The `notFound()` Next.js primitive is called immediately when the conversation id is not found in storage.
 
 ## Files Changed
 
-### New production files (REQ-017)
+### New production files
 
 | File | Lines | Purpose |
 |---|---|---|
-| `src/lib/ai/serializeDiaries.ts` | 30 | Converts DiaryEntry[] → plain-text LLM corpus |
-| `src/lib/ai/buildChatMessages.ts` | 58 | Assembles LLM messages array (CONTEXT ISOLATION enforced here) |
-| `src/lib/ai/extractCitedDates.ts` | 50 | Regex date extraction + diary ID cross-ref |
-| `src/lib/ai/callChat.ts` | 45 | Client fetch wrapper for `/api/chat` |
-| `src/app/api/chat/route.ts` | 99 | Serverless proxy: POST /api/chat → OpenAI gpt-4o-mini |
-| `src/app/chat/session/page.tsx` | 114 | ActiveChatPage — routing/render coordination |
-| `src/app/chat/session/_hooks/useChatSession.ts` | 199 | useReducer state machine + sendMessage/handleRetry + persistSession |
-| `src/app/chat/session/_components/ChatHeader.tsx` | 62 | Header: ‹ back + persona label + 완료 |
-| `src/app/chat/session/_components/MessageBubble.tsx` | 93 | User/assistant bubbles + LoadingBubble + ErrorBubble |
-| `src/app/chat/session/_components/CitedDiaryChip.tsx` | 33 | Tappable pill for cited diary entries |
-| `src/app/chat/session/_components/SuggestedPromptChips.tsx` | 50 | Pre-message example question chips |
-| `src/app/chat/session/_components/ChatComposer.tsx` | 90 | Auto-growing textarea + send button |
+| `src/app/chat/[id]/_components/ReadOnlyChatHeader.tsx` | 81 | Header: ‹ back + persona emoji + "{label} (종료됨)" center + optional 🗑 delete icon button |
+| `src/app/chat/[id]/page.tsx` | 112 | ReadOnlyChatPage — uses `useConversations()` + `useParams()`, renders messages, bottom banner, ConfirmDialog; calls `notFound()` for unknown ids |
 
-### New test files (REQ-017)
+### New test files
 
 | File | Lines | Cases |
 |---|---|---|
-| `src/lib/ai/__tests__/serializeDiaries.test.ts` | 64 | 4 |
-| `src/lib/ai/__tests__/buildChatMessages.test.ts` | 85 | 3 (includes ISOLATION test) |
-| `src/lib/ai/__tests__/extractCitedDates.test.ts` | 61 | 4 |
-| `src/lib/ai/__tests__/callChat.test.ts` | 44 | 2 |
-| `src/app/api/chat/__tests__/route.test.ts` | 105 | 4 |
-| `src/app/chat/session/__tests__/page.test.tsx` | 175 | 6 |
-
-Total new test cases (REQ-017): **23**
-Total new test cases including REQ-016: **27**
+| `src/app/chat/[id]/__tests__/page.test.tsx` | 177 | 5 (RC1–RC5) |
 
 ## Behavior Added
 
-1. GET `/chat/session?personaId=X` renders ActiveChatPage for the chosen persona.
-2. LLM call flow: user message → POST /api/chat → OpenAI gpt-4o-mini → assistant bubble.
-3. Context isolation: `buildChatMessages` receives only `sessionMessages` (this session only). No other session's messages are ever in scope.
-4. Diary serialization format exactly: `[YYYY-MM-DD] 기분: {label}({emoji}) | 본문: {text}`.
-5. Cited diary chips: regex matches YYYY-MM-DD in response → cross-ref diary entries → `citedDiaryIds` → tappable `CitedDiaryChip`.
-6. Session end (back or 완료): calls `persistSession` only when `messages.length > 0` (empty sessions never persisted).
-7. Suggested prompt chips shown when no messages yet; tapping fills composer (does not auto-send).
-8. Loading state: `LoadingBubble` ("답변 작성 중…") during in-flight API call.
-9. Error state: `ErrorBubble` ("응답을 받지 못했어요.") + "다시 시도" button; user message preserved in state.
-10. 0-diary guard: "아직 일기가 없어요…" + "캘린더로 가기" button.
-11. API key security: key never touches client; absent key returns HTTP 500 with helpful Korean message.
-12. Model: `gpt-4o-mini`, temperature 0.7, max_tokens 500. Uses `fetch` directly (no OpenAI SDK).
+1. Route `/chat/[id]` renders a past conversation in read-only mode.
+2. `notFound()` is called synchronously when the conversation id is absent from `useConversations()` after `isReady === true`.
+3. Loading skeleton shown while `isReady === false`.
+4. No `<textarea>` or `<input type="text">` is ever mounted — `ChatComposer` is absent from the component tree entirely.
+5. Header center shows `{persona.emoji}` + `{persona.label} (종료됨)` per REQ-018 spec.
+6. Header right renders a trash `IconButton` (label `대화 삭제`) that opens a `ConfirmDialog` with `destructive` mode.
+7. Confirm → `removeConversation(id)` → `router.push(Routes.chat)` (`/chat`).
+8. Cited diary chips in `MessageBubble` tap → look up entry by id in `useDiaries()` → `router.push(Routes.diary(entry.date))`.
+9. Bottom banner: "종료된 대화입니다. 추가 질문은 새 대화에서 해주세요." + "새 대화 시작" button → `/chat/new`.
+10. Back button (header left) → `router.push(Routes.chat)` (returns to conversation list, REQ-015).
 
 ## Existing Patterns Reused
 
-- `EmptyState` from `@/design-system/EmptyState` — 0-diary state and missing-persona guard.
-- `IconButton` from `@/design-system/IconButton` — back chevron in ChatHeader.
-- `Card` pattern (box-shadow via CSS var) — message bubbles.
-- `useDiaries` hook from `@/lib/storage/useDiaries` — diary entries + SSR-safe hydration.
-- `generateId` + `upsertConversation` from `@/lib/storage`.
-- `PERSONA_MAP` / `MOOD_MAP` from design-system.
-- `Routes` from `@/lib/navigation` — all `router.push` calls use typed helpers.
-- `setupNextNavigation` test helper pattern — same as REQ-016 tests.
-- `@vitest-environment happy-dom` comment on all UI tests.
-- `vi.mock` + top-level `await import` pattern from existing Editor tests.
+- `MessageBubble` from `src/app/chat/session/_components/MessageBubble` — no movement needed; imported via relative path `../session/_components/MessageBubble`.
+- `CitedDiaryChip` — indirectly used via `MessageBubble` (already integrated).
+- `ConfirmDialog` from `@/design-system/ConfirmDialog` — identical pattern to diary editor delete flow.
+- `EmptyState` from `@/design-system/EmptyState` — persona-not-found fallback.
+- `IconButton` from `@/design-system/IconButton` — back chevron and trash icon.
+- `useConversations` from `@/lib/storage/useConversations` — same hook used by `ChatPage`.
+- `useDiaries` from `@/lib/storage/useDiaries` — same hook used by `ActiveChatPage`.
+- `PERSONA_MAP` from `@/design-system/personas` — O(1) persona lookup.
+- `removeConversation` from `@/lib/storage` — existing storage primitive.
+- `Routes` from `@/lib/navigation` — typed route builder for `Routes.chat`, `Routes.diary(date)`.
+- Test pattern: `setupNextNavigation` + `vi.mock` + top-level `await import` — identical to REQ-016/017 tests.
+- `@vitest-environment happy-dom` — consistent with all other UI tests.
 
 ## Tests Added / Updated
 
-23 new test cases across 6 new test files (REQ-017).
-All 373 total tests pass (previous 350 + 23 new).
+5 new test cases in `src/app/chat/[id]/__tests__/page.test.tsx`:
 
-Key isolation test: `BCM1` in `buildChatMessages.test.ts` verifies that the messages array is exactly `[system, ...sessionMessages]` with no extra entries.
-Key security test: `RC1` in `route.test.ts` verifies that the API key appears in the outgoing `Authorization` header and never in the response body.
-Key invariant test: `AC6` in `page.test.tsx` verifies that `upsertConversation` is NOT called when 0 messages are sent.
+- **RC1** — renders user and assistant messages from seeded conversation.
+- **RC2** — `document.querySelector('textarea')` and `document.querySelector('input[type="text"]')` both return `null`.
+- **RC3** — header contains `"친구 (종료됨)"` (friend persona example).
+- **RC4** — delete button click → `ConfirmDialog` → confirm click → `removeConversation('conv-readonly-1')` called, `router.push('/chat')` called.
+- **RC5** — unknown id with `isReady=true` → `notFound()` throws `'NEXT_NOT_FOUND'`.
 
 ## Commands Run
 
 ```
 npx tsc --noEmit        → 0 errors
-npm run lint            → 0 errors / 0 warnings
-npx vitest run          → 373/373 passed (57 test files)
-npm run test:e2e        → 8/8 passed
+npm run lint            → 0 warnings / 0 errors
+npx vitest run          → 378/378 passed (58 test files)
 ```
 
 ## Risks / Follow-ups
 
-1. `page.tsx` is 114 lines (4 over guideline) due to two full-page conditional render branches (persona-not-found and 0-diary). These share no DOM structure so cannot be co-located under a single `return`; the natural boundary justification applies per CLAUDE.md.
-2. `useChatSession.ts` is 199 lines — it intentionally bundles the state reducer, hook, and `persistSession` utility since they are tightly coupled to the same session lifecycle. Splitting them further would create circular or awkward dependency graphs.
-3. No E2E test covers the full chat flow (chat → persona select → message → AI response → cited chip → diary) because it requires a live OpenAI key. Recommend adding a mocked E2E spec in a follow-up.
-4. `suggestedQuestions` field is not yet on the `Persona` type; fallback prompts are used for all 14 personas in MVP. Adding per-persona suggestions is a P2 enhancement.
+1. `page.tsx` is 112 lines — slightly above the 100-line guideline. The file has two distinct conditional render branches (loading state and persona-not-found fallback) plus the main page body; splitting would create unnecessary complexity for a thin page. The guideline allows exception when splitting is unnatural.
+2. `MessageBubble` and `CitedDiaryChip` remain in `session/_components/`. If a third caller emerges these should move to `chat/_components/` shared location. For two callers (session page + [id] page), relative import is acceptable per the prompt instruction.
+3. Initial scroll position is at top by default (no `scrollIntoView` call), matching the spec requirement ("최상단 — 대화 회상용").
+4. No E2E test covers the list → read-only → chip → diary → back → read-only flow. Recommended as a Playwright spec in a follow-up.
 
 ## Verdict
 PASS

@@ -36,7 +36,7 @@ PRD §8.3의 P2 항목(임베딩 RAG / PWA / 클라우드 동기화 / 알림 / s
 | REQ-015 | AI 채팅 — 대화 리스트 (모드 A) | DONE | REQ-002, REQ-004, REQ-005, REQ-006 | Low |
 | REQ-016 | AI 채팅 — 페르소나 선택 모달 (모드 B) | DONE | REQ-004, REQ-005, REQ-015 | Low |
 | REQ-017 | AI 채팅 — 활성 세션 (모드 C) + LLM 호출 플로우 | DONE | REQ-002, REQ-004, REQ-009, REQ-015, REQ-016 | High |
-| REQ-018 | AI 채팅 — 과거 대화 읽기 (모드 D) | TODO | REQ-015, REQ-017 | Low |
+| REQ-018 | AI 채팅 — 과거 대화 읽기 (모드 D) | DONE | REQ-015, REQ-017 | Low |
 | REQ-019 | JSON 백업 — 내보내기 / 가져오기 | TODO | REQ-002 | Medium |
 
 ## Recommended Execution Order
