@@ -1,8 +1,9 @@
 "use client";
 
 import React from 'react';
-import type { MoodId } from '@/lib/storage';
+import type { MoodId, DiaryEntry } from '@/lib/storage';
 import { MoodIcon } from '@/design-system/MoodIcon';
+import { HorizontalDatePicker } from './HorizontalDatePicker';
 
 const DATE_FMT = new Intl.DateTimeFormat('ko-KR', {
   year: 'numeric',
@@ -28,6 +29,12 @@ interface EditorBodyProps {
   onMoodTap: () => void;
   onTextChange: (text: string) => void;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  // REQ-010: horizontal date strip props
+  stripOpen: boolean;
+  onDateLabelTap: () => void;
+  dateRange: string[];
+  entryMap: Map<string, DiaryEntry>;
+  onDateSelect: (date: string) => void;
 }
 
 export function EditorBody({
@@ -38,6 +45,11 @@ export function EditorBody({
   onMoodTap,
   onTextChange,
   textareaRef,
+  stripOpen,
+  onDateLabelTap,
+  dateRange,
+  entryMap,
+  onDateSelect,
 }: EditorBodyProps) {
   const alignClass = textAlign === 'center' ? 'text-center' : 'text-left';
 
@@ -64,10 +76,36 @@ export function EditorBody({
         </button>
       </div>
 
-      {/* Date label (▾ is inert — REQ-010 hooks in here) */}
-      <p className="text-sm text-meta text-center mb-4">
-        {formatDate(date)} ▾
-      </p>
+      {/* Date label — tappable, opens horizontal date strip (REQ-010) */}
+      <button
+        type="button"
+        aria-expanded={stripOpen}
+        aria-haspopup="listbox"
+        aria-label="날짜 선택"
+        onClick={onDateLabelTap}
+        className="text-sm text-meta text-center mb-2 w-full flex items-center justify-center gap-1"
+      >
+        <span>{formatDate(date)}</span>
+        <span
+          aria-hidden="true"
+          style={{
+            display: 'inline-block',
+            transform: stripOpen ? 'rotate(180deg)' : 'none',
+            transition: 'transform 150ms',
+          }}
+        >
+          ▾
+        </span>
+      </button>
+
+      {stripOpen && (
+        <HorizontalDatePicker
+          currentDate={date}
+          dateRange={dateRange}
+          entryMap={entryMap}
+          onDateSelect={onDateSelect}
+        />
+      )}
 
       {/* Diary body textarea */}
       <textarea

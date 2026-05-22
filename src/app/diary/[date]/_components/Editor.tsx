@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useMemo, useCallback, useLayoutEffect } from 'react';
+import React, { useState, useRef, useMemo, useCallback, useLayoutEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { upsertDiary, removeDiary, generateId } from '@/lib/storage';
 import { Routes } from '@/lib/navigation';
@@ -10,6 +10,7 @@ import { Toast } from '@/design-system/Toast';
 import { useToast } from '@/design-system/useToast';
 import { useEditorState } from '@/lib/hooks/useEditorState';
 import { useAutosave } from '@/lib/hooks/useAutosave';
+import { useHorizontalDatePicker } from '@/lib/hooks/useHorizontalDatePicker';
 import { EditorHeader } from './EditorHeader';
 import { EditorBody } from './EditorBody';
 import { EditorToolbar } from './EditorToolbar';
@@ -22,7 +23,12 @@ interface EditorProps {
 export function Editor({ date }: EditorProps) {
   const router = useRouter();
   const toast = useToast();
-  const [state, dispatch] = useEditorState(date);
+
+  // REQ-010: currentDate is mutable; initialised from the URL route param.
+  // URL stays at original `date` (stale by design — no router.replace).
+  const [currentDate, setCurrentDate] = useState(date);
+
+  const [state, dispatch] = useEditorState(currentDate);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const pendingCursorPos = useRef<number | null>(null);
 
@@ -37,21 +43,31 @@ export function Editor({ date }: EditorProps) {
     [state.mood, state.text, state.textAlign],
   );
 
+  // CRITICAL (invariant 4): dep array uses `currentDate`, not the stale URL `date` prop.
   const saveFn = useCallback(
     (v: typeof autosaveValue) => {
       if (!v.mood) return;
       const id = state.persistedId ?? generateId();
       const createdAt = state.persistedCreatedAt ?? new Date().toISOString();
       upsertDiary({
-        id, date, mood: v.mood, text: v.text, textAlign: v.textAlign,
+        id, date: currentDate, mood: v.mood, text: v.text, textAlign: v.textAlign,
         photos: [], createdAt, updatedAt: new Date().toISOString(),
       });
       dispatch({ type: 'MARK_SAVED', id, createdAt });
     },
-    [state.persistedId, state.persistedCreatedAt, date, dispatch],
+    [state.persistedId, state.persistedCreatedAt, currentDate, dispatch],
   );
 
   useAutosave(autosaveValue, 1000, saveFn);
+
+  // REQ-010: horizontal date strip
+  const strip = useHorizontalDatePicker({
+    currentDate,
+    saveFn,
+    autosaveValue,
+    onDateChange: setCurrentDate,
+    onSaveError: (msg) => toast.show(msg),
+  });
 
   // Restore cursor position after time-insert dispatch
   useLayoutEffect(() => {
@@ -110,13 +126,18 @@ export function Editor({ date }: EditorProps) {
       />
 
       <EditorBody
-        date={date}
+        date={currentDate}
         mood={state.mood}
         text={state.text}
         textAlign={state.textAlign}
         onMoodTap={() => dispatch({ type: 'OPEN_MOOD_SHEET' })}
         onTextChange={(text) => dispatch({ type: 'SET_TEXT', text })}
         textareaRef={textareaRef}
+        stripOpen={strip.isOpen}
+        onDateLabelTap={strip.toggle}
+        dateRange={strip.dateRange}
+        entryMap={strip.entryMap}
+        onDateSelect={strip.handleDateSelect}
       />
 
       <Toast message={toast.message} open={toast.open} onClose={toast.hide} />
@@ -140,12 +161,12 @@ export function Editor({ date }: EditorProps) {
 
       <MoodPickerSheet
         open={state.moodSheetMode !== 'closed'}
-        date={date}
+        date={currentDate}
         mode={state.moodSheetMode === 'initial' ? 'initial' : 'change'}
         selectedMoodId={state.mood}
         onSelect={(moodId) => dispatch({ type: 'SET_MOOD', mood: moodId })}
         onClose={() => dispatch({ type: 'CLOSE_MOOD_SHEET' })}
-        onCancelInitial={() => router.back()}
+        onCancelInitial={undefined}
       />
 
       <ConfirmDialog

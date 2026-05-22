@@ -1,443 +1,391 @@
-# Technical Design — REQ-009
+# Technical Design — REQ-010: 에디터 내 가로 캘린더 인라인 드롭다운
 
-## Summary
+## Overview
 
-REQ-009 delivers the diary editor: a single "use client" React component tree that handles both new-entry creation and existing-entry editing under the same route `src/app/diary/[date]/`. The route stub (already a Next.js 15 async server component with date validation) is kept as-is; it gains one line: rendering `<Editor date={date} />`. All editor logic lives in route-scoped `_components/` files and two shared hooks. No new third-party dependencies. No backend changes. No schema changes (`DiaryEntry.textAlign` is already present as a required field).
-
-Six open unknowns from the architecture report are resolved in this design (detailed in Implementation Strategy below).
+The feature adds a collapsible horizontal date strip inside the diary editor. Tapping the date label (now a `<button>`) expands a scrollable row of day cells beneath it. Each cell shows either a `MoodIcon` (size 24) when a diary entry exists for that date, or a plain day number when it does not. The currently loaded date is highlighted with a peach pill. Tapping a different cell saves the current entry synchronously, then shifts `currentDate` state, which automatically triggers `useEditorState`'s existing `useEffect([date])` reload. No URL change, no router push, no new storage keys.
 
 ---
 
-## Implementation Strategy
+## Component / File Map
 
-### Decision log — closing the six architecture unknowns
+| File | Status | Target Lines | Responsibility |
+|---|---|---|---|
+| `src/lib/hooks/useHorizontalDatePicker.ts` | NEW | ~70 | Toggle open/close, build ±30-day date range, build entryMap from `readDiaries()`, expose `handleDateSelect` |
+| `src/app/diary/[date]/_components/HorizontalDatePicker.tsx` | NEW | ~60 | Scroll container, scroll-to-selected on open, renders `DateCell` array |
+| `src/app/diary/[date]/_components/DateCell.tsx` | NEW | ~55 | Single cell: MoodIcon or number, selected pill, today dot |
+| `src/app/diary/[date]/_components/Editor.tsx` | MODIFY | ~185 | Add `currentDate` state, wire `useHorizontalDatePicker`, pass new props to `EditorBody` |
+| `src/app/diary/[date]/_components/EditorBody.tsx` | MODIFY | ~95 | Convert date `<p>` to `<button>`, render strip inline when `stripOpen` |
+| `src/design-system/MoodIcon.tsx` | NO CHANGE | — | Used as-is with `size={24}` |
+| `src/lib/hooks/useEditorState.ts` | NO CHANGE | — | `useEffect([date])` already handles date changes |
+| `src/lib/storage/diaries.ts` | NO CHANGE | — | `readDiaries()` and `upsertDiary()` reused directly |
 
-**Unknown 1 — `ConfirmDialog` missing `title` prop.**
-Decision: option (a) — embed all copy in `message` as a single string. Do not add a `title?` prop to `ConfirmDialog` and do not create a new component. The design-system surface stays unchanged.
+---
 
-Concrete copy:
-- Unsaved-changes guard: `message="저장되지 않은 변경사항이 있어요. 저장하고 나가시겠어요?"` / `confirmLabel="저장하고 나가기"` / `cancelLabel="계속 작성"`
-- Delete confirm: `message="일기를 삭제할까요? 삭제한 일기는 복구할 수 없어요."` / `confirmLabel="삭제"` / `cancelLabel="취소"` / `destructive={true}`
+## Data Flow Diagram
 
-**Unknown 2 — Hydration flash before storage read.**
-Decision: render the editor shell unconditionally. The textarea starts empty. Once `readDiaries()` returns inside `useEffect`, a `LOAD_ENTRY` action populates all fields. The `isLoaded` flag is `false` until that action fires. `isDirty` is defined as `false` when `!isLoaded` — this prevents the back-guard from triggering before load completes. For a new entry the empty state IS the correct initial state, so there is no visible flash. For an existing entry the textarea is blank for one paint frame; this is acceptable for MVP.
-
-**Unknown 3 + 6 — Textarea keyboard avoidance / toolbar sticky positioning.**
-Decision: CSS-only, no `visualViewport` JS. Layout is a full-height flex column:
 ```
-<main class="flex flex-col h-[100dvh] bg-cream">
-  <EditorHeader />                   /* fixed height */
-  <EditorBody class="flex-1 overflow-y-auto" />
-  <EditorToolbar class="sticky bottom-0 bg-paper border-t pb-[env(safe-area-inset-bottom,0px)]" />
-</main>
+[User taps date label ▾]
+  → stripOpen: false → true
+  → useHorizontalDatePicker: build dateRange (±30d) + entryMap (readDiaries())
+  → HorizontalDatePicker mounts
+  → useEffect: scrollRef.current.querySelector('[aria-selected=true]').scrollIntoView({ inline: 'center', block: 'nearest' })
+
+[User taps a different DateCell]
+  → handleDateSelect(newDate) called
+  → try { saveFn(autosaveValue) }          ← synchronous localStorage write
+      success:
+        setCurrentDate(newDate)            ← triggers useEditorState useEffect([date])
+        strip.close()                      ← stripOpen: true → false
+        HorizontalDatePicker unmounts      ← {stripOpen && <...>} gate
+        useEditorState useEffect fires:
+          readDiaries().find(e.date === newDate)
+          dispatch({ type: 'LOAD_ENTRY', entry })
+            if entry → load mood/text/textAlign
+            if no entry → isLoaded:true, moodSheetMode:'initial'
+        MoodPickerSheet opens (moodSheetMode === 'initial')
+      failure (QuotaExceededError):
+        toast.show('저장에 실패했어요. 다시 시도해주세요.')
+        keep stripOpen, keep currentDate unchanged
+
+[Pending debounce timer fires later]
+  → saveFn(autosaveValue) called again
+  → upsertDiary with same persistedId → idempotent, no side-effect
 ```
-`100dvh` shrinks with the keyboard on modern iOS/Chrome. `sticky bottom-0` keeps the toolbar at the bottom of the scroll container. `env(safe-area-inset-bottom,0px)` covers iPhone notch padding.
 
-**Unknown 4 — E2E localStorage seeding.**
-Decision: `page.addInitScript(fn)` runs in the page context before any page script. Define `e2e/_helpers/seedDiaries.ts` exporting a function returning the serialized fixture data. The E2E test calls `await page.addInitScript(seedFn)` before `await page.goto(url)`.
+---
 
-**Unknown 5 — `MoodPickerSheet` Escape / `useDialogControl` NB-1.**
-Decision: fix `useDialogControl` as part of this REQ. Add a `cancel` event listener that calls `onClose` when the user presses Escape. ~8 lines of change; benefits BottomSheet, ConfirmDialog, and MoodPickerSheet uniformly.
+## Exact Function Signatures
 
-Updated `useDialogControl` effect (capture latest `onClose` via ref to keep effect deps minimal):
 ```ts
-const onCloseRef = useRef(onClose);
-useEffect(() => { onCloseRef.current = onClose; });
+// src/lib/hooks/useHorizontalDatePicker.ts
 
-useEffect(() => {
-  const el = ref.current;
-  if (!el) return;
-  if (open) el.showModal();
-  else el.close();
-  const handleCancel = (e: Event) => { e.preventDefault(); onCloseRef.current(); };
-  el.addEventListener('cancel', handleCancel);
-  return () => el.removeEventListener('cancel', handleCancel);
-}, [open]);
+export interface UseHorizontalDatePickerOptions {
+  currentDate: string;                   // "YYYY-MM-DD"
+  saveFn: (v: AutosaveValue) => void;    // same saveFn from Editor.tsx
+  autosaveValue: AutosaveValue;          // { mood, text, textAlign }
+  onDateChange: (newDate: string) => void; // calls setCurrentDate in Editor
+  onSaveError: (msg: string) => void;    // calls toast.show(...)
+}
+
+export interface UseHorizontalDatePickerReturn {
+  isOpen: boolean;
+  toggle: () => void;
+  close: () => void;
+  dateRange: string[];                   // ISO strings, 61 items: -30d to +30d
+  entryMap: Map<string, DiaryEntry>;     // date string → entry
+  handleDateSelect: (newDate: string) => void;
+}
+
+export function useHorizontalDatePicker(
+  opts: UseHorizontalDatePickerOptions
+): UseHorizontalDatePickerReturn;
 ```
 
-`e.preventDefault()` keeps the controlled `open` prop in charge of the animation.
+```ts
+// src/app/diary/[date]/_components/HorizontalDatePicker.tsx
 
-### `isDirty` derivation — snapshot diff
+export interface HorizontalDatePickerProps {
+  currentDate: string;
+  dateRange: string[];
+  entryMap: Map<string, DiaryEntry>;
+  onDateSelect: (date: string) => void;
+}
 
+export function HorizontalDatePicker(props: HorizontalDatePickerProps): JSX.Element;
 ```
-isDirty = isLoaded && (
-  state.mood !== state.snapshot.mood ||
-  state.text !== state.snapshot.text ||
-  state.textAlign !== state.snapshot.textAlign
-)
+
+```ts
+// src/app/diary/[date]/_components/DateCell.tsx
+
+export interface DateCellProps {
+  date: string;                          // "YYYY-MM-DD"
+  entry: DiaryEntry | undefined;
+  isSelected: boolean;
+  isToday: boolean;
+  onSelect: (date: string) => void;
+}
+
+export function DateCell(props: DateCellProps): JSX.Element;
 ```
-`snapshot` is set by `LOAD_ENTRY` and reset by `MARK_SAVED` (autosave or explicit).
 
-### Autosave save function
-
-`saveFn` (in `Editor.tsx`):
-1. Returns early if `state.mood === undefined` (mood is required for a valid `DiaryEntry`).
-2. Uses `state.persistedId ?? generateId()` as id.
-3. `createdAt = state.persistedCreatedAt ?? new Date().toISOString()`.
-4. Calls `upsertDiary({ id, date, mood, text, textAlign, photos: [], createdAt, updatedAt: new Date().toISOString() })`.
-5. Dispatches `MARK_SAVED({ id, createdAt })`.
+```ts
+// AutosaveValue (already in Editor.tsx, imported via type)
+type AutosaveValue = { mood: MoodId | undefined; text: string; textAlign: 'left' | 'center' };
+```
 
 ---
 
-## Frontend Design
-
-### Component tree
+## Editor.tsx Integration Delta
 
 ```
-src/app/diary/[date]/page.tsx            (server, unchanged + <Editor />)
-src/app/diary/[date]/_components/
-  Editor.tsx                             (client container)
-  EditorHeader.tsx                       (client)
-  EditorBody.tsx                         (client)
-  EditorToolbar.tsx                      (client)
-  EditorMoreMenu.tsx                     (client)
+// New state (after existing hooks)
+const [currentDate, setCurrentDate] = useState(date);
+  // Note: saveFn captures `date` in its useCallback deps.
+  // After setCurrentDate, saveFn still refers to the OLD date
+  // for any stale debounce fire — which is correct (saves old date's content).
+  // The next render produces a new saveFn bound to currentDate.
+
+// Replace: useEditorState(date) → useEditorState(currentDate)
+// Replace: EditorBody date={date} → date={currentDate}
+// Replace: MoodPickerSheet date={date} → date={currentDate}
+// Replace: saveFn useCallback dep [... date ...] → [... currentDate ...]
+
+const strip = useHorizontalDatePicker({
+  currentDate,
+  saveFn,
+  autosaveValue,
+  onDateChange: setCurrentDate,
+  onSaveError: (msg) => toast.show(msg),
+});
+
+// Pass to EditorBody:
+//   stripOpen={strip.isOpen}
+//   onDateLabelTap={strip.toggle}
+//   dateRange={strip.dateRange}
+//   entryMap={strip.entryMap}
+//   onDateSelect={strip.handleDateSelect}
+//   (strip props passed only when needed — EditorBody renders HorizontalDatePicker internally)
 ```
 
-No `UnsavedChangesDialog.tsx` — the two `ConfirmDialog` instances render inline in `Editor.tsx`.
+Key change: `saveFn`'s `useCallback` dependency array must reference `currentDate` not `date`:
 
-### `page.tsx`
+```ts
+const saveFn = useCallback(
+  (v: typeof autosaveValue) => {
+    if (!v.mood) return;
+    const id = state.persistedId ?? generateId();
+    const createdAt = state.persistedCreatedAt ?? new Date().toISOString();
+    upsertDiary({ id, date: currentDate, mood: v.mood, text: v.text, textAlign: v.textAlign,
+      photos: [], createdAt, updatedAt: new Date().toISOString() });
+    dispatch({ type: 'MARK_SAVED', id, createdAt });
+  },
+  [state.persistedId, state.persistedCreatedAt, currentDate, dispatch],
+);
+```
+
+`handleSaveAndBack` and `handleExplicitSave` need no changes — they call `saveFn(autosaveValue)` which now uses `currentDate`.
+
+---
+
+## EditorBody.tsx Integration Delta
+
+New props added to `EditorBodyProps`:
+
+```ts
+stripOpen: boolean;
+onDateLabelTap: () => void;
+dateRange: string[];
+entryMap: Map<string, DiaryEntry>;
+onDateSelect: (date: string) => void;
+```
+
+Replace the `<p>` at line 68:
 
 ```tsx
-import { Editor } from './_components/Editor';
-// ...
-const { date } = await params;
-if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) notFound();
-return <Editor date={date} />;
+{/* Date label — tappable, opens horizontal date strip */}
+<button
+  type="button"
+  aria-expanded={stripOpen}
+  aria-haspopup="listbox"
+  aria-label="날짜 선택"
+  onClick={onDateLabelTap}
+  className="text-sm text-meta text-center mb-2 w-full flex items-center justify-center gap-1"
+>
+  <span>{formatDate(date)}</span>
+  <span aria-hidden="true" style={{ display: 'inline-block', transform: stripOpen ? 'rotate(180deg)' : 'none', transition: 'transform 150ms' }}>▾</span>
+</button>
+
+{stripOpen && (
+  <HorizontalDatePicker
+    currentDate={date}
+    dateRange={dateRange}
+    entryMap={entryMap}
+    onDateSelect={onDateSelect}
+  />
+)}
 ```
 
-Outer `<main>` wrapper removed — `Editor` owns its own layout root.
-
-### `Editor.tsx` (container, ~90 lines)
-
-Imports: `useEditorState`, `useAutosave`, `useRouter` (from `next/navigation`), `useToast`, `readDiaries`, `upsertDiary`, `removeDiary`, `generateId`, `Routes`, `MoodPickerSheet`, sub-components, `ConfirmDialog`, `Toast`.
-
-Responsibilities:
-- `const [state, dispatch] = useEditorState(date)`.
-- `const isDirty = state.isLoaded && (state.mood !== state.snapshot.mood || state.text !== state.snapshot.text || state.textAlign !== state.snapshot.textAlign);`
-- `autosaveValue = useMemo(() => ({ mood, text, textAlign }), [state.mood, state.text, state.textAlign])`
-- `saveFn = useCallback(...)` depending on `[state.persistedId, state.persistedCreatedAt, date, dispatch]`
-- `useAutosave(autosaveValue, 1000, saveFn)`.
-- `handleBack`: dirty → `dispatch SET_UNSAVED_DIALOG(true)`; else `router.back()`.
-- `handleSaveAndBack`: call `saveFn` then `router.back()`.
-- `handleDelete`: `removeDiary(state.persistedId!)` then `router.back()`.
-- `handleExplicitSave`: call `saveFn`, then `toast.show('일기를 저장했어요!')`.
-- `<MoodPickerSheet open={state.moodSheetMode !== 'closed'} mode={state.moodSheetMode === 'initial' ? 'initial' : 'change'} ...>` with `onCancelInitial={() => router.back()}`.
-- Two inline `<ConfirmDialog>` instances for unsaved-changes and delete.
-- `<Toast {...toastState}>` rendered above the toolbar in the DOM tree.
-
-### `useEditorState.ts`
-
-`useEditorState(date: string): [EditorState, Dispatch<EditorAction>]`.
-
-State:
-```ts
-interface EditorState {
-  mood: MoodId | undefined;
-  text: string;
-  textAlign: 'left' | 'center';
-  persistedId: string | undefined;
-  persistedCreatedAt: string | undefined;
-  snapshot: { mood: MoodId | undefined; text: string; textAlign: 'left' | 'center' };
-  isLoaded: boolean;
-  moodSheetMode: 'initial' | 'change' | 'closed';
-  moreMenuOpen: boolean;
-  unsavedDialogOpen: boolean;
-  deleteDialogOpen: boolean;
-}
-```
-
-Initial: all empty/false; `moodSheetMode: 'closed'`.
-
-Actions:
-```ts
-type EditorAction =
-  | { type: 'LOAD_ENTRY'; entry: DiaryEntry | undefined }
-  | { type: 'SET_MOOD'; mood: MoodId }
-  | { type: 'SET_TEXT'; text: string }
-  | { type: 'TOGGLE_ALIGN' }
-  | { type: 'INSERT_TIME'; nextText: string }
-  | { type: 'MARK_SAVED'; id: string; createdAt: string }
-  | { type: 'OPEN_MOOD_SHEET' }
-  | { type: 'CLOSE_MOOD_SHEET' }
-  | { type: 'SET_MORE_MENU'; open: boolean }
-  | { type: 'SET_UNSAVED_DIALOG'; open: boolean }
-  | { type: 'SET_DELETE_DIALOG'; open: boolean };
-```
-
-Reducer key cases:
-- `LOAD_ENTRY` with entry: populate fields, snapshot=current, isLoaded=true, moodSheetMode='closed'.
-- `LOAD_ENTRY` without entry: snapshot=empty, isLoaded=true, moodSheetMode='initial'.
-- `MARK_SAVED`: snapshot=current, persistedId/persistedCreatedAt set.
-- `OPEN_MOOD_SHEET`: moodSheetMode='change'.
-- `CLOSE_MOOD_SHEET`: moodSheetMode='closed'.
-
-`useEffect` inside the hook: on mount (and date change), `dispatch LOAD_ENTRY(readDiaries().find(e => e.date === date))`.
-
-### `useAutosave.ts`
-
-```ts
-function useAutosave<T>(value: T, delayMs: number, saveFn: (v: T) => void): void {
-  useEffect(() => {
-    const t = setTimeout(() => saveFn(value), delayMs);
-    return () => clearTimeout(t);
-  }, [value, delayMs, saveFn]);
-}
-```
-
-Caller wraps `saveFn` in `useCallback`. Caller memoizes `value` if it is an object.
-
-### `EditorHeader.tsx` (~50 lines)
-
-Props: `{ onBack: () => void; onMoreMenu: () => void }`. Two `IconButton`s (back chevron left, ⋯ right) in a flex row.
-
-### `EditorBody.tsx` (~80 lines)
-
-Props:
-```ts
-{
-  date: string;
-  mood: MoodId | undefined;
-  text: string;
-  textAlign: 'left' | 'center';
-  onMoodTap: () => void;
-  onTextChange: (text: string) => void;
-  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
-}
-```
-
-Mood area: `MoodIcon size={72}` inside a tappable button when mood set; placeholder dashed circle + "기분을 선택해요" otherwise. 44px touch target.
-
-Date label: `Intl.DateTimeFormat('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' }).format(new Date(date + 'T00:00:00'))` + static ` ▾`. Inert affordance.
-
-Textarea: `<textarea ref={textareaRef} value={text} onChange={e => onTextChange(e.target.value)} placeholder="오늘 어떤 하루였나요?" maxLength={5000} className="w-full flex-1 resize-none bg-transparent outline-none text-charcoal text-base placeholder:text-meta [textAlign-class]" />`.
-
-### `EditorToolbar.tsx` (~70 lines)
-
-Props:
-```ts
-{
-  isDirty: boolean;
-  textAlign: 'left' | 'center';
-  onAlignToggle: () => void;
-  onTimeInsert: () => void;
-  onGalleryTap: () => void;
-  onExplicitSave: () => void;
-}
-```
-
-`sticky bottom-0 bg-paper border-t flex items-center px-4 py-3 pb-[env(safe-area-inset-bottom,0px)] gap-4`.
-
-Icons in order: 🖼 gallery (noop), ☰ align toggle, 🕐 time, then conditional ✓ save (rendered only when `isDirty`).
-
-### `EditorMoreMenu.tsx` (~50 lines)
-
-Props:
-```ts
-{
-  open: boolean;
-  hasSavedEntry: boolean;
-  onClose: () => void;
-  onNavigateList: () => void;
-  onDeleteTap: () => void;
-}
-```
-
-`<BottomSheet open onClose>` body contains:
-- Button "📋 일기 리스트 보기" → `onNavigateList`
-- Button "🗑 일기 삭제" (only when `hasSavedEntry`) → `onDeleteTap`. Use `text-danger`.
-
-### Time insert flow
-
-In `Editor.tsx`:
-1. Holds `textareaRef = useRef<HTMLTextAreaElement>(null)`.
-2. `pendingCursorPos = useRef<number | null>(null)`.
-3. `handleTimeInsert()`:
-   ```ts
-   const el = textareaRef.current;
-   if (!el) return;
-   const start = el.selectionStart;
-   const end = el.selectionEnd;
-   const now = new Date();
-   const hh = String(now.getHours()).padStart(2, '0');
-   const mm = String(now.getMinutes()).padStart(2, '0');
-   const timeStr = `${hh}:${mm} `;
-   const newText = state.text.slice(0, start) + timeStr + state.text.slice(end);
-   pendingCursorPos.current = start + timeStr.length;
-   dispatch({ type: 'INSERT_TIME', nextText: newText });
-   ```
-4. `useLayoutEffect` after dispatch:
-   ```ts
-   useLayoutEffect(() => {
-     if (pendingCursorPos.current !== null && textareaRef.current) {
-       const p = pendingCursorPos.current;
-       textareaRef.current.focus();
-       textareaRef.current.setSelectionRange(p, p);
-       pendingCursorPos.current = null;
-     }
-   });
-   ```
-
-### `useDialogControl.ts` change
-
-See "Unknown 5" decision above. Add `onCloseRef` capture + `cancel` event listener inside the existing `useEffect`.
+The strip is inserted between the date button and the textarea. It pushes content down (reflow), not overlay. The `mb-4` on the old `<p>` moves to the textarea's top margin or is retained on the strip container.
 
 ---
 
-## Backend Design
+## Visual Spec
 
-None.
+### Strip container (`HorizontalDatePicker`)
+- `display: flex`, `overflow-x: auto`, `scroll-snap-type: x mandatory`, `-webkit-overflow-scrolling: touch`
+- No scrollbar visible: `scrollbar-width: none`, `::-webkit-scrollbar { display: none }`
+- Height: `72px` fixed (single row)
+- Background: `bg-cream` (matches editor background — no card shadow needed; strip is inline, not modal)
+- Slide-down CSS transition on mount: `animate-[slideDown_150ms_ease-out]` — define `@keyframes slideDown { from { opacity:0; transform:translateY(-4px) } to { opacity:1; transform:translateY(0) } }` in `globals.css`
+- Padding: `px-2`
+
+### Date cell (`DateCell`)
+- Width: `44px` (meets minimum touch target)
+- Height: `64px` (within 72px container, centered)
+- `scroll-snap-align: center`
+- Gap between cells: `4px`
+- Layout: `flex flex-col items-center justify-center gap-1`
+
+### Cell states
+
+| State | Visual |
+|---|---|
+| No entry, not selected, not today | Day number (e.g. "22"), `text-sm text-charcoal` |
+| Has entry, not selected | `MoodIcon size={24}` + day number below, `text-xs text-meta` |
+| Selected (currentDate) | Peach pill background: `bg-peach rounded-full` on the whole 44×64 cell; text and icon remain |
+| Today (when today ≠ currentDate) | 3px dot below the day number: `w-1 h-1 rounded-full bg-peach mx-auto mt-0.5` |
+| Today + selected | Peach pill (selected takes priority; dot omitted since redundant) |
+
+Day number format: `date.slice(-2).replace(/^0/, '')` (show "1"–"31", not "01")
+Day of week label: optional `text-[10px] text-meta` above number (Mon/Tue etc.) — NOT included in MVP to keep cells clean and line count low.
+
+### chevron animation
+`transform: rotate(180deg)` when `stripOpen`, 150ms ease transition.
 
 ---
 
-## Data Model / Migration Design
+## Accessibility Spec
 
-None. `DiaryEntry.textAlign` already in types. Editor uses `entry.textAlign ?? 'left'` defensively at runtime.
+| Element | Role / Attribute |
+|---|---|
+| Date label `<button>` | `aria-expanded={stripOpen}` `aria-haspopup="listbox"` `aria-label="날짜 선택"` |
+| Strip container `<div>` | `role="listbox"` `aria-label="가로 캘린더"` |
+| Each cell `<button>` | `role="option"` `aria-selected={isSelected}` `aria-label="{ko-date-string}"` (e.g. "2026년 5월 22일") |
+| Chevron `▾` span | `aria-hidden="true"` |
+
+No ESC key handler needed — the strip is not modal. No outside-click-to-close; close-on-select is sufficient per UX decision below.
 
 ---
 
-## Test Design
+## Hydration and First-Paint Handling
 
-### `src/lib/hooks/__tests__/useAutosave.test.ts`
+`HorizontalDatePicker` accesses `readDiaries()` (localStorage) and `new Date()` (for today's date). Both are client-only.
 
-`// @vitest-environment happy-dom`, `vi.useFakeTimers()`.
+The gate is already in place: `{stripOpen && <HorizontalDatePicker .../>}`. The strip is never mounted during SSR because `stripOpen` is `false` on initial render and the toggle button is only interactable in the browser. No additional `mounted` flag needed.
 
-5 cases:
-1. Does not call `saveFn` before `delayMs` elapses.
-2. Calls `saveFn` exactly once after `delayMs` elapses.
-3. Resets timer on value change.
-4. Does not call `saveFn` after unmount.
-5. Passes the latest `value` to `saveFn`.
+`useHorizontalDatePicker` computes `dateRange` and `entryMap` on mount (lazy init) so they are also client-only. The hook file has `"use client"` (all `_components/` and `lib/hooks/` files already carry it). `readDiaries()` returns `[]` during SSR per its own guard — harmless since the strip doesn't render server-side.
 
-### `src/lib/hooks/__tests__/useEditorState.test.ts`
+---
 
-`// @vitest-environment happy-dom`. Import `@/lib/storage/__tests__/setup`.
+## Edge Case Resolutions
 
-5 cases:
-1. Initial state: `isLoaded=false`, `moodSheetMode='closed'`, fields empty.
-2. After `useEffect` (mount) with empty storage: `LOAD_ENTRY(undefined)` → `moodSheetMode='initial'`.
-3. After mount with seeded entry: fields populated, snapshot set, `moodSheetMode='closed'`.
-4. `isDirty` derivation: `SET_TEXT` makes dirty; re-set to original makes not dirty.
-5. `MARK_SAVED` resets snapshot: dirty → not dirty.
+**Q1 — Strip range**: ±30 days centered on `currentDate`. 61-cell array: `dateRange[i] = addDays(currentDate, i - 30)` for i in 0..60. Re-derive via `useMemo([currentDate])` when `currentDate` changes so the strip recenters. No lazy loading.
 
-### `src/app/diary/[date]/__tests__/Editor.test.tsx`
+**Q2 — Cell size and layout**: 44px wide × 64px tall cells. 4px gap. Total strip height 72px. `overflow-x: auto`, `scroll-snap-type: x mandatory`, each cell `scroll-snap-align: center`. No JS-controlled snap — CSS snap is sufficient and performant.
 
-`// @vitest-environment happy-dom`. Mocks `next/navigation`, `HTMLDialogElement.prototype.{showModal, close}`. Storage setup imported.
+**Q3 — Cell visual**: Entry present: `MoodIcon size={24}` centered, day number (1–2 digits) below in `text-xs text-meta`. No entry: day number only in `text-sm text-charcoal` centered. Selected: peach pill `bg-peach` on full cell. Today (not selected): 3px peach dot below number. Entry-with-no-mood: render `•` as a text placeholder character centered at 24px line-height; never crash.
 
-12 cases:
-1. New entry: textarea empty, mood sheet auto-opened (mode=initial), delete absent from more menu.
-2. Existing entry: textarea filled, mood icon shown, no mood sheet, delete visible in more menu.
-3. One-per-day: navigate to date with existing entry shows existing data.
-4. Autosave: typing then advancing 1000ms calls `upsertDiary` silently.
-5. Autosave guard: `upsertDiary` NOT called when mood undefined.
-6. Explicit save tap → `upsertDiary` + toast "일기를 저장했어요!".
-7. ✓ icon absent when not dirty.
-8. Dirty + back → unsaved dialog opens (not `router.back()`).
-9. "저장하고 나가기" → `upsertDiary` + `router.back()`.
-10. ⋯ → 일기 삭제 → confirm → `removeDiary(id)` + `router.back()`.
-11. MoodIcon tap → mood sheet opens with `mode='change'`, `selectedMoodId={current}`.
-12. Time icon tap inserts `HH:MM ` at textarea cursor position.
+**Q4 — Initial scroll position**: `useEffect` inside `HorizontalDatePicker` on mount fires `scrollRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'instant' })`. Use `behavior: 'instant'` to avoid animate-then-scroll jank on open. Fallback: if no selected cell found, do nothing.
 
-### `e2e/editor.spec.ts`
+**Q5 — Toggle UI**: Tap date label → toggle `isOpen`. Tap date cell → `handleDateSelect` → close strip after save succeeds. No ESC handler. No outside-click-to-close (strip is inline, not a popover — it pushes content down and stays visible intentionally). If user taps same (already selected) date → no-op save call (`saveFn` with no mood returns early, with mood saves idempotently), then close strip.
 
-One Playwright test. Uses dynamic date (within current month, computed at runtime). Asserts: mood sheet auto-opens on `/diary/[date]`, mood selection closes sheet, typing + 1.5s pause persists to storage, back to `/` shows mood emoji somewhere in calendar grid.
-
-### `e2e/_helpers/seedDiaries.ts`
-
-```ts
-export function seedDiariesScript(entries: DiaryEntry[]) {
-  const json = JSON.stringify(entries);
-  return () => { localStorage.setItem('ddalkkak:diaries:v1', json); };
-}
+**Q6 — Save flow on date switch**:
 ```
+a) try { saveFn(autosaveValue) }         // synchronous
+b) setCurrentDate(newDate)               // triggers LOAD_ENTRY via useEffect
+   strip.close()                         // {stripOpen && ...} unmounts strip
+c) catch(e) {
+     toast.show('저장에 실패했어요. 다시 시도해주세요.')
+     // do NOT setCurrentDate, do NOT close strip
+   }
+d) if state.mood is undefined, saveFn returns early (no throw) → proceed to step b
+```
+No async/await. No `Promise.resolve()`. `upsertDiary` throws synchronously on `QuotaExceededError`.
 
-Usage: `await page.addInitScript(seedDiariesScript([...]))` before `page.goto(...)`.
+**Q7 — Hydration safety**: Strip component never renders server-side. `{stripOpen && <HorizontalDatePicker/>}` — `stripOpen` initializes to `false` in `useState`, which is the same on server and client. No hydration mismatch.
 
----
+**Q8 — Memoization**: `dateRange`: `useMemo(() => buildDateRange(currentDate), [currentDate])` inside `useHorizontalDatePicker`. `entryMap`: `useMemo(() => buildEntryMap(readDiaries()), [isOpen])` — recomputes on each open, ensuring fresh data after autosave. Both in the same hook file.
 
-## Files Expected to Change
+**Q9 — ARIA spec**: Resolved in Accessibility Spec section above.
 
-### Modified
-- `src/app/diary/[date]/page.tsx` — render `<Editor date={date} />`.
-- `src/design-system/useDialogControl.ts` — add `cancel` listener via ref pattern.
+**Q10 — EditorBody prop coupling**: Tight coupling — `HorizontalDatePicker` renders inside `EditorBody`. It is an editor-specific component, lives in `_components/`, and has no other consumer. `EditorBody` receives `stripOpen`, `onDateLabelTap`, `dateRange`, `entryMap`, `onDateSelect` as explicit props. No `stripSlot` render prop.
 
-### New (route-scoped)
-- `src/app/diary/[date]/_components/Editor.tsx`
-- `src/app/diary/[date]/_components/EditorHeader.tsx`
-- `src/app/diary/[date]/_components/EditorBody.tsx`
-- `src/app/diary/[date]/_components/EditorToolbar.tsx`
-- `src/app/diary/[date]/_components/EditorMoreMenu.tsx`
+**Q11 — Closed strip**: `{stripOpen && <HorizontalDatePicker .../>}` — strip is not mounted when closed. 61 cells are not built when the strip is hidden.
 
-### New (shared hooks)
-- `src/lib/hooks/useAutosave.ts`
-- `src/lib/hooks/useEditorState.ts`
-
-### New (tests)
-- `src/app/diary/[date]/__tests__/Editor.test.tsx`
-- `src/lib/hooks/__tests__/useAutosave.test.ts`
-- `src/lib/hooks/__tests__/useEditorState.test.ts`
-- `e2e/editor.spec.ts`
-- `e2e/_helpers/seedDiaries.ts`
-
-### Not changed
-- `src/design-system/ConfirmDialog.tsx` (no `title` prop needed).
-- `src/design-system/MoodPickerSheet.tsx` (NB-2 deferred; REQ-009 does not add lines).
-- `src/lib/storage/types.ts`, `src/lib/storage/diaries.ts`.
+**Q12 — Saving with no mood**: `saveFn` early-returns when `v.mood` is falsy. Text typed without selecting a mood is lost when the user switches dates. This matches REQ-009's existing behavior and is explicitly accepted. No fix attempted here.
 
 ---
 
-## Implementation Order
+## Test Hooks
 
-1. `useDialogControl.ts` — NB-1 fix first.
-2. `useAutosave.ts` + tests.
-3. `useEditorState.ts` + tests.
-4. `EditorHeader.tsx`.
-5. `EditorBody.tsx`.
-6. `EditorMoreMenu.tsx`.
-7. `EditorToolbar.tsx`.
-8. `Editor.tsx` (wires all sub-components + inline ConfirmDialogs).
-9. `page.tsx` — swap stub for `<Editor />`.
-10. `Editor.test.tsx` — integration tests.
-11. `seedDiaries.ts` + `editor.spec.ts`.
+Tests will locate elements by these selectors / labels:
+
+| Element | Locator |
+|---|---|
+| Date toggle button | `aria-label="날짜 선택"` |
+| Strip container | `role="listbox"` |
+| Any date cell | `role="option"` |
+| Selected date cell | `role="option"` + `aria-selected="true"` |
+| Specific date cell | `aria-label="2026년 5월 22일"` |
+| Save failure toast | Text matching `"저장에 실패했어요"` |
+
+Unit test matrix:
+1. Toggle button click → strip mounts; click again → unmounts.
+2. Cell tap on unselected date: `saveFn` called → `onDateChange` called → strip closed.
+3. Cell tap when `saveFn` throws `QuotaExceededError`: `onSaveError` called, `onDateChange` NOT called.
+4. Cell renders `MoodIcon` when `entryMap` has entry for that date; renders day number otherwise.
+5. Selected cell has `aria-selected="true"`.
+6. Today's cell has dot indicator when `isToday && !isSelected`.
+7. Same-date tap → save called but `onDateChange` not called (no-op navigation). (Or strip closes only — implementation detail to settle in code.)
+
+E2E (Playwright):
+1. Editor for date A (with entry) → open strip → tap date B → verify date A entry persists in localStorage → verify editor now shows date B's content.
+2. Editor with unsaved text + no mood → tap date B → date B loads, date A text not saved (no entry created).
+
+---
+
+## Non-Goals (Critical Restatement)
+
+- Month/year picker — deferred to P1. No "jump to month" UI.
+- Virtual scroll — explicitly excluded. 61 static cells are fine.
+- URL sync during date navigation — explicitly prohibited. URL stays at original date.
+- Outside-click dismiss — not implemented. Close-on-select only.
+- Swipe gesture navigation — out of scope; CSS scroll handles touch natively.
+- Confirm dialog before date switch — autosave is silent. Error toast only on failure.
+- Photo carousel / full-screen photo viewer — REQ-011/012.
 
 ---
 
 ## Backward Compatibility
 
-- `useDialogControl` change is additive (cancel listener calls existing `onClose` callback). Safe.
-- `textAlign ?? 'left'` fallback is defensive only; no production data.
-- No route path change.
+- `Editor.tsx` changes `date` prop usage to `currentDate` state internally. The external prop signature `EditorProps { date: string }` is unchanged — callers (page.tsx) need no updates.
+- `EditorBody.tsx` adds new optional-feeling props but they are required in the updated interface. The single call site (Editor.tsx) is updated simultaneously — no other consumer.
+- No new localStorage keys; no schema changes; no migration needed.
+- Existing `useEditorState`, `useAutosave`, `saveFn` behavior is unchanged for non-strip usage paths.
 
 ---
 
 ## Performance Considerations
 
-- `readDiaries()` runs once on mount inside `useEffect`. Negligible for MVP scale.
-- `autosaveValue` memoized via `useMemo` so debounce timer only resets on actual content change.
-- `saveFn` wrapped in `useCallback` — re-created only when entry ID/date changes.
-- `100dvh` supported in modern mobile browsers (Safari 16+, Chrome 108+).
+- 61 `DateCell` nodes are lightweight (each is a `<button>` with at most one `<img>`-equivalent emoji). No virtualization needed.
+- `readDiaries()` on strip open: O(n) over diary entries. For a 1-year active user, n ≈ 365. Negligible.
+- `entryMap` recomputes only when `isOpen` changes (on open), not on every render.
+- CSS `scroll-snap` offloads scroll physics to the browser compositor — no JS scroll listeners.
+- Strip is not mounted when closed — zero render cost when hidden.
 
 ---
 
 ## Infra / Deployment Considerations
 
-None.
+None. All changes are client-side React components. No new API routes, no new environment variables, no build configuration changes. Existing Next.js App Router setup handles the new `"use client"` files automatically.
 
 ---
 
 ## Risks and Tradeoffs
 
-1. **Debounce + unmount race** — mitigated by `useAutosave` cleanup `clearTimeout`. Risk: LOW.
-2. **`onClose` stability** — addressed via `onCloseRef` capture pattern. Risk: LOW.
-3. **`MoodPickerSheet` auto-open timing** — `moodSheetMode` starts `'closed'`, transitions to `'initial'` only after `LOAD_ENTRY`. Dialog always-mounted (REQ-005). Risk: LOW.
-4. **`ConfirmDialog` copy without `title`** — sacrifices visual hierarchy. Acceptable for MVP. Future: add `title?` prop.
-5. **Toast re-entrancy** — gallery noop and save toast share one `useToast`. Re-entrant calls reset the message; acceptable.
-6. **E2E test date dependency** — use dynamic date within current month at test runtime, not hardcoded.
+| Risk | Severity | Mitigation |
+|---|---|---|
+| `saveFn` captures stale `currentDate` in `useCallback` if deps not updated | High | Change `saveFn` dep from `date` to `currentDate` (called out in Editor.tsx delta) |
+| Debounce fires after `setCurrentDate` with new date's `saveFn` — writes wrong date's content to new date | Medium | The debounce timer fires the OLD `saveFn` (closure captured before `setCurrentDate`). React state update is async-scheduled; the closure is already bound. This is safe. |
+| URL mismatch (URL shows original date, editor shows navigated date) | Low | Expected and intentional per PRD. Document in code comment. |
+| `Editor.tsx` already 171 lines; delta adds ~15 lines | Low | New logic extracted to `useHorizontalDatePicker` hook — Editor.tsx grows modestly to ~185 lines |
+| `entryMap` stale if another tab writes localStorage | Very Low | Strip is a single-tab app; stale risk is negligible. Recompute on open covers normal usage. |
 
 ---
 
 ## Open Questions
 
-None remaining. All six architecture unknowns closed.
+None. All 12 specified decisions are closed above.
 
 ---
 

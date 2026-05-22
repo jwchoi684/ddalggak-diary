@@ -245,4 +245,89 @@ describe('Editor', () => {
 
     expect(textarea.value).toBe('before14:30 ');
   });
+
+  it('C-strip-1: tapping date label opens strip (aria-expanded toggles)', async () => {
+    const entry = makeDiary({ date: '2026-05-15', mood: 'joy', text: 'hello' });
+    readDiariesMock.mockReturnValue([entry]);
+    await renderEditor();
+
+    // Date toggle button (aria-label="날짜 선택")
+    const toggleBtn = document.querySelector('button[aria-label="날짜 선택"]');
+    expect(toggleBtn).not.toBeNull();
+    expect(toggleBtn?.getAttribute('aria-expanded')).toBe('false');
+
+    fireEvent.click(toggleBtn!);
+    await act(async () => {});
+
+    expect(toggleBtn?.getAttribute('aria-expanded')).toBe('true');
+    // Strip container mounted
+    expect(document.querySelector('[role="listbox"]')).not.toBeNull();
+
+    // Tap again — strip closes
+    fireEvent.click(toggleBtn!);
+    await act(async () => {});
+    expect(toggleBtn?.getAttribute('aria-expanded')).toBe('false');
+    expect(document.querySelector('[role="listbox"]')).toBeNull();
+  });
+
+  it('C-strip-2: tapping a different date cell saves current date and loads new date', async () => {
+    const entryA = makeDiary({ date: '2026-05-15', mood: 'joy', text: 'date A content' });
+    const entryB = makeDiary({ date: '2026-05-16', mood: 'calm', text: 'date B content' });
+    readDiariesMock.mockReturnValue([entryA, entryB]);
+    await renderEditor('2026-05-15');
+
+    // Open strip
+    fireEvent.click(document.querySelector('button[aria-label="날짜 선택"]')!);
+    await act(async () => {});
+
+    // Find the cell for 2026-05-16 (aria-label contains both "5월" and "16일")
+    const cellB = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="option"]')).find(
+      (el) => {
+        const label = el.getAttribute('aria-label') ?? '';
+        return label.includes('5월') && label.includes('16일');
+      },
+    );
+    expect(cellB).toBeTruthy();
+
+    upsertDiaryMock.mockClear();
+    fireEvent.click(cellB!);
+    await act(async () => {});
+    await act(async () => {});
+
+    // upsertDiary called (saving date A)
+    expect(upsertDiaryMock).toHaveBeenCalledWith(
+      expect.objectContaining({ date: '2026-05-15' }),
+    );
+    // Editor now shows date B's content
+    const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
+    expect(textarea.value).toBe('date B content');
+    // Strip closed
+    expect(document.querySelector('[role="listbox"]')).toBeNull();
+  });
+
+  it('C-strip-3: switching to empty date auto-opens MoodPickerSheet', async () => {
+    const entryA = makeDiary({ date: '2026-05-15', mood: 'joy', text: 'A' });
+    // No entry for 2026-05-16
+    readDiariesMock.mockReturnValue([entryA]);
+    await renderEditor('2026-05-15');
+
+    showModalMock.mockClear();
+
+    // Open strip
+    fireEvent.click(document.querySelector('button[aria-label="날짜 선택"]')!);
+    await act(async () => {});
+
+    // Tap the cell for 2026-05-16 (aria-label contains "5월" and "16일")
+    const emptyCell = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="option"]')).find(
+      (el) => {
+        const label = el.getAttribute('aria-label') ?? '';
+        return label.includes('5월') && label.includes('16일');
+      },
+    );
+    fireEvent.click(emptyCell!);
+    await act(async () => {}); // flush useEditorState reload useEffect
+
+    // MoodPickerSheet should auto-open (showModal called again)
+    expect(showModalMock).toHaveBeenCalled();
+  });
 });

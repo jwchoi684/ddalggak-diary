@@ -1,291 +1,197 @@
-# Architecture Report — REQ-009
+# Architecture Report — REQ-010
 
 ## Summary
 
-REQ-009 delivers the diary editor — a single "use client" screen component that handles both new-entry creation and existing-entry editing without branching into separate routes or components. The route stub at `/Users/jay/Documents/Projects/ai_diary/src/app/diary/[date]/page.tsx` is a Next.js 15 async server component that validates the date param and renders a placeholder; REQ-009 replaces it with a real client component tree. Every primitive it needs — storage functions, design-system components, navigation constants — is confirmed present. No forward dependencies are blocked.
+REQ-010 adds an inline horizontal date-strip that slides down inside the diary editor when the user taps the date label (with `▾` chevron). The strip shows up to 7–10 days, uses the existing `MoodIcon` component for cells with entries, and performs a save-then-load sequence when the user taps a different date. All dependencies (REQ-002, REQ-003, REQ-005, REQ-009) are DONE. The architecture is solid and integration is well-defined with no blocking gaps.
 
 ---
 
-## Frontend Findings
+## Codebase Map (paths reviewed)
 
-### Stack confirmation
+- `src/design-system/MoodIcon.tsx`
+- `src/design-system/moods.ts`
+- `src/design-system/BottomSheet.tsx`
+- `src/design-system/Card.tsx`
+- `src/design-system/Toast.tsx`
+- `src/design-system/useToast.ts`
+- `src/app/globals.css`
+- `src/app/diary/[date]/_components/Editor.tsx`
+- `src/app/diary/[date]/_components/EditorBody.tsx`
+- `src/app/diary/[date]/_components/EditorHeader.tsx`
+- `src/app/diary/[date]/_components/EditorToolbar.tsx`
+- `src/app/diary/[date]/page.tsx`
+- `src/app/diary/[date]/__tests__/Editor.test.tsx`
+- `src/lib/hooks/useEditorState.ts`
+- `src/lib/hooks/useAutosave.ts`
+- `src/lib/hooks/__tests__/useEditorState.test.ts`
+- `src/lib/hooks/__tests__/useAutosave.test.ts`
+- `src/lib/storage/diaries.ts`
+- `src/lib/storage/useDiaries.ts`
+- `src/lib/storage/types.ts`
+- `src/lib/navigation/routes.ts`
+- `src/app/_components/CalendarDayCell.tsx`
 
-Confirmed from `package.json`:
+---
 
-- Next.js 15.5.18
-- React 19.0.0 / react-dom 19.0.0
-- Tailwind CSS 4.x (`@tailwindcss/postcss ^4.0.0`, `tailwindcss ^4.0.0`)
-- TypeScript 5.x (`strict: true` in `tsconfig.json`)
-- Vitest 2.x (`vitest ^2.0.0`)
-- `@testing-library/react ^16.3.2` + `happy-dom ^20.9.0`
-- `@playwright/test ^1.44.0`
+## Findings on Each Numbered Topic
 
-### Route file — current state
+### 1. Design System Primitives
 
-Path: `/Users/jay/Documents/Projects/ai_diary/src/app/diary/[date]/page.tsx`
+**MoodIcon** (`src/design-system/MoodIcon.tsx`, lines 15–19):
+- Props: `id: MoodId`, `size: number`, `className?: string`
+- `size` is a raw pixel number (integer), NOT a string enum. It sets `width`, `height`, and `fontSize` simultaneously via inline style.
+- The calendar (`CalendarDayCell.tsx` line 48) uses `size={32}`. The editor's `EditorBody.tsx` (line 55) uses `size={72}`.
+- For the horizontal date strip, the design agent must specify `size={24}` or `size={28}` — a plain integer. There is no named small/medium/large variant; any integer is valid. Consistency with the calendar "small" use (32px) is the reference floor.
 
-It is a **server component** (no `"use client"` directive). The params are consumed with the Next.js 15 async-params pattern:
+**Horizontal scroll / chip patterns**: No existing scroll container, chip, or pill component exists in `src/design-system/`. The feature will need new components.
 
-```ts
-interface PageProps {
-  params: Promise<{ date: string }>;
-}
+**Tokens** (from `globals.css`):
+- `--color-cream: #FAF6EE`, `--color-charcoal: #2A2A2A`, `--color-peach: #F5C896`, `--color-meta: #A8A8A8`, `--color-paper: #FFFFFF`
+- `--radius-card: 16px`, `--radius-card-lg: 20px`, `--shadow-card: 0 2px 8px rgba(0,0,0,0.04)`
+- These tokens are exposed as Tailwind utility classes: `bg-cream`, `text-charcoal`, `bg-peach`, `text-meta`, `bg-paper`, `rounded-[var(--radius-card)]`
 
-export default async function DiaryPage({ params }: PageProps) {
-  const { date } = await params;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) notFound();
-  return (
-    <main className="px-6 py-8 text-charcoal">
-      <h1 className="text-3xl">{date} 일기</h1>
-      <p className="mt-2 text-meta">REQ-009에서 채워집니다.</p>
-    </main>
-  );
-}
+**BottomSheet**: Uses `<dialog>` with `showModal()` — not applicable for inline strip. The strip is not modal; do not reuse BottomSheet for it.
+
+**Card**: Available with `large` prop (20px radius vs 16px). Could wrap the strip container if a card visual is desired, but it is a server component, so it is usable in RSC contexts too.
+
+**Toast / useToast**: Available for save-failure handling. `toast.show(message)` accepts optional `durationMs`. Use `role="alert"` for error case per `ToastProps`. The existing `Toast` instance in `Editor.tsx` (line 122) must be reused — do not add a second `Toast` mount. Pass the failure message through the existing `toast.show()` call.
+
+### 2. Editor Component Analysis
+
+**Date display location** (`EditorBody.tsx`, line 68–70):
+```tsx
+<p className="text-sm text-meta text-center mb-4">
+  {formatDate(date)} ▾
+</p>
 ```
+The `▾` is already present as a static character in the markup, with a JSX comment `{/* Date label (▾ is inert — REQ-010 hooks in here) */}`. This is the exact attachment point. The `<p>` must become a `<button>` (or wrap a `<button>`) to be tappable. `EditorBody` will need two new props: `stripOpen: boolean` and `onDateLabelTap: () => void`.
 
-The `await params` pattern is already correct for Next.js 15. REQ-009 will keep `DiaryPage` as an async server component that passes the validated `date` down to a `"use client"` `<Editor date={date} />` child. The date validation regex stays in the server component.
-
-**Important path discrepancy**: The REQ-009 intake and previous agent-state files referenced `src/app/(routes)/diary/[date]/page.tsx` (a route group). The actual path is `src/app/diary/[date]/page.tsx` (no route group). All sub-component paths must use the actual path: `src/app/diary/[date]/_components/`.
-
-### Storage hooks — `useDiaryByDate` does not exist
-
-`/Users/jay/Documents/Projects/ai_diary/src/lib/storage/useDiaries.ts` exposes only:
-
-```ts
-export function useDiaries(): { entries: DiaryEntry[]; isReady: boolean }
+**saveFn shape and location** (`Editor.tsx`, lines 40–52):
+```tsx
+const saveFn = useCallback(
+  (v: typeof autosaveValue) => {
+    if (!v.mood) return;
+    const id = state.persistedId ?? generateId();
+    const createdAt = state.persistedCreatedAt ?? new Date().toISOString();
+    upsertDiary({ id, date, mood: v.mood, text: v.text, textAlign: v.textAlign, ... });
+    dispatch({ type: 'MARK_SAVED', id, createdAt });
+  },
+  [state.persistedId, state.persistedCreatedAt, date, dispatch],
+);
 ```
+`saveFn` lives inside `Editor.tsx` and is a `useCallback`. It is already called imperatively in `handleSaveAndBack` (line 75) and `handleExplicitSave` (line 80), so calling it synchronously before a date switch is the correct and established pattern. The date-switch handler must call `saveFn(autosaveValue)` then dispatch a `LOAD_ENTRY` for the new date — no need to lift or ref this function.
 
-There is **no `useDiaryByDate(date)` hook and no `getDiaryByDate` function** exported from `@/lib/storage`. The public API in `index.ts` exports only `readDiaries`, `writeAllDiaries`, `upsertDiary`, `removeDiary`.
+**No `flush` on useAutosave**: `useAutosave` (line 22–26) is a bare `useEffect` with `setTimeout` — there is no `flush()` method. To avoid data loss when the debounce timer is mid-flight, the date-switch handler must call `saveFn(autosaveValue)` directly (which is the synchronous eager-save path, identical to `handleExplicitSave`). The in-flight debounce timer will fire later but `upsertDiary` is idempotent (same `persistedId`) and harmless. This is the cleanest approach; no timer cancellation API is needed.
 
-Recommended approach for the editor: inside a `"use client"` `useEditorState` hook, call `readDiaries()` in a `useEffect` on mount and filter by `date` (exactly as `CalendarScreen` does via `useDiaries` + a `Map`). This is the lightest path — no new hook needed, and it follows the established `isReady` hydration-guard pattern.
-
-### Storage function signatures
-
-From `/Users/jay/Documents/Projects/ai_diary/src/lib/storage/diaries.ts`:
-
-```ts
-export function readDiaries(): DiaryEntry[]
-export function upsertDiary(entry: DiaryEntry): void
-export function removeDiary(id: string): void   // keyed on id, NOT date
-```
-
-`upsertDiary` enforces 1-per-day by a two-step dedup: id-match takes precedence, then date-match. Both replace in-place.
-
-`removeDiary` is keyed on **`DiaryEntry.id`**, not on `date`. The editor must track the loaded entry's `id` so it can call `removeDiary(entry.id)`.
-
-There is no `deleteDiary(date)` function. The intake document refers to it as `deleteDiary` — the actual name is `removeDiary` and it takes `id`. This is a naming discrepancy the technical design must note explicitly.
-
-### `DiaryEntry` type — `textAlign` already present
-
-From `/Users/jay/Documents/Projects/ai_diary/src/lib/storage/types.ts`:
-
-```ts
-export interface DiaryEntry {
-  id: string;
-  date: string;
-  mood: MoodId;
-  text: string;
-  textAlign: 'left' | 'center';
-  photos: Photo[];
-  createdAt: string;
-  updatedAt: string;
-}
-```
-
-`textAlign` is already a **required** field (not optional). The fixtures factory at `/Users/jay/Documents/Projects/ai_diary/src/lib/storage/__tests__/fixtures.ts` already populates it with `'left'`. This means:
-
-1. No schema extension needed for `DiaryEntry`.
-2. Old entries that pre-date this field definition are not a real concern since all test fixtures already include it. However, because `textAlign` is **required** (not `textAlign?`), any old localStorage data lacking this field would produce `undefined` at runtime even though TypeScript marks it non-optional. The editor should default to `'left'` when reading `entry.textAlign` in case of legacy data.
-
-The body field in `DiaryEntry` is named `text`, not `body`. The technical design must align all references to `entry.text` (not `entry.body`).
-
-### `MoodPickerSheetProps` — confirmed interface
-
-From `/Users/jay/Documents/Projects/ai_diary/src/design-system/MoodPickerSheet.tsx`:
-
-```ts
-export interface MoodPickerSheetProps {
-  open: boolean;
-  date: string;
-  selectedMoodId?: MoodId;
-  mode: 'initial' | 'change';
-  onSelect: (moodId: MoodId) => void;
-  onClose: () => void;
-  onCancelInitial?: () => void;
+**LOAD_ENTRY with date change** (`useEditorState.ts`, lines 101–109):
+```tsx
+export function useEditorState(date: string): [EditorState, Dispatch<EditorAction>] {
+  const [state, dispatch] = useReducer(reducer, INITIAL_STATE);
+  useEffect(() => {
+    const entry = readDiaries().find((e) => e.date === date);
+    dispatch({ type: 'LOAD_ENTRY', entry });
+  }, [date]);
+  return [state, dispatch];
 }
 ```
+The `date` prop is a dependency of the `useEffect`. When `date` changes, `LOAD_ENTRY` fires automatically. This means if the `Editor` component receives a new `date` prop, it will reload state correctly without remounting. HOWEVER, `Editor.tsx` currently receives `date` from the Next.js page route param and passes it to `useEditorState`. The `date` prop on `Editor` never changes during the component's lifetime (it comes from the URL). For the date-strip, we need `date` to change while keeping the Editor mounted.
 
-`MoodPickerSheet` is 129 lines and already contains an inline `MoodPickerTabs` sub-component. The NB-2 carry-forward from REQ-008 (extract `MoodPickerTabs`) is still open but not blocking.
+**Two approaches are possible**:
+1. Move `date` into a `useState` inside `Editor.tsx` (initialized from the prop, mutable during strip navigation). The `useEditorState(date)` hook already supports re-firing on date change — this would work with no hook changes.
+2. Alternatively, dispatch `LOAD_ENTRY` directly from the strip's selection handler by reading the new entry from storage and dispatching manually, bypassing the `useEditorState` hook's `useEffect`. This is messier and couples the strip to internal hook dispatch semantics.
 
-### Back navigation pattern
+Approach 1 is clean. `Editor.tsx` changes: `const [currentDate, setCurrentDate] = useState(date);` and passes `currentDate` everywhere `date` was used. The strip handler calls `setCurrentDate(newDate)` after saving.
 
-`CalendarScreen` uses `useRouter` from `next/navigation` directly and calls `router.push(Routes.diary(date))` on cell tap. There is **no `useRouterBack` helper** in the codebase — back navigation is done with `router.back()` from `next/navigation` inline wherever needed. The editor should do the same.
+### 3. Storage Layer
 
-### Tailwind tokens available
+**readDiaries()** (`src/lib/storage/diaries.ts`, line 13): Returns `DiaryEntry[]`. No `Map<date, entry>` helper exists. The strip component must build its own date-to-entry lookup by calling `readDiaries()` and using `Array.find` or constructing a `Map` locally.
 
-From `/Users/jay/Documents/Projects/ai_diary/src/app/globals.css` `@theme` block, confirmed tokens:
+**useDiaries()** (`src/lib/storage/useDiaries.ts`): Reads once on mount, returns `{ entries, isReady }`. The strip can use this hook to get the full entry list on mount and build its lookup map. No new storage keys are needed.
 
-- `bg-cream` (`#FAF6EE`), `bg-paper` (`#FFFFFF`), `bg-charcoal` (`#2A2A2A`)
-- `text-charcoal`, `text-meta`, `text-cell-empty`
-- `bg-peach` (`#F5C896`), `bg-peach-dark`, `bg-peach-light`
-- `bg-danger` (`#C53030`)
-- `bg-success` (`#B4E4B4`)
-- All 10 mood pastel colors: `bg-mood-joy`, `bg-mood-love`, etc.
-- `--radius-card: 16px`, `--radius-card-lg: 20px`, `--shadow-card`
-- `--container-mobile: 420px`
+**No index helper exists**: The design agent must specify building a local `Map<string, DiaryEntry>` from `readDiaries()` results inside the strip hook, e.g. `new Map(entries.map(e => [e.date, e]))`.
 
-Missing token for the editor: there is no `bg-toolbar` or `border-divider` token. The toolbar background will need to use `bg-paper` or `bg-cream` from existing tokens. No new token is strictly required.
+### 4. Calendar MoodIcon Size
 
-### `ConfirmDialog` — no `title` prop
+`CalendarDayCell.tsx` line 48: `<MoodIcon id={entry.mood} size={32} />`. The strip cells should match or be slightly smaller (24–28px) to fit the tighter horizontal cell layout. The design agent should specify `size={24}` for strip cells given their constrained width (~44px touch target).
 
-`ConfirmDialog` has: `open`, `message`, `onConfirm`, `onCancel`, `confirmLabel?`, `cancelLabel?`, `destructive?`, `className?`. There is **no `title` prop**. The intake's recommended dialog copy (e.g. "저장되지 않은 변경사항이 있어요") must be embedded in `message` rather than a separate title field, or `ConfirmDialog` must be extended to add a `title?` prop. This is a design decision the technical design phase must resolve.
+### 5. Navigation / Routing
 
----
+`Editor.tsx` uses `useRouter()` from `next/navigation` for `router.back()` and `router.push(Routes.list)`. These are navigation events to other screens — not involved in the date-strip switch. The strip switch is pure state: call `saveFn`, then `setCurrentDate(newDate)`. No `router.push`, no `router.replace`, no URL mutation. This satisfies REQ-010's invariant 5 ("inline — no history-stack push, no URL change").
 
-## Backend Findings
+`Routes` in `src/lib/navigation/routes.ts` does not need to change.
 
-None. This REQ uses localStorage only via `@/lib/storage` imperatives. No server-side routes, API calls, or edge functions are involved.
+### 6. Existing Tests
 
----
-
-## Data Model Findings
-
-### `textAlign` — already in schema, required not optional
-
-`DiaryEntry.textAlign` is already `'left' | 'center'` (required). No migration or type change is needed. However, since localStorage data from before REQ-009 was built could technically have entries without the field, the editor should read `entry.textAlign ?? 'left'` defensively at runtime even though TypeScript will not flag it.
-
-### 1-per-day enforcement confirmed
-
-`upsertDiary` in `/Users/jay/Documents/Projects/ai_diary/src/lib/storage/diaries.ts` uses two-step dedup (id-match, then date-match). The call with the same `date` and a different `id` will overwrite the existing entry. This means the editor can create a new `DiaryEntry` with a fresh `generateId()` id each time and still be safe — the date-match step will prevent duplicates.
-
-### Delete is `removeDiary(id: string)` — not `deleteDiary(date)`
-
-The intake document uses the name `deleteDiary` in several places. The actual exported function is `removeDiary(id: string)`. The editor must load and retain the existing entry's `id` from storage to call delete correctly. For a new entry that has never been saved, delete should not be reachable (it is hidden when no saved record exists).
+- `Editor.test.tsx` uses `vi.useFakeTimers()` + `act(() => { vi.advanceTimersByTime(1000); })` for autosave testing — this pattern applies directly to testing the flush-before-switch sequence.
+- `useEditorState.test.ts` uses `renderHook` with direct `dispatch` calls and tests `LOAD_ENTRY` firing on initial mount. Tests for date-change re-loading would follow the same `renderHook({ initialProps: { date: 'YYYY-MM-DD' } })` + `rerender({ date: '...' })` pattern.
+- No scrollable-strip or IntersectionObserver tests exist. The strip uses CSS `overflow-x: auto` (no IntersectionObserver needed), so no new testing infrastructure is required.
+- Mocking setup: `setupNextNavigation.ts` exposes `mockRouter` with `replace` already mocked alongside `push` and `back` — available if needed, though the strip won't call it.
 
 ---
 
-## Test Structure Findings
+## Concrete Integration Points
 
-### Vitest patterns
-
-- Default environment: `node`. Per-file override via `// @vitest-environment happy-dom` at file top (used in every component test and hook-render test).
-- Global setup: `/Users/jay/Documents/Projects/ai_diary/src/lib/storage/__tests__/setup.ts` — installs `LocalStorageShim` on `globalThis` and `globalThis.window`, resets via `localStorage.clear()` in `beforeEach`.
-- Storage tests do **not** need happy-dom because they do not render React — they rely on the `LocalStorageShim` from setup.ts.
-- Component/hook tests: `// @vitest-environment happy-dom`, import `render`, `screen`, `fireEvent`, `cleanup`, `act` from `@testing-library/react`. `cleanup()` in `afterEach`.
-- Timer faking: `vi.useFakeTimers()` in `beforeEach`, `vi.useRealTimers()` in `afterEach` (used in `MoodPickerSheet.test.tsx` and `useToast.test.ts`).
-- `<dialog>` in happy-dom: `showModal` and `close` are not implemented natively; tests mock them via `HTMLDialogElement.prototype.showModal = vi.fn()` / `HTMLDialogElement.prototype.close = vi.fn()` in `beforeEach`, restored in `afterEach`.
-- `next/navigation` mocking: `vi.mock('next/navigation', () => ({ ... }))` using helpers from `/Users/jay/Documents/Projects/ai_diary/src/lib/navigation/__tests__/setupNextNavigation.ts`. The helper exports `mockRouter` (with `back`, `push`, `replace`, `prefetch`, `refresh`, `forward` as `vi.fn()`), `mockNotFound`, and `resetNavigationMocks()`.
-- Module imports are done **after** `vi.mock` calls (dynamic `await import(...)`) when the module has internal state that must be seeded before first render.
-
-### Playwright patterns
-
-- Config: `/Users/jay/Documents/Projects/ai_diary/playwright.config.ts` — Chromium only, `baseURL: 'http://localhost:3000'`, `webServer` auto-starts `npm run dev`, `reuseExistingServer: !process.env.CI`.
-- Test file: `/Users/jay/Documents/Projects/ai_diary/e2e/calendar.spec.ts` — one test, exercises FAB click → URL navigation. Uses `page.goto('/')`, `page.getByRole`, `page.getByText`, `expect(page).toHaveURL(...)`.
-- No localStorage seeding pattern is established yet in E2E. The editor E2E flow will need to either seed via `page.evaluate(() => localStorage.setItem(...))` before navigation or navigate through the real UI to write data.
-
----
-
-## Tooling and Commands
-
-From `package.json` scripts:
-
-```
-npm run dev          # next dev
-npm run build        # next build
-npm run start        # next start
-npm run lint         # next lint (ESLint)
-npm run typecheck    # tsc --noEmit
-npm run test         # vitest run (single-pass)
-npm run test:watch   # vitest (watch mode)
-npm run test:e2e     # playwright test
-npm run test:e2e:install  # playwright install chromium
-```
-
----
-
-## Existing Patterns to Reuse
-
-| Primitive | File |
+| File | Change Required |
 |---|---|
-| `DiaryEntry`, `MoodId`, `Photo` types | `/Users/jay/Documents/Projects/ai_diary/src/lib/storage/types.ts` |
-| `readDiaries`, `upsertDiary`, `removeDiary`, `generateId` | `/Users/jay/Documents/Projects/ai_diary/src/lib/storage/diaries.ts` (via `@/lib/storage`) |
-| `useDiaries` (isReady pattern) | `/Users/jay/Documents/Projects/ai_diary/src/lib/storage/useDiaries.ts` |
-| `Routes.diary(date)`, `Routes.list` | `/Users/jay/Documents/Projects/ai_diary/src/lib/navigation/routes.ts` |
-| `BottomSheet` | `/Users/jay/Documents/Projects/ai_diary/src/design-system/BottomSheet.tsx` |
-| `ConfirmDialog` | `/Users/jay/Documents/Projects/ai_diary/src/design-system/ConfirmDialog.tsx` |
-| `Toast` | `/Users/jay/Documents/Projects/ai_diary/src/design-system/Toast.tsx` |
-| `useToast` | `/Users/jay/Documents/Projects/ai_diary/src/design-system/useToast.ts` |
-| `useDialogControl` | `/Users/jay/Documents/Projects/ai_diary/src/design-system/useDialogControl.ts` |
-| `IconButton` | `/Users/jay/Documents/Projects/ai_diary/src/design-system/IconButton.tsx` |
-| `MoodIcon` | `/Users/jay/Documents/Projects/ai_diary/src/design-system/MoodIcon.tsx` |
-| `MoodPickerSheet`, `MoodPickerSheetProps` | `/Users/jay/Documents/Projects/ai_diary/src/design-system/MoodPickerSheet.tsx` |
-| `MOODS`, `MOOD_MAP` | `/Users/jay/Documents/Projects/ai_diary/src/design-system/moods.ts` |
-| `setupNextNavigation` helpers | `/Users/jay/Documents/Projects/ai_diary/src/lib/navigation/__tests__/setupNextNavigation.ts` |
-| `makeDiary` fixture factory | `/Users/jay/Documents/Projects/ai_diary/src/lib/storage/__tests__/fixtures.ts` |
-| `LocalStorageShim` + setup | `/Users/jay/Documents/Projects/ai_diary/src/lib/storage/__tests__/setup.ts` |
-| `isReady` hydration guard pattern | Established in `useDiaries` and consumed in `CalendarScreen` |
-| `HTMLDialogElement.prototype.showModal` mock pattern | Established in `BottomSheet.test.tsx`, `ConfirmDialog.test.tsx`, `MoodPickerSheet.test.tsx` |
+| `src/app/diary/[date]/_components/EditorBody.tsx` (84 lines) | Add `stripOpen: boolean` + `onDateLabelTap: () => void` props. Convert date `<p>` to a tappable `<button>`. Render `<HorizontalDatePicker>` below date line when `stripOpen`. |
+| `src/app/diary/[date]/_components/Editor.tsx` (171 lines — ALREADY OVER 100) | Add `useState(date)` for `currentDate`. Add `stripOpen` state. Wire `handleDateSwitch(newDate)` which calls `saveFn(autosaveValue)` then `setCurrentDate(newDate)`. Pass `stripOpen` and `onDateLabelTap` to `EditorBody`. |
+| `src/lib/hooks/useEditorState.ts` (110 lines — ALREADY OVER 100) | No code change required; the hook already responds to `date` param changes via `useEffect([date])`. |
+| `src/design-system/MoodIcon.tsx` | No change. Used as-is with `size={24}` in strip cells. |
+
+New files to create (all under the 100-line budget individually):
+- `src/app/diary/[date]/_components/HorizontalDatePicker.tsx` — scroll container + maps date range to cells
+- `src/app/diary/[date]/_components/DateCell.tsx` — single cell: `MoodIcon` or numeric, highlight logic
+- `src/lib/hooks/useHorizontalDatePicker.ts` — toggle state + date range generation + entry map lookup
 
 ---
 
-## Files Likely to Change
+## Architecture Constraints That Must Be Honored
 
-### Modified
-- `/Users/jay/Documents/Projects/ai_diary/src/app/diary/[date]/page.tsx` — replace stub body with `<Editor date={date} />` render; keep async server component shell and date validation.
-
-### New (route-scoped)
-- `src/app/diary/[date]/_components/Editor.tsx` — container; wires state, storage, navigation.
-- `src/app/diary/[date]/_components/EditorHeader.tsx` — back `IconButton` + `⋯` `IconButton`.
-- `src/app/diary/[date]/_components/EditorBody.tsx` — mood area + date label + `<textarea>`.
-- `src/app/diary/[date]/_components/EditorToolbar.tsx` — bottom icon strip (gallery noop, align toggle, time insert, conditional save).
-- `src/app/diary/[date]/_components/EditorMoreMenu.tsx` — `BottomSheet` with list/delete items.
-- `src/app/diary/[date]/_components/UnsavedChangesDialog.tsx` — `ConfirmDialog` wrapper for dirty-state guard.
-
-### New (shared hooks)
-- `src/lib/hooks/useAutosave.ts` — `useAutosave(value, delayMs, saveFn)` with debounce.
-- `src/lib/hooks/useEditorState.ts` — `useReducer`-based state for `mood`, `text`, `textAlign`, `isDirty`, and UI open-states.
-
-### New (tests)
-- `src/app/diary/[date]/__tests__/Editor.test.tsx` — four entry-context initial states, autosave debounce, explicit-save toast, back-nav guard.
-- `src/lib/hooks/__tests__/useAutosave.test.ts` — debounce timing, cleanup on unmount.
-- `e2e/editor.spec.ts` — end-to-end flow: empty cell → mood select → body input → autosave → back → calendar shows mood.
-
-### Possibly modified (carry-forwards from REQ-008)
-- `/Users/jay/Documents/Projects/ai_diary/src/design-system/MoodPickerSheet.tsx` — NB-2: extract `MoodPickerTabs` if adding integration lines pushes file over 100 lines further.
-- `/Users/jay/Documents/Projects/ai_diary/src/design-system/useDialogControl.ts` — NB-1: Escape key on `BottomSheet` in `mode='initial'` may not trigger `onCancelInitial`. Implementer should verify and add a `cancel` event listener if needed.
-- `/Users/jay/Documents/Projects/ai_diary/src/design-system/ConfirmDialog.tsx` — may need a `title?` prop if the intake's recommended dialog copy requires a separate header line (currently only `message` is rendered).
+1. `saveFn` must be called synchronously before `setCurrentDate(newDate)`. No async gap between save and state transition — both are synchronous (localStorage is synchronous).
+2. `LOAD_ENTRY` dispatches from `useEditorState`'s `useEffect` when `date` changes — this is automatic if `currentDate` state is used. The strip must NOT dispatch `LOAD_ENTRY` directly (that would bypass the hook's single-load gate).
+3. `MoodIcon` called with `size` as a plain integer (e.g. `size={24}`). No string variant name.
+4. No new localStorage keys. Strip reads `readDiaries()` and constructs a transient in-memory lookup.
+5. Save-failure handling: catch `QuotaExceededError` from `upsertDiary`, call `toast.show('저장에 실패했어요...', undefined, 'alert')` — reuse the existing `toast` instance in `Editor.tsx`. Block `setCurrentDate` on failure.
+6. Korean strings only for all user-visible text (aria-labels, labels).
+7. All new files under ~100 lines. `Editor.tsx` is already at 171 lines — any additions should extract rather than inline.
 
 ---
 
-## Risks
+## Risks Specific to This Architecture
 
-1. **SSR/hydration mismatch in storage access.** `readDiaries()` calls `window.localStorage` which is not available during server render. The page component is a server component, so it cannot call `readDiaries()` directly — it must pass only the `date` string to a `"use client"` `Editor` child. Inside the editor, `readDiaries()` must be called inside `useEffect` (following the `useDiaries` + `isReady` pattern). Any attempt to read storage outside `useEffect` will return `[]` silently on SSR and produce a hydration mismatch flash.
+**Data loss during debounce mid-flight**: `useAutosave` has no flush method. The date-switch handler must call `saveFn(autosaveValue)` eagerly (same pattern as `handleExplicitSave`). The pending debounce timer will then fire a duplicate save — harmless because `upsertDiary` is idempotent. This is safe by design but must be explicitly documented in the implementation.
 
-2. **`removeDiary` takes `id`, not `date`.** The intake and requirements consistently call the function `deleteDiary(date)`, which does not exist. The actual function is `removeDiary(id: string)`. If the editor creates a new entry id on mount (before first save) and then the user taps delete immediately, the editor may call `removeDiary` with a stale or non-persisted id. The implementation must guard: delete is only reachable when a saved record exists (loaded from storage with a real persisted `id`).
+**`currentDate` vs URL mismatch**: Once `currentDate` state diverges from the URL path param, the browser URL stays stale (e.g. URL shows `/diary/2026-05-20` while the editor shows May 22nd's entry). This is intentional per REQ-010 (no URL change), but it means the back button will navigate to whatever was before `/diary/2026-05-20` on the stack, not return to May 20th. This is correct behavior per the PRD's history-stack model. The implementation must NOT use `router.replace` to keep the URL in sync — that would still push a history entry and break the expected back behavior.
 
-3. **Debounce + back-navigation race condition.** If the user types and then taps back within the 1-second debounce window, the autosave has not yet fired. The `isDirty` guard fires the `UnsavedChangesDialog`. The "저장하고 나가기" path calls `upsertDiary` explicitly and then `router.back()`. But the still-pending debounce timer will fire 1 second later into an unmounted component. The `useAutosave` hook must cancel its timer in a `useEffect` cleanup, and `useEditorState` must also cancel the pending debounce on unmount.
+**`useDiaries` reads only on mount**: If the strip is mounted while the user is mid-session and has saved an entry (via autosave), the in-memory entry map built from `useDiaries` may be stale for the current date. The strip hook should call `readDiaries()` directly (not `useDiaries`) to get the freshest view on each render or on each strip-open event. This avoids a one-time stale snapshot problem.
 
-4. **NB-1 Escape key gap in `MoodPickerSheet`.** `BottomSheet` claims Escape is handled by native `showModal()`, but `useDialogControl` does not attach a `cancel` event listener to call `onClose`. In `mode='initial'`, the user pressing Escape may close the native dialog without triggering `onCancelInitial`, which is supposed to call `router.back()`. If this fires silently, the user lands on a blank editor with no mood selected and no way to go back cleanly. This carry-forward must be verified and patched before or during REQ-009 integration.
+**`Editor.tsx` file size**: Already at 171 lines. Adding `currentDate` state, `stripOpen` state, and `handleDateSwitch` will push it further. The 100-line rule is already violated; extraction (e.g., pulling date-switch logic into `useHorizontalDatePicker`) is required to keep the file manageable.
 
-5. **`DiaryEntry.textAlign` is required, not optional.** Old localStorage data from informal testing before this REQ may not have the field. Since TypeScript marks it required, `entry.textAlign` typed as `'left' | 'center'` will silently be `undefined` at runtime for legacy data. The editor's initial state derivation should use `entry.textAlign ?? 'left'` defensively.
-
-6. **`MoodPickerSheet` auto-open on new entry — open state timing.** When the editor mounts for a new entry (no existing data), it must auto-open `MoodPickerSheet`. If the open state is set synchronously during render (e.g. `useState(true)`), it will attempt `showModal()` before the `<dialog>` ref is attached. The existing `useDialogControl` already defers `showModal()` to a `useEffect`, so this is safe — but the initial `open` state for the mood sheet must still be set with care (initialized to `true` for new entries, `false` for existing ones).
+**`useEditorState.ts` file size**: Already at 110 lines. No new code goes here, but it's on the radar.
 
 ---
 
-## Unknowns
+## Suggested Component/File Structure for the New Feature
 
-1. **`ConfirmDialog` lacks a `title` prop.** The intake recommends dialog copy like `"저장되지 않은 변경사항이 있어요"` as a title, but `ConfirmDialog` only has `message` (body text). The technical design must decide: (a) put the full copy in `message` as a single string, (b) add a `title?` prop to `ConfirmDialog` and split the copy across title + message, or (c) create a new dialog component. Option (b) is cleanest but requires modifying an existing design-system file.
+```
+src/app/diary/[date]/_components/
+  HorizontalDatePicker.tsx       # scroll container, maps date range → DateCell array
+  DateCell.tsx                   # single cell: MoodIcon (size=24) or day number, highlight
 
-2. **`useEditorState` initial state shape for existing entry.** The editor loads the entry inside `useEffect`. Before the effect runs, the state is empty. Between mount and effect completion, the editor renders with empty fields. Is a loading skeleton needed, or is the flash acceptable? The existing `useDiaries` + `isReady` pattern suppresses rendering until `isReady`, but the editor needs to show something immediately (e.g. the textarea is present but empty). The design must define whether to suppress the entire editor until data is loaded, or accept a brief empty-fields flash.
+src/lib/hooks/
+  useHorizontalDatePicker.ts     # toggle open/close, build ±30-day range, build date→entry Map
+                                 # exposes: isOpen, toggle(), dateRange, entryMap
+```
 
-3. **Textarea keyboard-avoidance strategy.** The intake mentions "CSS `resize: none` + scroll-padding." On mobile Safari and Chrome, `position: sticky` toolbars above the software keyboard require `window.visualViewport` event listeners or CSS `env(keyboard-inset-height)` (iOS 15+). The design must specify the exact implementation, as this is platform-specific and the existing codebase has no prior art for it.
+`Editor.tsx` changes (kept minimal — delegate logic to `useHorizontalDatePicker`):
+- `const [currentDate, setCurrentDate] = useState(date);`
+- `const strip = useHorizontalDatePicker(currentDate);`
+- `handleDateSwitch(newDate)`: `try { saveFn(autosaveValue); setCurrentDate(newDate); strip.close(); } catch { toast.show('저장에 실패했어요...'); }`
 
-4. **E2E localStorage seeding.** The E2E spec for the editor needs to test the "existing entry" entry context, which requires pre-seeding localStorage before navigating. No Playwright localStorage seeding pattern exists in `e2e/calendar.spec.ts`. The design must define how to seed data: `page.evaluate(() => localStorage.setItem(...))` before `page.goto('/diary/...')`, or navigating through the real new-entry flow first and then reloading.
-
-5. **`MoodPickerSheet` Escape + `onCancelInitial` gap (NB-1).** Whether native dialog Escape fires `onCancelInitial` is unverified. This must be tested manually or with a targeted unit test against happy-dom before the editor's back-navigation guard can be considered complete.
-
-6. **Toolbar sticky positioning when keyboard rises.** The design has not specified how the bottom toolbar attaches above the virtual keyboard. Options include `position: fixed; bottom: 0`, `env(safe-area-inset-bottom)`, or `visualViewport` resize listener. This is particularly important on iOS where the viewport does not shrink when the keyboard opens.
+`EditorBody.tsx` changes:
+- Add `stripOpen`, `onDateLabelTap`, `onDateSelect`, `stripEntries` props (or accept the strip node as a `stripSlot` render prop to avoid coupling).
+- Convert the date `<p>` at line 68 to a `<button>` with `aria-label="날짜 선택"`.
+- Render `<HorizontalDatePicker>` between the date line and the textarea when `stripOpen`.
 
 ---
 

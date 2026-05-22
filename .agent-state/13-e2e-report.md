@@ -1,53 +1,59 @@
-# E2E Report — REQ-009: 일기 에디터
+# E2E Report — REQ-010: 가로 날짜 피커 (Horizontal Date Picker)
 
 ## Summary
 
-REQ-009 diary editor E2E suite verified against the current codebase. Both Playwright tests (calendar navigation + editor journey) passed cleanly in 17.9 s with no retries. The `editor.spec.ts` file was written during Phase 9 (test-engineer) and is confirmed green here.
+4 of 4 Playwright specs passed in 13.0s (Chromium, Desktop Chrome). The two new specs for REQ-010 (`horizontal-date-picker.spec.ts`) both passed, confirming the core date-switch user journey is correct and regression-free against the full existing suite.
 
 ## Scenario Tested
 
-**Core user journey:** User opens the calendar, taps the FAB to enter today's editor, sees the mood picker auto-open, selects a mood (기쁨), types diary text, waits for the 1-second autosave to fire, taps the back button to return to the calendar, and confirms the calendar cell for today now shows a mood emoji rather than a plain date number.
+**REQ-010 — Horizontal Date Picker on the Diary Editor**
+
+A user on the diary editor taps the "날짜 선택" button to reveal a horizontal date strip, taps a different date cell, and the editor content switches to that date without navigating away or corrupting the original entry.
 
 ## Steps
 
-1. Navigate to `/` (calendar screen).
-2. Tap `오늘 일기 쓰기` FAB — router navigates to `/diary/YYYY-MM-DD`.
-3. Assert `MoodPickerSheet` heading `오늘은 어떤 하루였나요?` is visible (auto-open on empty entry).
-4. Click `기쁨` mood button — sheet closes.
-5. Assert textarea placeholder `오늘 어떤 하루였나요?` is visible.
-6. Fill textarea with `E2E 테스트 일기`.
-7. Wait 1500 ms (autosave debounce = 1000 ms + 500 ms buffer).
-8. Click `뒤로가기` button — expect URL to return to `/`.
-9. Find today's calendar button by date string regex — assert text content is non-empty and not a bare digit string (confirms mood emoji rendered).
+**E1 — date switch with both entries seeded**
+1. Seed localStorage with entries for DATE_A (yesterday) and DATE_B (today).
+2. Navigate to `/diary/DATE_A`; assert textarea shows "Entry A text".
+3. Click "날짜 선택" button; assert listbox "가로 캘린더" is visible.
+4. Click the option for DATE_B (full Korean locale label via `toKoreanLabel`).
+5. Assert URL remains `/diary/DATE_A` (no navigation occurred).
+6. Assert textarea now shows "Entry B text".
+7. Assert listbox is closed.
+8. Assert localStorage still contains DATE_A entry with original text unchanged.
+
+**E2 — date switch from a no-mood entry does not persist partial data**
+1. Seed localStorage with only DATE_B; DATE_A has no entry.
+2. Navigate to `/diary/DATE_A`; mood picker opens automatically.
+3. Dismiss mood picker via "닫기" button.
+4. Fill textarea with "Unsaved text no mood" (no mood selected).
+5. Click "날짜 선택"; assert strip opens.
+6. Click DATE_B cell; assert textarea shows "Entry B only".
+7. Assert localStorage contains no entry for DATE_A (save guard exits early when `mood === undefined`).
 
 ## Test Files Added / Updated
 
-- `/Users/jay/Documents/Projects/ai_diary/e2e/editor.spec.ts` — 1 Playwright test (written in Phase 9; no changes made in this phase)
-- `/Users/jay/Documents/Projects/ai_diary/e2e/_helpers/seedDiaries.ts` — localStorage seed utility used by tests (no changes made in this phase)
-
-The existing `e2e/calendar.spec.ts` (FAB navigation test from REQ-007) also runs in this suite and passes; it was not modified.
+- `e2e/horizontal-date-picker.spec.ts` — 2 test cases (written in Phase 9; no changes in this phase)
+- `e2e/_helpers/seedDiaries.ts` — `seedDiariesScript` localStorage seed utility (shared with `editor.spec.ts`)
 
 ## Commands Run
 
 ```
-npx playwright install chromium
 npm run test:e2e
 ```
 
 ## Results
 
-```
-Running 2 tests using 2 workers
+| # | File | Test | Result | Duration |
+|---|------|------|--------|----------|
+| 1 | horizontal-date-picker.spec.ts | E1: switch date A → B, URL stays at A | PASS | 3.9s |
+| 2 | horizontal-date-picker.spec.ts | E2: no-mood date switch, no partial persist | PASS | 1.5s |
+| 3 | calendar.spec.ts | 캘린더 FAB → 오늘 에디터 이동 | PASS | 3.2s |
+| 4 | editor.spec.ts | 빈 셀 → 무드 → 입력 → 저장 → 캘린더 무드 표시 | PASS | 4.9s |
 
-  ✓  2 [chromium] › e2e/calendar.spec.ts:3:5 › 캘린더 화면 진입 후 FAB 탭 시 오늘 일기 에디터로 이동 (2.4s)
-  ✓  1 [chromium] › e2e/editor.spec.ts:3:5 › 캘린더 빈 셀 → 무드 선택 → 본문 입력 → 자동 저장 → 뒤로 → 캘린더에 무드 표시 (4.2s)
+**Total: 4 passed, 0 failed — 13.0s**
 
-  2 passed (17.9s)
-```
-
-Browser: Chromium (Desktop Chrome profile), Playwright 1.60.0.
-Dev server: `npm run dev` on `http://localhost:3000` (reused if already running per `reuseExistingServer: true`).
-Spec config: `playwright.config.ts` — `testDir: ./e2e`, `timeout: 30_000`, Chromium only, `fullyParallel: false`.
+Browser: Chromium (Desktop Chrome profile). Config: `playwright.config.ts`, `testDir: ./e2e`, `timeout: 30_000`, `fullyParallel: false`.
 
 ## Failures
 
@@ -59,10 +65,9 @@ No failures occurred. `trace: 'on-first-retry'` is configured; no traces were pr
 
 ## Not Tested
 
-- **Existing-entry re-open persistence (E2E):** Covered by integration tests (Cases C2, C3) but not by a dedicated E2E flow. Omitted to keep E2E scope narrow.
-- **Delete flow (E2E):** Covered by integration test (Case C10); not duplicated in E2E.
-- **Unsaved-changes guard (E2E):** Covered by integration tests (Cases C8, C9); not duplicated in E2E.
-- **Mobile viewport:** Config uses `Desktop Chrome`. Mobile-first layout is validated by unit tests; no mobile Playwright project is configured.
+- Month boundary scrolling in the date strip (strip renders ±15 days; scroll past that boundary is a stretch goal).
+- Keyboard navigation within the date strip listbox.
+- Mobile viewport (config targets Desktop Chrome; mobile-first layout validated by unit tests).
 
 ## Verdict
 PASS

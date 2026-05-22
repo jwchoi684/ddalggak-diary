@@ -1,85 +1,55 @@
-# Performance Review Report — REQ-009
+# Performance Review Report — REQ-010
 
 ## Summary
 
-REQ-009 adds the diary editor at `/diary/[date]`. The change is entirely client-side (Next.js App Router, React 19, localStorage). There are no backend calls, no network requests, no pagination, no large data queries, and no background jobs. The feature affects two narrow performance-sensitive areas: (1) the autosave debounce timer, and (2) localStorage read/write frequency. Both are implemented correctly. No blocking performance issues were found.
+REQ-010 adds a collapsible horizontal date strip (61 cells, ±30 days) to the diary editor. All performance characteristics are acceptable for a single-user, localStorage-backed, mobile-first app. No blocking issues were found. Three non-blocking observations are noted.
 
 ## Scope
 
 Files reviewed:
-
-- `src/app/diary/[date]/page.tsx`
+- `src/lib/hooks/useHorizontalDatePicker.ts`
+- `src/app/diary/[date]/_components/HorizontalDatePicker.tsx`
+- `src/app/diary/[date]/_components/DateCell.tsx`
 - `src/app/diary/[date]/_components/Editor.tsx`
 - `src/app/diary/[date]/_components/EditorBody.tsx`
-- `src/app/diary/[date]/_components/EditorToolbar.tsx`
-- `src/app/diary/[date]/_components/EditorHeader.tsx`
-- `src/app/diary/[date]/_components/EditorMoreMenu.tsx`
-- `src/lib/hooks/useAutosave.ts`
-- `src/lib/hooks/useEditorState.ts`
-- `src/design-system/useDialogControl.ts`
 - `src/lib/storage/diaries.ts`
+- `.agent-state/03-technical-design.md`, `.agent-state/09-code-review-report.md`
 
 ## Findings
 
-### 1. Autosave debounce — correct, no timer leaks
+**1. Re-render churn from `useHorizontalDatePicker` when strip is closed.**
 
-`useAutosave` is a single `useEffect` that schedules `setTimeout` and cancels it via the cleanup return. Because `[value, delayMs, saveFn]` are the deps, any change to those three cancels the prior timer and starts a fresh one. On unmount the cleanup fires and the pending timer is cancelled. `saveFn` is not called after unmount. Textbook correct pattern.
+`useHorizontalDatePicker` is called unconditionally inside `Editor` on every render. When the strip is closed (the common state while typing), the hook runs three `useMemo` and two `useCallback` computations on every render. `dateRange` is memoized on `[currentDate]` — stable while typing, so it does not recompute. `entryMap` is memoized on `[isOpen]` — stable while typing (strip stays closed), so it does not recompute. `handleDateSelect` is memoized on `[currentDate, saveFn, autosaveValue, onDateChange, onSaveError]`. `autosaveValue` is a `useMemo` keyed on `[state.mood, state.text, state.textAlign]`; each character typed changes `state.text`, which recreates `autosaveValue`, which invalidates `handleDateSelect`. Additionally, `onSaveError` is an inline arrow `(msg) => toast.show(msg)` (Editor line 69) that is recreated on every render, which also invalidates `handleDateSelect`. In practice this means `handleDateSelect` is recreated on every keystroke. Because the strip is not mounted when closed (`{stripOpen && <HorizontalDatePicker .../>}`), this recreated callback never reaches any mounted component; it is dropped immediately. The churn is therefore limited to a single `useCallback` invocation per keystroke inside the hook — roughly equivalent to allocating a small closure object. For a textarea in a single-user diary app this cost is negligible.
 
-The 1-second debounce is appropriate. Rapid keystrokes will repeatedly cancel-and-reschedule without amplification — each keystroke merely resets one timer. There is no accumulation of concurrent timers.
+**2. 61 DateCell render cost when strip opens.**
 
-### 2. `saveFn` / `autosaveValue` memoization — correct
+Each `DateCell` is a small functional component: two string operations (`date.slice(-2).replace(...)` for `dayNumber` and `date === today` / `date === currentDate` comparisons), one conditional branch for `entry`, and one optional `MoodIcon`. None of these are expensive. The 61 cells are rendered in a single pass on mount. There is no virtualization, which is appropriate — 61 cells at 44px width each fit in ~2900px of scroll width; all are allocated but only ~7-9 are visible. A 61-element DOM is within normal browser capacity.
 
-In `Editor.tsx`:
-- `autosaveValue` is wrapped in `useMemo([state.mood, state.text, state.textAlign])`. Object identity is stable between renders that do not change those three fields, so the autosave timer does not reset on unrelated state changes (e.g., opening the more-menu, toggling dialogs).
-- `saveFn` is wrapped in `useCallback([state.persistedId, state.persistedCreatedAt, date, dispatch])`. It only gets a new identity when persisted identity data changes (first save, or after delete), which is rare.
+`onSelect` is passed as `onDateSelect` from `HorizontalDatePicker` to each `DateCell` as a prop, with each cell capturing its own `date` via `() => onSelect(date)` in the `onClick`. This inline arrow is created per cell per render, but since `HorizontalDatePicker` only mounts on open, and renders only once (no internal state changes during the strip's lifetime unless `onDateSelect` itself changes), this is effectively a one-time allocation of 61 arrow functions. Acceptable.
 
-These two together mean keystrokes only reset the debounce timer — not toolbar re-renders or dialog open/close events.
+**3. `scrollIntoView` on mount.**
 
-### 3. localStorage read frequency — one read on mount, writes only on save
+`HorizontalDatePicker` uses `useEffect([], [])` — the empty dependency array ensures the DOM query and `scrollIntoView` call fire exactly once, on mount. It does not re-fire on subsequent renders. This is correct.
 
-`readDiaries()` is called exactly once inside the `useEffect` in `useEditorState`, and only on mount or if `date` changes (impossible since the route is static per navigation). No polling or read-on-keystroke.
+**4. `readDiaries()` cost per open.**
 
-`upsertDiary` calls `readDiaries()` internally (read-then-write pattern) every time it runs. One `JSON.parse` + one `JSON.stringify` per save event. For a single-user app with at most a few hundred diary entries, this is negligible. At 5000 characters of maximum text, the entire serialized payload is well under 100 KB.
+`readDiaries()` performs one `localStorage.getItem` and one `JSON.parse` of the full diary array. For a personal diary app the array is bounded by roughly one entry per day of use (typically tens to low hundreds of entries). `JSON.parse` of a few hundred small objects on modern mobile hardware takes well under 1ms. The `entryMap` memo is keyed on `[isOpen]`, so this runs once on open and once on close. The close-time recompute is a minor unnecessary cost (noted by the code review), but it is not a performance concern.
 
-### 4. Toolbar/Header callback identity — acceptable for MVP
+**5. `buildDateRange` cost.**
 
-`EditorHeader` receives `onBack` and `onMoreMenu`. Both are inline arrow functions defined inside `Editor`'s render body — they are new references every render. Since `EditorHeader` and `EditorToolbar` are not wrapped in `React.memo`, this is harmless: they re-render whenever `Editor` re-renders anyway. No gratuitous DOM updates occur because React's reconciler compares output, not prop identity, for non-memoised children. For a screen with fewer than 10 interactive elements this is entirely acceptable.
+A 61-iteration loop over integer arithmetic and a single `toISOString().slice(0, 10)` call per iteration. This is negligible. It runs once per `currentDate` change (i.e., once per date-cell tap), not per keystroke.
 
-If these components were memoised for optimisation, the inline lambdas would defeat that. They are not, so no issue exists today.
+**6. `Intl.DateTimeFormat` instantiation per render in `DateCell`.**
 
-### 5. `useEditorState` state shape — no unnecessary sub-component re-renders
+`DateCell` calls `toKoreanDateLabel(date)` on every render, which instantiates `new Intl.DateTimeFormat('ko-KR', ...)` inside the function body on each call. Since `HorizontalDatePicker` renders 61 `DateCell` instances on mount, this creates 61 `Intl.DateTimeFormat` objects. Modern V8 caches the resolved locale data for `'ko-KR'` so subsequent instantiations do not re-parse locale data, but object construction overhead is still 61x. In contrast, `EditorBody.tsx` correctly uses a module-level `DATE_FMT` singleton. The inconsistency is a minor inefficiency but not a performance problem at this scale — `Intl.DateTimeFormat` construction inside a one-time mount of 61 cells is not a hot path.
 
-The full editor state is a single flat object passed via `useReducer`. `Editor` reads individual fields and passes them as primitive or simple props to children. Sub-components re-render only when their specific props change. `EditorToolbar` re-renders when `isDirty` or `textAlign` changes, which is correct. The state shape does not force the whole tree to re-render on dialog open/close because `EditorBody` and `EditorToolbar` do not receive dialog state.
+**7. CSS `scroll-snap-type: x mandatory` on mobile Chromium.**
 
-### 6. `useLayoutEffect` runs on every render — low impact
+CSS scroll snap is GPU-composited in all modern browsers including mobile Chromium (Chrome for Android, WebView). It does not involve a JS scroll listener and does not block the main thread during scrolling. The `WebkitOverflowScrolling: 'touch'` style enables momentum scrolling on iOS. No performance concern.
 
-The cursor-restoration `useLayoutEffect` in `Editor.tsx` has no dep array, meaning it runs after every render. The guard `if (pendingCursorPos.current !== null && textareaRef.current)` makes the body a near-zero-cost branch in the common case (the ref is null almost always). Intentional: running after every render ensures it fires in the same paint frame as the time-insert dispatch. Acceptable.
+**8. `Editor.tsx` re-render frequency with strip wired.**
 
-### 7. `Intl.DateTimeFormat` formatter — module-level singleton
-
-In `EditorBody.tsx` the formatter is instantiated once at module level:
-
-```ts
-const DATE_FMT = new Intl.DateTimeFormat('ko-KR', { ... });
-```
-
-Avoids re-constructing a `DateTimeFormat` object on every render. Correct.
-
-### 8. `useDialogControl` cancel event listener — no leak
-
-The `cancel` listener is attached only when `open=true` and removed in the effect cleanup, which fires when `open` flips to `false` or the component unmounts. The `onCloseRef` pattern ensures the listener never captures a stale `onClose`. No leak.
-
-### 9. Route bundle size — 5.68 kB, negligible
-
-Confirmed from the build output in the implementation report. No large third-party imports introduced. All new dependencies (`useReducer`, `useCallback`, `useMemo`, `useLayoutEffect`) are React built-ins with no bundle cost.
-
-### 10. Hydration / first-paint
-
-The editor renders unconditionally on first paint with empty fields (`isLoaded: false`). The textarea is visible immediately; content populates after the `useEffect` in `useEditorState` completes (one microtask cycle). For an existing entry there is a one-frame empty-field flash, accepted by design. No hydration mismatch risk because `readDiaries()` is only called inside `useEffect`, never at render time.
-
-### 11. `readDiaries().find()` cost — negligible
-
-`Array.find` over a diary array for a single-user app capped at 365 entries/year is O(n) with n < 1000 for any plausible usage. Negligible.
+Typing in the textarea dispatches `SET_TEXT` into `useEditorState`, which re-renders `Editor`. Each re-render calls `useHorizontalDatePicker` (always-on hook). As discussed in finding #1, `autosaveValue` changes on every keystroke (by design — it tracks live text), which causes `handleDateSelect` to be recreated, but since the strip is unmounted while closed the callback is never propagated to any child. `dateRange` and `entryMap` are stable during typing (their deps do not change). Net re-render work added to each keystroke: one `useMemo` equality check (autosaveValue deps changed), one `useMemo` equality check (dateRange deps unchanged — skip), one `useMemo` equality check (entryMap deps unchanged — skip), one `useCallback` recreation (handleDateSelect). This is a typical React overhead per keystroke and is within expected norms for a mobile app of this kind.
 
 ## Blocking Issues
 
@@ -87,11 +57,11 @@ None.
 
 ## Non-Blocking Suggestions
 
-1. **Memoize `EditorHeader` and `EditorToolbar` if they grow.** Currently they receive new callback refs every render but are not `React.memo`-wrapped. Fine today. If either becomes more expensive (animation, complex DOM), wrap in `memo` and stabilise the callbacks with `useCallback` in `Editor`.
+1. **`Intl.DateTimeFormat` in `DateCell.tsx` — move to module-level singleton.** `toKoreanDateLabel` instantiates a new formatter on each call. Elevating `new Intl.DateTimeFormat('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })` to a module-level constant (matching the `DATE_FMT` pattern already used in `EditorBody.tsx`) eliminates 61 object allocations per strip open. Low priority, but it is a straightforward one-line fix and makes the pattern consistent across the codebase.
 
-2. **`useLayoutEffect` dep array.** The no-dep-array `useLayoutEffect` for cursor restoration runs on every render. An alternative is to pass `[state.text]` as deps and accept the one-frame delay. Minor code-clarity improvement, not a performance issue.
+2. **`onSaveError` inline arrow causes `handleDateSelect` recreation on every Editor render.** Wrapping `(msg) => toast.show(msg)` at Editor line 69 in a `useCallback([toast.show])` would stabilize the reference and prevent `handleDateSelect` from being recreated on every keystroke. Since the strip is unmounted while closed this has zero observable impact today, but the fix is trivial and preempts the issue if the strip ever supports live preview updates without closing.
 
-3. **`upsertDiary` double-read on new entry creation.** Every save reads-then-writes. Unavoidable given current storage layer design. Not an issue at MVP scale; a write-only `appendDiary` for new entries would eliminate the read if revisited.
+3. **`entryMap` recomputes on strip close (as well as open).** The `eslint-disable` on `useMemo([isOpen])` is intentional and documented. A minimal mitigation without using a ref hack would be to check `if (!isOpen) return prev` inside the memo factory — but `useMemo` does not expose `prev`. This is acceptable as-is for the current scale; note it before the diary corpus grows significantly.
 
 ## Verdict
 PASS

@@ -50,3 +50,23 @@ body {
 dialog::backdrop {
   background-color: rgba(0, 0, 0, 0.4);
 }
+
+/* REQ-010: horizontal date strip slide-in animation */
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* REQ-010: hide scrollbar on the horizontal date strip */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
