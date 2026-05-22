@@ -12,7 +12,7 @@ const { readDiaries } = await import('@/lib/storage');
 const readDiariesMock = readDiaries as ReturnType<typeof vi.fn>;
 
 const { useEditorState } = await import('@/lib/hooks/useEditorState');
-const { makeDiary } = await import('@/lib/storage/__tests__/fixtures');
+const { makeDiary, makePhoto } = await import('@/lib/storage/__tests__/fixtures');
 
 // Install LocalStorageShim (pattern check / defensive)
 await import('@/lib/storage/__tests__/setup');
@@ -84,6 +84,54 @@ describe('useEditorState', () => {
 
     act(() => { result.current[1]({ type: 'SET_TEXT', text: 'original' }); });
     expect(isDirty(result.current[0])).toBe(false);
+  });
+
+  it('ES-photo-1: ADD_PHOTO appends photo to state.photos', async () => {
+    readDiariesMock.mockReturnValue([]);
+    const { result } = renderHook(() => useEditorState('2026-05-15'));
+    await act(async () => {});
+
+    expect(result.current[0].photos).toHaveLength(0);
+
+    const photo = makePhoto();
+    act(() => { result.current[1]({ type: 'ADD_PHOTO', photo }); });
+
+    expect(result.current[0].photos).toHaveLength(1);
+    expect(result.current[0].photos[0]).toEqual(photo);
+  });
+
+  it('ES-photo-2: DELETE_PHOTO removes photo by id', async () => {
+    const photo1 = makePhoto();
+    const photo2 = makePhoto();
+    const entry = makeDiary({ date: '2026-05-15', photos: [photo1, photo2] });
+    readDiariesMock.mockReturnValue([entry]);
+    const { result } = renderHook(() => useEditorState('2026-05-15'));
+    await act(async () => {});
+
+    expect(result.current[0].photos).toHaveLength(2);
+
+    act(() => { result.current[1]({ type: 'DELETE_PHOTO', id: photo1.id }); });
+
+    expect(result.current[0].photos).toHaveLength(1);
+    expect(result.current[0].photos[0].id).toBe(photo2.id);
+  });
+
+  it('ES-photo-3: LOAD_ENTRY spreads entry.photos; missing photos defaults to []', async () => {
+    const photo1 = makePhoto();
+    const photo2 = makePhoto();
+    const entryWithPhotos = makeDiary({ date: '2026-05-15', photos: [photo1, photo2] });
+    readDiariesMock.mockReturnValue([entryWithPhotos]);
+    const { result } = renderHook(() => useEditorState('2026-05-15'));
+    await act(async () => {});
+
+    expect(result.current[0].photos).toHaveLength(2);
+
+    // Re-render with a date having no entry (photos should default to [])
+    readDiariesMock.mockReturnValue([]);
+    const { result: r2 } = renderHook(() => useEditorState('2026-05-20'));
+    await act(async () => {});
+
+    expect(r2.current[0].photos).toEqual([]);
   });
 
   it('MARK_SAVED resets snapshot → isDirty=false after save', async () => {

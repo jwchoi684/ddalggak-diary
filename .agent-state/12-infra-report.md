@@ -1,37 +1,49 @@
-# Infra Review Report — REQ-010
+# Infra Review Report — REQ-011
 
 ## Summary
 
-REQ-010 is a pure client-side UI feature. All changed files are React components, custom hooks, CSS utilities, unit tests, and one Playwright E2E spec. No infrastructure surface is touched.
+REQ-011 is a pure client-side photo attachment feature (FileReader, localStorage base64, no backend). The only infrastructure-touching change is a fix-cycle edit to `playwright.config.ts`. All other infra surfaces are untouched.
 
 ## Scope
 
-Files reviewed:
+The following infra surfaces were checked:
 
-- `src/lib/hooks/useHorizontalDatePicker.ts`
-- `src/app/diary/[date]/_components/HorizontalDatePicker.tsx`
-- `src/app/diary/[date]/_components/DateCell.tsx`
-- `src/app/diary/[date]/_components/Editor.tsx`
-- `src/app/diary/[date]/_components/EditorBody.tsx`
-- `src/app/globals.css`
-- `e2e/horizontal-date-picker.spec.ts`
-- Git diff across `package.json`, `*.config.*`, `.env*`, CI workflow files, Docker files
+- `package.json` / `package-lock.json` — dependency manifest
+- `.env*` files — environment variable configuration
+- `.github/` — CI/CD workflows (directory does not exist in this repo)
+- `playwright.config.ts` — E2E test runner configuration
+- `next.config*` — Next.js build/routing configuration
+- Docker / Compose files — not present in repo
 
 ## Environment / Config Changes
 
-None. No `process.env` references, `NEXT_PUBLIC_*` variables, or secret lookups appear in any new or modified file. The only `.env*` file in the repo (`.env.local.example`) was not touched. `package.json` diff is empty — no new runtime or dev dependencies introduced.
+None. No `.env` files were added or modified. No environment variables are introduced, removed, or renamed by REQ-011. The existing `OPENAI_API_KEY` path in `.env.local.example` is unchanged.
 
 ## Deployment Impact
 
-None. All new code is statically bundled client-side React. No new API routes, no server actions, no edge functions. The Next.js routing contract is unchanged: `src/app/diary/[date]/page.tsx` retains the same dynamic segment and now renders `<Editor date={date} />` (the placeholder content it previously held was removed as part of REQ-009/010 implementation, not a routing change). `next.config.ts`, `postcss.config.mjs`, `playwright.config.ts`, and `vitest.config.ts` were last touched in REQ-007 or REQ-001; none changed in this diff.
+None. REQ-011 adds no server routes, no API handlers, no build-time plugins, and no new npm dependencies. The Next.js routing tree is unchanged. Build output is identical in character — no new pages, no changed `next.config.ts`.
+
+The single config change is in `playwright.config.ts`, which is a test-time file and has no effect on the production deployment artifact.
+
+## `playwright.config.ts` Change Analysis
+
+Changes introduced:
+
+1. Port 3000 -> 3001 across `baseURL`, `webServer.url`, and `webServer.command` (`next dev --port 3001`). Rationale (VS Code extension host conflict on port 3000) is valid and well-commented. Port 3001 is unambiguous and does not collide with any other declared service.
+
+2. `workers: 1` and `fullyParallel: false` — prevent parallel cold-start races against Next.js route compilation. Conservative and appropriate for a single-machine dev environment.
+
+3. `expect.timeout: 15_000` and `navigationTimeout: 15_000` — accommodate Next.js cold-start compile time. Standard mitigation.
+
+4. `stdout: 'pipe'` + `wait: { stdout: /Ready in/ }` — waits for the Next.js "Ready in" log line before releasing the webServer gate. The code-reviewer flagged this as relying on an undocumented API (NB-6). Verification: Playwright 1.60.0 is installed; `defineConfig` accepts the `wait` property without error. The `wait.stdout` key is present in `@playwright/test` 1.50+ internals (introduced as part of the webServer stability improvements) and is accepted by the schema validator at runtime. The risk is that the exact log string "Ready in" is Next.js-internal and could change across Next.js versions, causing the E2E suite to hang until `timeout: 120_000` expires before falling through. This is not a blocking deployment risk — it only affects local E2E runs and CI E2E runs; it does not affect the production build or runtime.
 
 ## Rollback Plan
 
-Standard Next.js revert applies: `git revert` of the commit removes the three new component files and restores `Editor.tsx`, `EditorBody.tsx`, and `globals.css` to their prior state. No migration, no seed data, no cloud resource teardown required. Storage keys (`ddalkkak:diaries:v1`) are unchanged.
+No deployment artifact is changed. Rolling back this feature requires reverting the source files listed in the implementation report. `playwright.config.ts` can independently be reverted to port 3000 with the URL-based readiness check (`url: 'http://localhost:3000'`) if the `wait.stdout` pattern causes CI hangs.
 
 ## Observability Notes
 
-No new logging, metrics, or tracing added. Existing `toast.show()` on `QuotaExceededError` is the only observable runtime signal introduced by this feature; it reuses the existing toast infrastructure with no new sinks.
+No logging, metrics, or tracing changes. The feature writes only to `localStorage`; no server-side observability surface is touched.
 
 ## Blocking Issues
 
@@ -39,7 +51,9 @@ None.
 
 ## Non-Blocking Suggestions
 
-None with infra relevance.
+1. The `wait: { stdout: /Ready in/ }` pattern depends on a Next.js log string that is not part of its public API. If Next.js changes that string in a future upgrade, the E2E suite will time out (after 120 s) rather than fail fast. A more robust fallback is to remove `wait` and rely solely on Playwright's URL-based health poll combined with the existing `timeout: 120_000`. The port change alone resolves the VS Code conflict; the `wait` optimization is additive.
+
+2. The `webServer.command` now calls `next` directly rather than via `npm run dev`. Ensure the `next` binary is resolvable in CI PATH (it is, given `next` is a project dependency resolved through `node_modules/.bin`), but this is worth noting if a CI image does not install dev dependencies.
 
 ## Verdict
 PASS

@@ -1,35 +1,31 @@
-# Test Report — REQ-010 (Fix Cycle 1 re-verify)
+# Test Report — REQ-011 (Cycle 2)
 
 ## Summary
 
-All verification gates pass after Fix Cycle 1. 237/237 unit tests PASS. TypeCheck PASS.
-Lint PASS. E2E: 4/4 PASS (calendar.spec.ts, editor.spec.ts, horizontal-date-picker.spec.ts E1
-and E2 both green).
-
-No existing test expected `router.back()` to be called on `onCancelInitial`. The
-`onCancelInitial={undefined}` change in `Editor.tsx` caused zero unit-test regressions.
+Unit/integration tests: 263/263 PASS (38 files). TypeCheck PASS. Lint PASS.
+E2E: 6/6 PASS — all specs pass after three developer fixes (port 3001, webServer ready-signal, seedDiariesOnceScript helper).
 
 ---
 
-## Tests Added / Updated
+## Tests Added / Updated (REQ-011)
 
 | File | Cases | Status |
 |---|---|---|
-| `src/lib/hooks/__tests__/useHorizontalDatePicker.test.ts` | 7 (H1–H7) | PASS |
-| `src/app/diary/[date]/_components/__tests__/DateCell.test.tsx` | 8 (DC1–DC8) | PASS |
-| `src/app/diary/[date]/_components/__tests__/HorizontalDatePicker.test.tsx` | 4 (HP1–HP4) | PASS |
-| `src/app/diary/[date]/__tests__/Editor.test.tsx` | 15 total (3 new: C-strip-1,2,3) | PASS |
-| `e2e/horizontal-date-picker.spec.ts` | 2 E2E (E1, E2) | PASS |
+| `src/app/diary/[date]/__tests__/PhotoCarousel.test.tsx` | 7 (new) | PASS |
+| `src/lib/storage/__tests__/photoBase64.test.ts` | 6 (new) | PASS |
+| `src/app/diary/[date]/__tests__/Editor.test.tsx` | 19 total (4 new photo cases) | PASS |
+| `src/app/__tests__/diary-date-page.test.tsx` | 4 total (updated) | PASS |
+| `e2e/photos.spec.ts` | 2 new E2E (PE1, PE2) | PASS |
 
 ---
 
 ## Commands Run
 
 ```
-npx vitest run --reporter=basic   → 35 files, 237 tests, all PASS (5.97s)
+npx vitest run --reporter=basic   → 38 files, 263 tests, all PASS (7.87s)
 npx tsc --noEmit                  → 0 errors PASS
 npm run lint                      → 0 warnings, 0 errors PASS
-npm run test:e2e                  → 4 total: 4 passed (12.6s)
+npm run test:e2e                  → 6 tests, all PASS (21.6s)
 ```
 
 ---
@@ -38,13 +34,15 @@ npm run test:e2e                  → 4 total: 4 passed (12.6s)
 
 | Suite | Count | Result |
 |---|---|---|
-| Unit + integration (vitest) | 237 | PASS |
+| Unit + integration (vitest) | 263 | PASS |
 | TypeScript compile | — | PASS |
 | ESLint | — | PASS |
 | E2E — calendar.spec.ts | 1 | PASS |
 | E2E — editor.spec.ts | 1 | PASS |
 | E2E — horizontal-date-picker.spec.ts E1 | 1 | PASS |
 | E2E — horizontal-date-picker.spec.ts E2 | 1 | PASS |
+| E2E — photos.spec.ts PE1 | 1 | PASS |
+| E2E — photos.spec.ts PE2 | 1 | PASS |
 
 ---
 
@@ -54,35 +52,19 @@ None.
 
 ---
 
-## onCancelInitial Regression Check
-
-Inspected all 15 cases in `src/app/diary/[date]/__tests__/Editor.test.tsx`. No test asserted
-that `router.back()` is called when MoodPickerSheet is canceled in `'initial'` mode.
-
-- C1 verifies `showModal` is called (mood sheet auto-opens for new entry) — no cancel path tested.
-- C8/C9 test the header back-button flow via `handleBack` / `handleSaveAndBack` — unrelated.
-- No existing test is invalidated by the behavioral change. Zero regressions.
-
----
-
 ## Coverage Notes
 
-- All 19 unit cases for new REQ-010 code (H1–H7, DC1–DC8, HP1–HP4) pass.
-- 3 integration cases in Editor.test.tsx (C-strip-1, C-strip-2, C-strip-3) pass.
-- E2E E1 verifies: date strip navigation preserves seeded entry A in localStorage and loads
-  entry B text into the editor without changing the URL.
-- E2E E2 verifies: closing MoodPickerSheet via "닫기" button stays on editor, then date-strip
-  switch to date B does not persist a no-mood entry for date A.
+- 263 unit/integration tests pass, including 7 new PhotoCarousel tests and 6 new photoBase64 storage tests added for REQ-011.
+- All 6 E2E specs pass end-to-end on Chromium with the Next.js dev server bound to port 3001.
+- TypeScript and ESLint gates are clean.
 
 ---
 
 ## Remaining Risks
 
-- `isoDate(offset)` in the E2E spec uses local-date arithmetic (`setDate`). In KST between
-  midnight and 09:00 UTC, `isoDate(0)` returns today's local date correctly. Latent flakiness
-  risk is low for developer machines but noted for CI in non-UTC zones.
-- `EditorBody.tsx` at 122 lines and `Editor.tsx` at 192 lines remain over the 100-line soft
-  ceiling. Extraction is recommended before the next feature adds further props.
+- E2E suite runs only on Chromium (single worker). Firefox/WebKit coverage is deferred.
+- PE1 uses `seedDiariesOnceScript` to seed localStorage before any navigation; if that helper is removed or the script timing changes, PE1 may become flaky.
+- Photo upload relies on `input[type="file"]` being present unconditionally in the DOM. A future conditional-render refactor would break PE1.
 
 ---
 

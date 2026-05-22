@@ -1,72 +1,51 @@
-# Data Model / Migration Report — REQ-010
+# Data Model / Migration Report — REQ-011
 
 ## Summary
 
-REQ-010 (에디터 내 가로 캘린더 인라인 드롭다운) is a pure client-side UI feature. It reads
-existing diary entries from localStorage and derives an in-memory lookup table. No storage schema
-changes, no new keys, no migration, and no backfill are required.
+REQ-011 adds photo attachment UI to the diary editor. All data model work was completed in REQ-002. This feature only populates an already-defined field. No schema changes, no migrations, and no new localStorage keys are required.
 
 ## Schema Change Required
 
-None. `DiaryEntry` in `src/lib/storage/types.ts` is unchanged. No new fields are added. No
-existing fields are removed or widened.
+No. `Photo` and `DiaryEntry.photos: Photo[]` are already defined in `src/lib/storage/types.ts` (lines 78–87 and 108 respectively). The storage layer (`diaries.ts`) round-trips the full `DiaryEntry` object through `JSON.parse` / `JSON.stringify` without any field projection, so a non-empty `photos` array persists correctly today.
 
 ## Migration Strategy
 
-Not applicable. There is no database layer (this project uses localStorage only). No migration
-script is needed.
+None needed.
 
 ## Backfill / Default / Nullability
 
-Not applicable. The feature reads existing `DiaryEntry` records as-is. The `entryMap` (a
-`Map<string, DiaryEntry>`) is built entirely in memory inside `useHorizontalDatePicker` by calling
-the existing `readDiaries()` function. Missing entries for a given date are represented as
-`undefined` — no default value is written back to storage.
+Existing entries serialized before REQ-011 have `photos: []`. The storage layer returns entries as-is from JSON; callers are expected to use `entry.photos ?? []` to guard against entries that predate the field entirely. No backfill required.
 
 ## Index Requirements
 
-Not applicable. `readDiaries()` performs a full O(n) scan over the localStorage array and indexes
-results into an in-memory `Map<string, DiaryEntry>` keyed by `date`. For a 1-year active user
-(n ≈ 365 entries) this is negligible. No persistent index is needed.
+None. localStorage has no index layer.
 
 ## Existing Data Compatibility
 
-Full compatibility confirmed. The feature reads `ddalkkak:diaries:v1` entries written by earlier
-REQs (REQ-002, REQ-009). All fields consumed (`date`, `mood`, `id`) already exist in the current
-`DiaryEntry` schema. Entries with a falsy `mood` are handled gracefully (renders `•` placeholder
-rather than crashing).
+Fully backward-compatible. An entry with `photos: []` loads correctly; the carousel renders nothing and hides itself (per acceptance criteria). An entry with a populated `photos` array also loads without any migration.
 
 ## Rollback Considerations
 
-Not applicable. No storage structure is modified. Rolling back or removing this feature has zero
-impact on existing localStorage data.
+No schema artifact to roll back. Removing the REQ-011 UI code leaves any stored `photos` arrays inert but harmless in localStorage. Data is not corrupted.
 
 ## Query Performance Risk
 
-None. `readDiaries()` is called once per strip open event (recomputed via
-`useMemo([isOpen])`), not on every render. 61-cell static render with no virtual scroll is well
-within acceptable bounds.
+None for the storage layer itself. The only risk is localStorage quota exhaustion from large base64 payloads — this is a runtime concern documented in `limits.ts` and enforced by the `addPhotoFromFile()` utility (not a migration concern).
 
 ## Seed / Fixture Impact
 
-None. No seed or fixture files reference localStorage keys or `DiaryEntry` shape in a way that
-would break.
+No fixture changes required. Existing fixtures in `src/lib/storage/__tests__/fixtures.ts` that set `photos: []` remain valid. Optionally, test-level fixtures for REQ-011 unit tests may construct `Photo` objects inline without touching shared fixtures.
 
 ## Files Expected to Change
 
-- `src/lib/hooks/useHorizontalDatePicker.ts` — NEW (reads `readDiaries()`; no writes)
-- `src/app/diary/[date]/_components/HorizontalDatePicker.tsx` — NEW (pure UI)
-- `src/app/diary/[date]/_components/DateCell.tsx` — NEW (pure UI)
-- `src/app/diary/[date]/_components/Editor.tsx` — MODIFY (internal state only)
-- `src/app/diary/[date]/_components/EditorBody.tsx` — MODIFY (props + render delta)
+None in the data/storage layer. The two constants that serve as the source of truth are already present:
 
-No storage files (`types.ts`, `keys.ts`, `diaries.ts`) are modified.
+- `src/lib/storage/types.ts` — `Photo` interface, `DiaryEntry.photos`
+- `src/lib/storage/limits.ts` — `MAX_PHOTOS_PER_ENTRY = 10`, `MAX_PHOTO_DATAURL_BYTES = 150 * 1024`
 
 ## Test Requirements
 
-No migration-specific tests are needed. Data-layer concerns covered by existing REQ-002/REQ-009
-tests. REQ-010 unit tests cover correct rendering based on `entryMap` presence/absence — those
-are component tests, not migration tests.
+No new storage-layer tests required for migration. REQ-011 implementation tests (`photoBase64.test.ts`) validate count/size guards at the utility level, which is correct placement.
 
 ## Verdict
-PASS — not applicable (no schema or migration changes)
+PASS

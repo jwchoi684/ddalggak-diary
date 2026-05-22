@@ -26,7 +26,7 @@ describe('useHorizontalDatePicker', () => {
       useHorizontalDatePicker({
         currentDate: '2026-05-22',
         saveFn: vi.fn(),
-        autosaveValue: { mood: 'joy', text: '', textAlign: 'left' },
+        autosaveValue: { mood: 'joy', text: '', textAlign: 'left', photos: [] },
         onDateChange: vi.fn(),
         onSaveError: vi.fn(),
       }),
@@ -41,7 +41,7 @@ describe('useHorizontalDatePicker', () => {
       useHorizontalDatePicker({
         currentDate: '2026-05-22',
         saveFn: vi.fn(),
-        autosaveValue: { mood: 'joy', text: '', textAlign: 'left' },
+        autosaveValue: { mood: 'joy', text: '', textAlign: 'left', photos: [] },
         onDateChange: vi.fn(),
         onSaveError: vi.fn(),
       }),
@@ -56,7 +56,7 @@ describe('useHorizontalDatePicker', () => {
       useHorizontalDatePicker({
         currentDate: '2026-05-22',
         saveFn: vi.fn(),
-        autosaveValue: { mood: undefined, text: '', textAlign: 'left' },
+        autosaveValue: { mood: undefined, text: '', textAlign: 'left', photos: [] },
         onDateChange: vi.fn(),
         onSaveError: vi.fn(),
       }),
@@ -82,7 +82,7 @@ describe('useHorizontalDatePicker', () => {
       useHorizontalDatePicker({
         currentDate: '2026-05-22',
         saveFn: vi.fn(),
-        autosaveValue: { mood: 'joy', text: '', textAlign: 'left' },
+        autosaveValue: { mood: 'joy', text: '', textAlign: 'left', photos: [] },
         onDateChange: vi.fn(),
         onSaveError: vi.fn(),
       }),
@@ -102,7 +102,7 @@ describe('useHorizontalDatePicker', () => {
       useHorizontalDatePicker({
         currentDate: '2026-05-22',
         saveFn,
-        autosaveValue: { mood: 'joy', text: 'hello', textAlign: 'left' },
+        autosaveValue: { mood: 'joy', text: 'hello', textAlign: 'left', photos: [] },
         onDateChange,
         onSaveError,
       }),
@@ -112,7 +112,7 @@ describe('useHorizontalDatePicker', () => {
     act(() => { result.current.handleDateSelect('2026-05-23'); });
 
     expect(saveFn).toHaveBeenCalledTimes(1);
-    expect(saveFn).toHaveBeenCalledWith({ mood: 'joy', text: 'hello', textAlign: 'left' });
+    expect(saveFn).toHaveBeenCalledWith({ mood: 'joy', text: 'hello', textAlign: 'left', photos: [] });
     expect(onDateChange).toHaveBeenCalledWith('2026-05-23');
     expect(onSaveError).not.toHaveBeenCalled();
     expect(result.current.isOpen).toBe(false);
@@ -132,7 +132,7 @@ describe('useHorizontalDatePicker', () => {
       useHorizontalDatePicker({
         currentDate: '2026-05-22',
         saveFn,
-        autosaveValue: { mood: 'joy', text: 'hello', textAlign: 'left' },
+        autosaveValue: { mood: 'joy', text: 'hello', textAlign: 'left', photos: [] },
         onDateChange,
         onSaveError,
       }),
@@ -155,7 +155,7 @@ describe('useHorizontalDatePicker', () => {
       useHorizontalDatePicker({
         currentDate: '2026-05-22',
         saveFn,
-        autosaveValue: { mood: 'joy', text: '', textAlign: 'left' },
+        autosaveValue: { mood: 'joy', text: '', textAlign: 'left', photos: [] },
         onDateChange,
         onSaveError: vi.fn(),
       }),

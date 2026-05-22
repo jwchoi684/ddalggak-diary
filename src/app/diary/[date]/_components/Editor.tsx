@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useMemo, useCallback, useLayoutEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { upsertDiary, removeDiary, generateId } from '@/lib/storage';
+import { upsertDiary, removeDiary, generateId, MAX_PHOTOS_PER_ENTRY } from '@/lib/storage';
 import { Routes } from '@/lib/navigation';
 import { MoodPickerSheet } from '@/design-system/MoodPickerSheet';
 import { ConfirmDialog } from '@/design-system/ConfirmDialog';
@@ -11,10 +11,12 @@ import { useToast } from '@/design-system/useToast';
 import { useEditorState } from '@/lib/hooks/useEditorState';
 import { useAutosave } from '@/lib/hooks/useAutosave';
 import { useHorizontalDatePicker } from '@/lib/hooks/useHorizontalDatePicker';
+import { addPhotoFromFile } from '@/lib/storage/photoBase64';
 import { EditorHeader } from './EditorHeader';
 import { EditorBody } from './EditorBody';
 import { EditorToolbar } from './EditorToolbar';
 import { EditorMoreMenu } from './EditorMoreMenu';
+import { PhotoCarousel } from './PhotoCarousel';
 
 interface EditorProps {
   date: string; // ISO "YYYY-MM-DD" — validated upstream in page.tsx
@@ -31,6 +33,8 @@ export function Editor({ date }: EditorProps) {
   const [state, dispatch] = useEditorState(currentDate);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const pendingCursorPos = useRef<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const isProcessing = useRef(false);
 
   const isDirty = state.isLoaded && (
     state.mood !== state.snapshot.mood ||
@@ -39,8 +43,8 @@ export function Editor({ date }: EditorProps) {
   );
 
   const autosaveValue = useMemo(
-    () => ({ mood: state.mood, text: state.text, textAlign: state.textAlign }),
-    [state.mood, state.text, state.textAlign],
+    () => ({ mood: state.mood, text: state.text, textAlign: state.textAlign, photos: state.photos }),
+    [state.mood, state.text, state.textAlign, state.photos],
   );
 
   // CRITICAL (invariant 4): dep array uses `currentDate`, not the stale URL `date` prop.
@@ -49,13 +53,18 @@ export function Editor({ date }: EditorProps) {
       if (!v.mood) return;
       const id = state.persistedId ?? generateId();
       const createdAt = state.persistedCreatedAt ?? new Date().toISOString();
-      upsertDiary({
-        id, date: currentDate, mood: v.mood, text: v.text, textAlign: v.textAlign,
-        photos: [], createdAt, updatedAt: new Date().toISOString(),
-      });
+      try {
+        upsertDiary({
+          id, date: currentDate, mood: v.mood, text: v.text, textAlign: v.textAlign,
+          photos: v.photos, createdAt, updatedAt: new Date().toISOString(),
+        });
+      } catch {
+        toast.show('저장에 실패했어요. 다시 시도해주세요.');
+        return;
+      }
       dispatch({ type: 'MARK_SAVED', id, createdAt });
     },
-    [state.persistedId, state.persistedCreatedAt, currentDate, dispatch],
+    [state.persistedId, state.persistedCreatedAt, currentDate, dispatch, toast],
   );
 
   useAutosave(autosaveValue, 1000, saveFn);
@@ -118,8 +127,43 @@ export function Editor({ date }: EditorProps) {
     dispatch({ type: 'INSERT_TIME', nextText });
   }
 
+  function handleGalleryTap() {
+    if (isProcessing.current) return;
+    if (state.photos.length >= MAX_PHOTOS_PER_ENTRY) {
+      toast.show('최대 10장입니다');
+      return;
+    }
+    fileInputRef.current?.click();
+  }
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (!file) return;
+    isProcessing.current = true;
+    const result = await addPhotoFromFile(file, state.photos.length);
+    isProcessing.current = false;
+    if (!result.ok) {
+      if (result.reason === 'count_exceeded') toast.show('최대 10장입니다');
+      else if (result.reason === 'size_exceeded') toast.show('파일이 너무 큽니다');
+      else toast.show('사진을 불러오지 못했어요');
+      return;
+    }
+    dispatch({ type: 'ADD_PHOTO', photo: result.photo });
+  }
+
   return (
     <main className="flex flex-col bg-cream" style={{ height: '100dvh' }}>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="sr-only"
+        aria-hidden="true"
+        tabIndex={-1}
+        onChange={handleFileChange}
+      />
+
       <EditorHeader
         onBack={handleBack}
         onMoreMenu={() => dispatch({ type: 'SET_MORE_MENU', open: true })}
@@ -140,6 +184,12 @@ export function Editor({ date }: EditorProps) {
         onDateSelect={strip.handleDateSelect}
       />
 
+      <PhotoCarousel
+        photos={state.photos}
+        onDelete={(id) => dispatch({ type: 'DELETE_PHOTO', id })}
+        onThumbnailTap={() => {}}
+      />
+
       <Toast message={toast.message} open={toast.open} onClose={toast.hide} />
 
       <EditorToolbar
@@ -147,8 +197,9 @@ export function Editor({ date }: EditorProps) {
         textAlign={state.textAlign}
         onAlignToggle={() => dispatch({ type: 'TOGGLE_ALIGN' })}
         onTimeInsert={handleTimeInsert}
-        onGalleryTap={() => toast.show('곧 만나요!')}
+        onGalleryTap={handleGalleryTap}
         onExplicitSave={handleExplicitSave}
+        galleryDisabled={state.photos.length >= MAX_PHOTOS_PER_ENTRY}
       />
 
       <EditorMoreMenu

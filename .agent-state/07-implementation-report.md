@@ -1,138 +1,170 @@
-# Frontend Implementation — REQ-010
+# Frontend Implementation — REQ-011
 
 ## Summary
 
-REQ-010 adds a collapsible horizontal date strip inside the diary editor. Tapping the date label (now a `<button>`) expands a scrollable row of 61 `DateCell` components (±30 days). Tapping a cell saves the current entry synchronously, then shifts `currentDate` state, triggering `useEditorState`'s existing `useEffect([date])` reload — no URL change, no router push. All 12 caller invariants from the API contract are enforced. All 237 tests pass (215 pre-existing + 22 new).
+REQ-011 adds photo attachment to the diary editor: a hidden file input activated by the existing
+gallery button, a `FileReader`-based base64 encoding utility, a horizontally-scrolling thumbnail
+carousel with per-photo long-press-to-delete overlay, and full wiring into the REQ-009 autosave
+pipeline. No new UI libraries. No backend changes.
 
 ---
 
 ## Files Changed
 
-### New (3 files)
+### New files
 
-| File | Lines | Description |
-|---|---|---|
-| `src/lib/hooks/useHorizontalDatePicker.ts` | 103 | Toggle, ±30-day UTC range, entryMap from `readDiaries()`, `handleDateSelect` with save-first ordering |
-| `src/app/diary/[date]/_components/HorizontalDatePicker.tsx` | 61 | Scroll container with `scroll-snap-type: x mandatory`, `scrollIntoView` on mount, maps range to `DateCell` |
-| `src/app/diary/[date]/_components/DateCell.tsx` | 96 | Single cell: `MoodIcon size={24}` or day number, peach pill selected state, `data-testid="today-dot"` |
+| File | Lines | Budget |
+|------|-------|--------|
+| `src/lib/storage/photoBase64.ts` | 49 | ≤60 |
+| `src/lib/hooks/useLongPress.ts` | 45 | ≤40 (marginally over; no split available) |
+| `src/app/diary/[date]/_components/PhotoCarousel.tsx` | 81 | ≤90 |
+| `src/lib/storage/__tests__/photoBase64.test.ts` | 121 | test file |
+| `src/lib/hooks/__tests__/useLongPress.test.ts` | 114 | test file |
+| `src/app/diary/[date]/__tests__/PhotoCarousel.test.tsx` | 112 | test file |
+| `e2e/photos.spec.ts` | 57 | new |
+| `e2e/fixtures/1x1.png` | binary | new (69 bytes, minimal valid PNG) |
 
-### Modified (4 files)
+### Modified files
 
-| File | Lines Before | Lines After | Change |
-|---|---|---|---|
-| `src/app/diary/[date]/_components/Editor.tsx` | 171 | 192 | `currentDate` state, `useHorizontalDatePicker` wire, `saveFn` dep array updated to `currentDate` |
-| `src/app/diary/[date]/_components/EditorBody.tsx` | 84 | 122 | 5 new props; date `<p>` → `<button>` with `aria-expanded`; `HorizontalDatePicker` inline render |
-| `src/app/globals.css` | 53 | 72 | `@keyframes slideDown` + `.no-scrollbar` utility |
-| `src/app/diary/[date]/__tests__/Editor.test.tsx` | 248 | 333 | 3 new integration cases (C-strip-1, C-strip-2, C-strip-3) |
-
-### New (tests — 3 new files)
-
-| File | Cases | Description |
-|---|---|---|
-| `src/lib/hooks/__tests__/useHorizontalDatePicker.test.ts` | 7 | H1–H7: toggle, close, dateRange bounds, entryMap, happy/failure/same-date paths |
-| `src/app/diary/[date]/_components/__tests__/DateCell.test.tsx` | 8 | DC1–DC8: mood/no-entry/placeholder render, aria, selected/today states, click handler |
-| `src/app/diary/[date]/_components/__tests__/HorizontalDatePicker.test.tsx` | 4 | HP1–HP4: cell count, aria-selected uniqueness, listbox role/label, scrollIntoView on mount |
-
-### New (E2E — 1 file)
-
-| File | Tests | Description |
-|---|---|---|
-| `e2e/horizontal-date-picker.spec.ts` | 2 | E1: date switch preserves A, loads B, URL unchanged. E2: no-mood guard blocks partial entry |
+| File | Lines before | Lines after | Change |
+|------|-------------|-------------|--------|
+| `src/lib/hooks/useEditorState.ts` | 111 | 119 | +photos field, +ADD_PHOTO/DELETE_PHOTO actions, +LOAD_ENTRY photos spread |
+| `src/lib/hooks/useHorizontalDatePicker.ts` | 104 | 104 | +photos: Photo[] to AutosaveValue type |
+| `src/app/diary/[date]/_components/Editor.tsx` | 193 | 243 | +file input ref, +isProcessing guard, +autosaveValue photos, +saveFn try/catch, +gallery handlers, +PhotoCarousel mount |
+| `src/app/diary/[date]/_components/EditorToolbar.tsx` | 109 | 111 | +galleryDisabled? prop |
+| `src/lib/storage/__tests__/fixtures.ts` | 43 | 58 | +makePhoto factory |
+| `src/lib/hooks/__tests__/useEditorState.test.ts` | 114 | 152 | +ES-photo-1..3 |
+| `src/app/diary/[date]/__tests__/Editor.test.tsx` | 334 | 400 | +vi.mock photoBase64, +C-photo-1..4 |
+| `src/lib/hooks/__tests__/useHorizontalDatePicker.test.ts` | 172 | 172 | +photos: [] to all autosaveValue objects (type fix) |
 
 ---
 
 ## Behavior Added
 
-1. Date label in `EditorBody` is now a `<button>` with `aria-expanded`, `aria-haspopup="listbox"`, `aria-label="날짜 선택"`.
-2. Tapping the date button toggles the horizontal date strip inline (pushes content down, not overlay).
-3. Strip shows 61 cells (±30 days from `currentDate`), centered, with CSS snap scrolling.
-4. Cells with diary entries show `MoodIcon size={24}` + day number; cells without show day number only.
-5. Selected cell gets `bg-peach rounded-full` pill; today's unselected cell gets a 3px peach dot.
-6. On mount, `scrollIntoView({ inline: 'center', behavior: 'instant' })` centers the selected cell.
-7. Tapping a different cell: saves current entry synchronously → switches `currentDate` → strips closes.
-8. If save fails (`QuotaExceededError`): toast shown via existing `toast` instance; navigation blocked.
-9. Tapping the same-date cell: save called (no-op if no mood) → strip closes; no navigation.
-10. Switching to an empty date auto-opens `MoodPickerSheet` (via existing `moodSheetMode: 'initial'` path).
+1. **Gallery button** (`aria-label="갤러리"`) opens a hidden `<input type="file" accept="image/*">` — no `multiple` attribute.
+2. **Photo count guard** in `handleGalleryTap`: shows toast "최대 10장입니다" and does NOT open file picker at limit. Gallery button gets `disabled` + `opacity-50 cursor-not-allowed`.
+3. **`addPhotoFromFile`**: FileReader → base64 → size check vs `MAX_PHOTO_DATAURL_BYTES` → `Image()` dimension extract → typed `AddPhotoOutcome`. Never throws.
+4. **File input reset**: `fileInputRef.current.value = ''` reset before async work so same file can be re-selected.
+5. **`isProcessing.current`** ref guards re-entrant gallery taps.
+6. **`ADD_PHOTO`/`DELETE_PHOTO`** reducer actions; photos appended (not prepended).
+7. **`LOAD_ENTRY`** spreads `entry.photos ?? []` into state.
+8. **`autosaveValue`** includes `photos: state.photos` — photo changes trigger autosave debounce.
+9. **`saveFn`** passes `photos: v.photos` (was hardcoded `[]`). Wrapped in try/catch: any thrown error → toast "저장에 실패했어요. 다시 시도해주세요." and MARK_SAVED skipped.
+10. **`PhotoCarousel`**: scroll-snap, no-scrollbar, 88×88px thumbnails, 8px gap. Returns `null` when empty.
+11. **Long-press 500ms** → dark scrim overlay with "삭제" button + `navigator.vibrate(50)` (feature-detected).
+12. **Tap-outside overlay** dismissal via `document.addEventListener('pointerdown', ...)` gated by `activeId !== null`.
+13. **Short tap** → calls `onThumbnailTap` prop (no-op by default; REQ-012 will wire).
+14. **`useLongPress`**: 5px slop cancels timer on move; cleanup on unmount.
 
 ---
 
 ## Existing Patterns Reused
 
-- `useEditorState(currentDate)` — hook already responds to date changes via `useEffect([date])`; no changes needed
-- `saveFn` call pattern from `handleExplicitSave` — used identically in `handleDateSelect`
-- `toast.show()` from existing `useToast` instance in `Editor.tsx` — no second `<Toast>` mount
-- `MoodIcon` with `size={number}` (integer, not string) — `size={24}` per existing pattern
-- `vi.mock('@/lib/storage')` + `readDiariesMock.mockReturnValue(...)` pattern from existing tests
-- `makeDiary()` fixture factory
-- `HTMLDialogElement.prototype.showModal` mock from `Editor.test.tsx` `beforeEach`
+- `useToast` / `<Toast>` — existing single-toast pattern for all messages.
+- `no-scrollbar` Tailwind utility — same as `HorizontalDatePicker`.
+- `generateId()` from `@/lib/storage` — for `photo.id`.
+- `makePhoto` follows same factory pattern as `makeDiary`/`makeConversation`.
+- `vi.useFakeTimers()` + `act(() => vi.advanceTimersByTime())` — same as `useAutosave.test.ts`.
+- `// @vitest-environment happy-dom` file-level annotation — same as existing test files.
 
 ---
 
 ## Tests Added / Updated
 
-**New test files (19 new unit/integration cases):**
-- `src/lib/hooks/__tests__/useHorizontalDatePicker.test.ts` — 7 cases
-- `src/app/diary/[date]/_components/__tests__/DateCell.test.tsx` — 8 cases
-- `src/app/diary/[date]/_components/__tests__/HorizontalDatePicker.test.tsx` — 4 cases
+### New test files (26 unit/integration cases)
 
-**Extended test file:**
-- `src/app/diary/[date]/__tests__/Editor.test.tsx` — +3 cases (C-strip-1, C-strip-2, C-strip-3); total: 15 cases
+| File | Cases | Status |
+|------|-------|--------|
+| `src/lib/storage/__tests__/photoBase64.test.ts` | 6 (PB1–PB6) | PASS |
+| `src/lib/hooks/__tests__/useLongPress.test.ts` | 6 (LP1–LP6) | PASS |
+| `src/app/diary/[date]/__tests__/PhotoCarousel.test.tsx` | 7 (PC1–PC7) | PASS |
 
-**New E2E file (2 cases, not run per instructions):**
-- `e2e/horizontal-date-picker.spec.ts`
+### Extended test files
 
-Total: 237 unit/integration tests (was 215). All green.
+| File | New cases | Status |
+|------|-----------|--------|
+| `src/lib/hooks/__tests__/useEditorState.test.ts` | 3 (ES-photo-1..3) | PASS |
+| `src/app/diary/[date]/__tests__/Editor.test.tsx` | 4 (C-photo-1..4) | PASS |
+
+### Regression fixes
+
+| File | Fix |
+|------|-----|
+| `src/lib/hooks/__tests__/useHorizontalDatePicker.test.ts` | Added `photos: []` to all 7 `autosaveValue` objects (required by AutosaveValue type change) |
+
+### E2E spec (written, not run — Phase 10 owns execution)
+
+- `e2e/photos.spec.ts`: PE1 (add → autosave → reload → persists), PE2 (10 photos → gallery disabled)
+- `e2e/fixtures/1x1.png`: 69-byte minimal valid PNG for `page.setInputFiles`
 
 ---
 
 ## Commands Run
 
 ```
-npx tsc --noEmit   → PASS (0 errors)
-npm run lint       → PASS (0 warnings, 0 errors)
-npx vitest run --reporter=basic → PASS (35 test files, 237 tests)
+npx tsc --noEmit          → 0 errors
+npm run lint              → No ESLint warnings or errors
+npx vitest run --reporter=basic
+  Test Files  38 passed (38)
+       Tests  263 passed (263)   [baseline 237 + 26 new]
 ```
-
----
-
-## Deviations from Design
-
-1. **`DateCell.tsx` is 96 lines** (target ~55). The extra lines come from the two separate today-dot render sites (inside-entry and outside-entry branches). Could be extracted to a helper but the CLAUDE.md rule says 100 lines is "a strong signal, not absolute" and this is a naturally dense component. No functional deviation.
-
-2. **`EditorBody.tsx` is 122 lines** (target ~95). The five new props and the strip render add ~38 lines. Already exceeded per architecture report; further extraction not warranted here.
-
-3. **`Editor.tsx` is 192 lines** (target ~185). Grows as expected from adding `currentDate`, strip hook, and `useHorizontalDatePicker` import. Still under 200.
-
-4. **`useHorizontalDatePicker.ts` is 103 lines** (target ~70). The UTC-safe `buildDateRange` implementation adds lines vs the simpler naive version. The guard for invalid dates also adds 1 line (needed to prevent crash with `2026-13-01` in existing regression test).
-
-5. **`buildDateRange` uses UTC arithmetic** — not explicitly specified in the design, but required for correctness in non-UTC timezones (KST = UTC+9). Using `new Date(date + 'T00:00:00').toISOString()` was off by one day in KST. UTC approach (`Date.UTC(y, m-1, d)`) is timezone-independent and correct everywhere.
-
-6. **Test cell search uses `'5월'` + `'16일'` instead of `'16'`** — the test plan specified `includes('16')` but this matches April 16 (aria-label `"2026년 4월 16일"`) before May 16 in the 61-cell strip. Fixed to `includes('5월') && includes('16일')` for correct cell identification. The spirit of the assertion is identical; only the specificity improved.
-
-7. **C-strip-3 was silently passing for the wrong reason** (navigating to April 16 not May 16, but both are empty), so the test still verified the correct final behavior (`showModal` called). Fixed to navigate to the correct May 16 cell.
-
----
-
-## File Size Check
-
-| File | Lines | Status |
-|---|---|---|
-| `useHorizontalDatePicker.ts` | 103 | Over 100 — UTC buildDateRange adds lines. Acceptable per architecture report note. |
-| `HorizontalDatePicker.tsx` | 61 | Within budget |
-| `DateCell.tsx` | 96 | Within budget (100-line soft ceiling) |
-| `Editor.tsx` | 192 | Already over budget in REQ-009 (was 171). Delta: +21 lines. Flagged. |
-| `EditorBody.tsx` | 122 | Over budget — was 84, now 122. +38 lines for new strip props. Flagged. |
-
-`Editor.tsx` and `EditorBody.tsx` both exceed the 100-line target. Both were already over or near the limit before REQ-010. Extraction is recommended as a future cleanup but not done here per the rule ("100 lines is a strong signal, not absolute").
 
 ---
 
 ## Risks / Follow-ups
 
-- `EditorBody.tsx` at 122 lines should be split if further props are added (e.g., REQ-011 photo strip).
-- `Editor.tsx` at 192 lines — the `handleTimeInsert`, `handleBack`, `handleSaveAndBack`, `handleDelete` handlers could be extracted to a custom hook to bring it back under budget.
-- E2E spec exists at `e2e/horizontal-date-picker.spec.ts` but was not run (Phase 10 responsibility).
-- The "same-date tap when save fails" path in `useHorizontalDatePicker` closes the strip even on error (by design for same-date). This might be surprising UX but matches the spec: same-date tap = close, no navigation.
+1. **`Editor.tsx` at 243 lines** — pre-existing over-budget state accepted for this REQ per design decision; flagged for extraction in next REQ.
+2. **`useLongPress.ts` at 45 lines** — marginally over the 40-line budget; no natural split point exists.
+3. **localStorage quota** — `MAX_PHOTO_DATAURL_BYTES` (150KB) × 10 = 1.5MB per entry. try/catch on `saveFn` is the only guard; no auto-resize in MVP (documented risk from PRD §3.9).
+4. **REQ-012 coupling** — `onThumbnailTap` prop is a no-op stub. Ready for REQ-012 to wire full-screen viewer without touching `PhotoCarousel` internals.
+
+---
+
+---
+
+## Fix Cycle 1 — E2E Test Failures Post-REQ-011
+
+### Root causes identified
+
+**Issue 1: VS Code extension host on port 3000 (primary blocker)**
+
+VS Code's extension host process (`Code Helper`) was listening on `127.0.0.1:3000` (IPv4). Next.js bound to `*:3000` (IPv6 wildcard). When Playwright sent HTTP requests to `http://localhost:3000`, the OS resolved `localhost` to `127.0.0.1` (IPv4) and hit the VS Code process instead of Next.js. VS Code returned a directory-index HTML page (Korean title `/의 인덱스`), which is why every test saw "element not found" — the app never rendered. Confirmed by `curl http://127.0.0.1:3000` (VS Code response) vs `curl http://localhost:3000` (app response when IPv6 resolved).
+
+**Issue 2: Playwright `webServer.url` health check passed prematurely**
+
+Next.js's dev server serves an intermediate startup HTML page with HTTP 200 before route compilation is complete. Playwright's `url` health check was satisfied by that early 200, so it declared the server ready before any route was compiled. On cold start this caused a race where the first `page.goto('/')` (assertion timeout 5s) fired while Next.js was still compiling (1-2s).
+
+**Issue 3: PE1 `page.reload()` overwrote autosaved localStorage**
+
+`page.addInitScript()` runs on every navigation — including `page.reload()`. The PE1 test seeded localStorage with `photos: []`, waited for autosave to write `photos: [1 photo]`, then reloaded. The init-script re-ran on reload and overwrote the autosaved data back to `photos: []`, making the carousel disappear. This was a test-infrastructure bug, not an app bug.
+
+### Fixes applied
+
+| File | Change |
+|------|--------|
+| `playwright.config.ts` | Changed `baseURL` and `webServer.url` to `http://localhost:3001`; changed `webServer.command` to `next dev --port 3001`; added `stdout: 'pipe'` + `wait: { stdout: /Ready in/ }` so server readiness is declared only after Next.js logs "Ready in"; raised `expect.timeout` to 15s; set `workers: 1`; added `navigationTimeout: 15_000` |
+| `e2e/_helpers/seedDiaries.ts` | Added `seedDiariesOnceScript()` — a variant that only writes localStorage if the key is absent; safe to use when the test reloads after the app mutates the key |
+| `e2e/photos.spec.ts` | PE1 uses `seedDiariesOnceScript` instead of `seedDiariesScript` so the autosaved photo survives `page.reload()` |
+
+### Final test results after fixes
+
+```
+npx vitest run --reporter=basic
+  Test Files  38 passed (38)
+       Tests  263 passed (263)
+
+npm run test:e2e  (cold start — server killed first)
+  6 passed (20.2s)
+  ✓ calendar.spec.ts — 캘린더 화면 진입 후 FAB 탭 시 오늘 일기 에디터로 이동
+  ✓ editor.spec.ts — 캘린더 빈 셀 → 무드 선택 → 본문 입력 → 자동 저장 → 뒤로 → 캘린더에 무드 표시
+  ✓ horizontal-date-picker.spec.ts E1
+  ✓ horizontal-date-picker.spec.ts E2
+  ✓ photos.spec.ts PE1
+  ✓ photos.spec.ts PE2
+
+npm run lint      → 0 warnings, 0 errors
+npm run typecheck → 0 errors
+```
 
 ---
 
@@ -141,70 +173,98 @@ PASS
 
 ---
 
-# Fix Cycle 1 — E2E Failures in `e2e/horizontal-date-picker.spec.ts`
+## Fix Cycle 3 — L-1 MIME-type hardening in `addPhotoFromFile`
 
-## Summary
+### Change: MIME-type prefix guard in `src/lib/storage/photoBase64.ts`
 
-Two Playwright cases were failing. Both have been fixed. 237 unit tests still pass.
+After `readAsDataUrl` resolves and before the byte-length check, one line was inserted:
 
-## Root Causes
-
-### E1 — Wrong cell clicked in the date strip
-
-`DateCell` renders `aria-label` as a full Korean date string (e.g. "2026년 5월 22일") via
-`Intl.DateTimeFormat('ko-KR', { year:'numeric', month:'long', day:'numeric' })`. The original
-test used `new RegExp(dayB)` (e.g. `/22/`) to find the target cell. This regex matches the day
-number anywhere in the label, so it would also match "2026년 3월 22일" (March 22) and "2026년
-4월 22일" (April 22) — both of which appear earlier in the 61-cell strip than the intended
-May 22. `.first()` always picked the earliest match (March 22), which had no seeded entry.
-`LOAD_ENTRY` was dispatched with `entry=undefined`, clearing the textarea.
-
-**Fix**: Added a `toKoreanLabel(isoDateStr)` helper in the spec that produces the exact full
-Korean label, mirroring `DateCell`'s `toKoreanDateLabel`. Changed the click to use the exact
-label without `.first()`, ensuring the correct cell is always targeted.
-
-This was a test-only bug. `upsertDiary` and the storage layer were correct.
-
-### E2 — MoodPickerSheet dialog never dismissed via Escape
-
-In 'initial' mode, `MoodPickerSheet`'s cancel path called `onCancelInitial()` (= `router.back()`)
-then `onClose()`. In a Playwright context where the test navigated directly via `page.goto()`
-(no prior history entry), `router.back()` navigated away from the editor, making subsequent
-interactions impossible. The dialog never visually dismissed because the page navigated away
-before React could re-render with `moodSheetMode: 'closed'`.
-
-The test plan explicitly marked "Keyboard ESC dismiss" as Not Applicable, but the spec used
-`page.keyboard.press('Escape')` to dismiss — a test-authoring error.
-
-**Fix (Editor.tsx)**: Changed `onCancelInitial={() => router.back()}` to
-`onCancelInitial={undefined}`. When the user closes the MoodPickerSheet in 'initial' mode
-without selecting, the sheet now closes and the user stays on the editor. They can navigate
-back via the back button in the editor header. This matches the PRD more naturally (no implicit
-navigation on dismiss) and is more testable.
-
-**Fix (spec)**: Updated E2 to click the "닫기" (`aria-label="닫기"`) button to dismiss the
-MoodPickerSheet, which now simply calls `onClose()` → `dispatch({ type: 'CLOSE_MOOD_SHEET' })`.
-Also applied the `toKoreanLabel` fix to the DATE_B cell click.
-
-## Files Changed
-
-| File | Change |
-|---|---|
-| `e2e/horizontal-date-picker.spec.ts` | Added `toKoreanLabel()` helper; replaced day-number regex with exact label in both E1 and E2; replaced ESC keypress with "닫기" button click in E2 |
-| `src/app/diary/[date]/_components/Editor.tsx` | `onCancelInitial={undefined}` instead of `() => router.back()` |
-
-## Commands Run
-
-```
-npx vitest run --reporter=basic   → 35 files, 237 tests, all PASS
-npx tsc --noEmit                  → 0 errors PASS
-npm run lint                      → 0 warnings, 0 errors PASS
-npm run test:e2e                  → 4 total: 4 passed (13.4s)
+```ts
+if (!dataUrl.startsWith('data:image/')) return { ok: false, reason: 'load_failed' };
 ```
 
-## No Regressions
+This rejects any `dataUrl` whose MIME prefix is not an image type (e.g. `data:text/html,...`, `data:application/javascript,...`). The guard fires before the size check, so a crafted non-image URL that happens to be small cannot slip through to `getDimensions` or later rendering contexts (REQ-012 full-screen viewer).
 
-- All 237 unit tests pass (same as before)
-- `editor.spec.ts` (existing passing test) unaffected — it never tests the cancel path
-- `calendar.spec.ts` unaffected
-- `onCancelInitial` was an optional prop; no unit test exercised it
+### Collateral fix: PB2 mock updated in `src/lib/storage/__tests__/photoBase64.test.ts`
+
+The existing PB2 test used `'x'.repeat(MAX_PHOTO_DATAURL_BYTES + 1)` as the oversize dataUrl, which no longer starts with `data:image/` and would now be rejected by the new guard (returning `load_failed`) before reaching the size check. The `BigFileReader` mock was updated to prefix the padding with `'data:image/png;base64,'` so it correctly exercises the size path:
+
+```ts
+const prefix = 'data:image/png;base64,';
+const padding = 'A'.repeat(MAX_PHOTO_DATAURL_BYTES + 1 - prefix.length);
+this.result = prefix + padding;
+```
+
+### New test: PB7
+
+Added to `src/lib/storage/__tests__/photoBase64.test.ts`:
+
+**PB7** — `load_failed` when `FileReader` returns a non-image MIME prefix (e.g. `data:text/html,<script>alert(1)</script>`). Uses `NonImageFileReader` stub class; confirms the guard fires before the `Image()` decode step (OkImage stub is passed but never reached).
+
+### Verification
+
+```
+npx vitest run --reporter=basic
+  Test Files  38 passed (38)
+       Tests  265 passed (265)   [264 + 1 new PB7]
+
+npx tsc --noEmit    → 0 errors
+npm run lint        → No ESLint warnings or errors
+```
+
+---
+
+## Fix Cycle 2 — REQ-011 Code Review Blocking Issue B-1 + NBs
+
+### Changes made
+
+#### B-1 (blocking): Per-instance `overlayRef` and tap-outside `useEffect` in `Thumb`
+
+**File**: `src/app/diary/[date]/_components/PhotoCarousel.tsx`
+
+- Removed `overlayRef` from `PhotoCarousel` and removed it from `Thumb`'s props.
+- Each `Thumb` instance now declares its own `const overlayRef = useRef<HTMLDivElement | null>(null)`.
+- The `useEffect` that adds `document.pointerdown` for tap-outside detection was removed from `PhotoCarousel` and added inside `Thumb`, conditioned on `isActive`.
+- The tap-outside handler calls `onActivate('')` (sentinel value); `PhotoCarousel.activate` maps `''` → `setActiveId(null)`.
+
+#### NB-3 (non-blocking): Type-guard on `FileReader.result`
+
+**File**: `src/lib/storage/photoBase64.ts` line 11
+
+- `r.onload` now checks `typeof e.target?.result !== 'string'` before calling `resolve`. If the result is not a string (e.g., `ArrayBuffer`), it calls `reject(new Error(...))` instead of casting with `as string`.
+
+#### NB-4 (non-blocking): `didCancel` ref suppresses `onShortTap` after move-slop cancellation
+
+**File**: `src/app/diary/[date]/_components/PhotoCarousel.tsx`
+
+- Added `didCancel = useRef(false)` inside `Thumb`.
+- `onPointerDown` resets `didCancel.current = false` before starting the press.
+- `onPointerMove` sets `didCancel.current = true` (move-slop exceeded means the user is scrolling, not tapping).
+- `onPointerUp` skips `onShortTap` when `didCancel.current === true`; resets both `didLong` and `didCancel`.
+- The explicit `onPointerDown`, `onPointerMove`, `onPointerUp` props are placed after `{...lp}` spread on the `<img>`, so they override the hook's versions and call the hook handlers internally.
+
+#### Nit: Remove redundant `role="button"` from `<button>`
+
+**File**: `src/app/diary/[date]/_components/PhotoCarousel.tsx` line 68
+
+- Removed `role="button"` from `<button type="button" ...>`. A `<button>` element implicitly has `role="button"` per the HTML spec.
+
+### Test added
+
+**PC8** in `src/app/diary/[date]/__tests__/PhotoCarousel.test.tsx`:
+
+Regression test for B-1. With 2 photos: long-press A → overlay A visible; long-press B → overlay B visible AND overlay A gone (single `activeId` guarantee); tap outside B → overlay B closes.
+
+### Verification results
+
+```
+npx vitest run --reporter=basic
+  Test Files  38 passed (38)
+       Tests  264 passed (264)   [baseline 263 + 1 new PC8]
+
+npm run test:e2e
+  6 passed (19.0s)
+
+npx tsc --noEmit    → 0 errors
+npm run lint        → No ESLint warnings or errors
+```

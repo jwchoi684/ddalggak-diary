@@ -28,11 +28,17 @@ vi.mock('@/lib/storage', async (importOriginal) => {
   };
 });
 
+vi.mock('@/lib/storage/photoBase64', () => ({
+  addPhotoFromFile: vi.fn(),
+}));
+
 const { readDiaries, upsertDiary, removeDiary } = await import('@/lib/storage');
 const readDiariesMock = readDiaries as ReturnType<typeof vi.fn>;
 const upsertDiaryMock = upsertDiary as ReturnType<typeof vi.fn>;
 const removeDiaryMock = removeDiary as ReturnType<typeof vi.fn>;
-const { makeDiary } = await import('@/lib/storage/__tests__/fixtures');
+const { addPhotoFromFile } = await import('@/lib/storage/photoBase64');
+const addPhotoFromFileMock = addPhotoFromFile as ReturnType<typeof vi.fn>;
+const { makeDiary, makePhoto } = await import('@/lib/storage/__tests__/fixtures');
 const { Editor } = await import('@/app/diary/[date]/_components/Editor');
 
 let showModalMock: ReturnType<typeof vi.fn>;
@@ -329,5 +335,72 @@ describe('Editor', () => {
 
     // MoodPickerSheet should auto-open (showModal called again)
     expect(showModalMock).toHaveBeenCalled();
+  });
+
+  it('C-photo-1: tapping gallery button triggers .click() on hidden file input', async () => {
+    const entry = makeDiary({ date: '2026-05-15', mood: 'joy', text: '' });
+    readDiariesMock.mockReturnValue([entry]);
+    await renderEditor();
+
+    const clickSpy = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(() => {});
+    fireEvent.click(btn('갤러리'));
+
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+    clickSpy.mockRestore();
+  });
+
+  it('C-photo-2: file change → addPhotoFromFile ok → upsertDiary includes new photo', async () => {
+    const entry = makeDiary({ date: '2026-05-15', mood: 'joy', text: '' });
+    readDiariesMock.mockReturnValue([entry]);
+    const photo = makePhoto();
+    addPhotoFromFileMock.mockResolvedValue({ ok: true, photo });
+
+    await renderEditor();
+    upsertDiaryMock.mockClear();
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['x'], 'test.png', { type: 'image/png' });
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [file] } });
+    });
+
+    act(() => { vi.advanceTimersByTime(1000); });
+
+    expect(upsertDiaryMock).toHaveBeenCalledWith(
+      expect.objectContaining({ photos: expect.arrayContaining([photo]) }),
+    );
+  });
+
+  it('C-photo-3: addPhotoFromFile count_exceeded → toast "최대 10장입니다"', async () => {
+    const entry = makeDiary({ date: '2026-05-15', mood: 'joy', text: '' });
+    readDiariesMock.mockReturnValue([entry]);
+    addPhotoFromFileMock.mockResolvedValue({ ok: false, reason: 'count_exceeded' });
+
+    await renderEditor();
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['x'], 'test.png', { type: 'image/png' });
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [file] } });
+    });
+
+    expect(document.body.textContent).toContain('최대 10장입니다');
+  });
+
+  it('C-photo-4: upsertDiary throws → toast "저장에 실패했어요" and MARK_SAVED not dispatched', async () => {
+    const entry = makeDiary({ date: '2026-05-15', mood: 'joy', text: 'original' });
+    readDiariesMock.mockReturnValue([entry]);
+    await renderEditor();
+
+    upsertDiaryMock.mockImplementation(() => { throw new Error('QuotaExceededError'); });
+
+    const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: '수정됨' } });
+
+    act(() => { vi.advanceTimersByTime(1000); });
+
+    expect(document.body.textContent).toContain('저장에 실패했어요');
+    // isDirty should still be true (MARK_SAVED was NOT dispatched)
+    expect(document.querySelector('button[aria-label="저장"]')).not.toBeNull();
   });
 });

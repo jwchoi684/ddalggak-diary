@@ -1,199 +1,222 @@
-# Architecture Report — REQ-010
+# Architecture Report — REQ-011
 
 ## Summary
 
-REQ-010 adds an inline horizontal date-strip that slides down inside the diary editor when the user taps the date label (with `▾` chevron). The strip shows up to 7–10 days, uses the existing `MoodIcon` component for cells with entries, and performs a save-then-load sequence when the user taps a different date. All dependencies (REQ-002, REQ-003, REQ-005, REQ-009) are DONE. The architecture is solid and integration is well-defined with no blocking gaps.
+REQ-011 (사진 추가 / 카로젤 / 길게 누름 삭제) adds photo attachment to the diary editor. The existing codebase has all prerequisites in place: the `Photo` type is fully defined, `DiaryEntry.photos: Photo[]` exists, `EditorToolbar` has an `onGalleryTap` stub, `generateId` is exported from `@/lib/storage`, and the autosave/save pipeline flows through `useEditorState` + `useAutosave` + `saveFn`. The critical gap is that `useEditorState` has no `photos` field and `saveFn` currently hardcodes `photos: []`. All four files that will be modified are at or above the 100-line budget.
 
 ---
 
 ## Codebase Map (paths reviewed)
 
-- `src/design-system/MoodIcon.tsx`
-- `src/design-system/moods.ts`
-- `src/design-system/BottomSheet.tsx`
-- `src/design-system/Card.tsx`
-- `src/design-system/Toast.tsx`
-- `src/design-system/useToast.ts`
-- `src/app/globals.css`
-- `src/app/diary/[date]/_components/Editor.tsx`
-- `src/app/diary/[date]/_components/EditorBody.tsx`
-- `src/app/diary/[date]/_components/EditorHeader.tsx`
-- `src/app/diary/[date]/_components/EditorToolbar.tsx`
-- `src/app/diary/[date]/page.tsx`
-- `src/app/diary/[date]/__tests__/Editor.test.tsx`
-- `src/lib/hooks/useEditorState.ts`
-- `src/lib/hooks/useAutosave.ts`
-- `src/lib/hooks/__tests__/useEditorState.test.ts`
-- `src/lib/hooks/__tests__/useAutosave.test.ts`
-- `src/lib/storage/diaries.ts`
-- `src/lib/storage/useDiaries.ts`
-- `src/lib/storage/types.ts`
-- `src/lib/navigation/routes.ts`
-- `src/app/_components/CalendarDayCell.tsx`
+- `src/lib/storage/types.ts` — `Photo`, `DiaryEntry`, all types
+- `src/lib/storage/index.ts` — public API, exports `MAX_PHOTO_DATAURL_BYTES`, `MAX_PHOTOS_PER_ENTRY`
+- `src/lib/storage/limits.ts` — capacity constants
+- `src/lib/storage/diaries.ts` — `upsertDiary`, `readDiaries`, `removeDiary`
+- `src/lib/storage/uuid.ts` — `generateId`
+- `src/lib/storage/__tests__/fixtures.ts` — `makeDiary`, `makeConversation`
+- `src/lib/hooks/useEditorState.ts` — reducer, `EditorState`, `EditorAction`
+- `src/lib/hooks/useAutosave.ts` — autosave debounce hook
+- `src/lib/hooks/useHorizontalDatePicker.ts` — date strip hook
+- `src/app/diary/[date]/_components/Editor.tsx` — main editor component
+- `src/app/diary/[date]/_components/EditorToolbar.tsx` — toolbar with gallery stub
+- `src/app/diary/[date]/_components/EditorBody.tsx` — mood header + textarea
+- `src/app/diary/[date]/_components/HorizontalDatePicker.tsx` — scroll-snap strip
+- `src/design-system/useToast.ts` — `show(message, durationMs?)` / `hide()`
+- `src/design-system/Toast.tsx` — `role?: 'status' | 'alert'`
+- `src/design-system/useDialogControl.ts` — dialog open/close
+- `e2e/_helpers/seedDiaries.ts` — E2E seed helper
+- `vitest.config.ts` — `environment: 'node'`, no happy-dom default
+- `package.json` — Next 15 / React 19 / Vitest / Playwright
 
 ---
 
 ## Findings on Each Numbered Topic
 
-### 1. Design System Primitives
+### 1. `Photo` type — confirmed exact fields
 
-**MoodIcon** (`src/design-system/MoodIcon.tsx`, lines 15–19):
-- Props: `id: MoodId`, `size: number`, `className?: string`
-- `size` is a raw pixel number (integer), NOT a string enum. It sets `width`, `height`, and `fontSize` simultaneously via inline style.
-- The calendar (`CalendarDayCell.tsx` line 48) uses `size={32}`. The editor's `EditorBody.tsx` (line 55) uses `size={72}`.
-- For the horizontal date strip, the design agent must specify `size={24}` or `size={28}` — a plain integer. There is no named small/medium/large variant; any integer is valid. Consistency with the calendar "small" use (32px) is the reference floor.
-
-**Horizontal scroll / chip patterns**: No existing scroll container, chip, or pill component exists in `src/design-system/`. The feature will need new components.
-
-**Tokens** (from `globals.css`):
-- `--color-cream: #FAF6EE`, `--color-charcoal: #2A2A2A`, `--color-peach: #F5C896`, `--color-meta: #A8A8A8`, `--color-paper: #FFFFFF`
-- `--radius-card: 16px`, `--radius-card-lg: 20px`, `--shadow-card: 0 2px 8px rgba(0,0,0,0.04)`
-- These tokens are exposed as Tailwind utility classes: `bg-cream`, `text-charcoal`, `bg-peach`, `text-meta`, `bg-paper`, `rounded-[var(--radius-card)]`
-
-**BottomSheet**: Uses `<dialog>` with `showModal()` — not applicable for inline strip. The strip is not modal; do not reuse BottomSheet for it.
-
-**Card**: Available with `large` prop (20px radius vs 16px). Could wrap the strip container if a card visual is desired, but it is a server component, so it is usable in RSC contexts too.
-
-**Toast / useToast**: Available for save-failure handling. `toast.show(message)` accepts optional `durationMs`. Use `role="alert"` for error case per `ToastProps`. The existing `Toast` instance in `Editor.tsx` (line 122) must be reused — do not add a second `Toast` mount. Pass the failure message through the existing `toast.show()` call.
-
-### 2. Editor Component Analysis
-
-**Date display location** (`EditorBody.tsx`, line 68–70):
-```tsx
-<p className="text-sm text-meta text-center mb-4">
-  {formatDate(date)} ▾
-</p>
+`src/lib/storage/types.ts` lines 78–87:
 ```
-The `▾` is already present as a static character in the markup, with a JSX comment `{/* Date label (▾ is inert — REQ-010 hooks in here) */}`. This is the exact attachment point. The `<p>` must become a `<button>` (or wrap a `<button>`) to be tappable. `EditorBody` will need two new props: `stripOpen: boolean` and `onDateLabelTap: () => void`.
-
-**saveFn shape and location** (`Editor.tsx`, lines 40–52):
-```tsx
-const saveFn = useCallback(
-  (v: typeof autosaveValue) => {
-    if (!v.mood) return;
-    const id = state.persistedId ?? generateId();
-    const createdAt = state.persistedCreatedAt ?? new Date().toISOString();
-    upsertDiary({ id, date, mood: v.mood, text: v.text, textAlign: v.textAlign, ... });
-    dispatch({ type: 'MARK_SAVED', id, createdAt });
-  },
-  [state.persistedId, state.persistedCreatedAt, date, dispatch],
-);
+id: string        // UUID from generateId()
+dataUrl: string   // base64 data URL
+width: number
+height: number
+addedAt: string   // ISO 8601
 ```
-`saveFn` lives inside `Editor.tsx` and is a `useCallback`. It is already called imperatively in `handleSaveAndBack` (line 75) and `handleExplicitSave` (line 80), so calling it synchronously before a date switch is the correct and established pattern. The date-switch handler must call `saveFn(autosaveValue)` then dispatch a `LOAD_ENTRY` for the new date — no need to lift or ref this function.
+Matches intake exactly. No deviation.
 
-**No `flush` on useAutosave**: `useAutosave` (line 22–26) is a bare `useEffect` with `setTimeout` — there is no `flush()` method. To avoid data loss when the debounce timer is mid-flight, the date-switch handler must call `saveFn(autosaveValue)` directly (which is the synchronous eager-save path, identical to `handleExplicitSave`). The in-flight debounce timer will fire later but `upsertDiary` is idempotent (same `persistedId`) and harmless. This is the cleanest approach; no timer cancellation API is needed.
+### 2. `DiaryEntry.photos`
 
-**LOAD_ENTRY with date change** (`useEditorState.ts`, lines 101–109):
-```tsx
-export function useEditorState(date: string): [EditorState, Dispatch<EditorAction>] {
-  const [state, dispatch] = useReducer(reducer, INITIAL_STATE);
-  useEffect(() => {
-    const entry = readDiaries().find((e) => e.date === date);
-    dispatch({ type: 'LOAD_ENTRY', entry });
-  }, [date]);
-  return [state, dispatch];
-}
-```
-The `date` prop is a dependency of the `useEffect`. When `date` changes, `LOAD_ENTRY` fires automatically. This means if the `Editor` component receives a new `date` prop, it will reload state correctly without remounting. HOWEVER, `Editor.tsx` currently receives `date` from the Next.js page route param and passes it to `useEditorState`. The `date` prop on `Editor` never changes during the component's lifetime (it comes from the URL). For the date-strip, we need `date` to change while keeping the Editor mounted.
+Line 108 of `types.ts`: `photos: Photo[]`. It is `Photo[]`, not `string[]`. `fixtures.ts` initialises it as `photos: []`. Confirmed.
 
-**Two approaches are possible**:
-1. Move `date` into a `useState` inside `Editor.tsx` (initialized from the prop, mutable during strip navigation). The `useEditorState(date)` hook already supports re-firing on date change — this would work with no hook changes.
-2. Alternatively, dispatch `LOAD_ENTRY` directly from the strip's selection handler by reading the new entry from storage and dispatching manually, bypassing the `useEditorState` hook's `useEffect`. This is messier and couples the strip to internal hook dispatch semantics.
+### 3. `EditorToolbar` — gallery button shape
 
-Approach 1 is clean. `Editor.tsx` changes: `const [currentDate, setCurrentDate] = useState(date);` and passes `currentDate` everywhere `date` was used. The strip handler calls `setCurrentDate(newDate)` after saving.
+`EditorToolbar.tsx` lines 47–53: `EditorToolbarProps` has `onGalleryTap: () => void`. The gallery button (lines 69–76) is wired to that prop. It has no `disabled` prop, no `photoCount` prop. The button has `aria-label="갤러리"`, `min-h-[44px] min-w-[44px]`, `text-meta` — exactly the touch-target pattern required. REQ-011 needs to add `disabled?: boolean` and `photoCount?: number` (or `galleryDisabled?: boolean`) to `EditorToolbarProps`.
 
-### 3. Storage Layer
+### 4. `Editor.tsx` integration
 
-**readDiaries()** (`src/lib/storage/diaries.ts`, line 13): Returns `DiaryEntry[]`. No `Map<date, entry>` helper exists. The strip component must build its own date-to-entry lookup by calling `readDiaries()` and using `Array.find` or constructing a `Map` locally.
+Line 150–152: `onGalleryTap={() => toast.show('곧 만나요!')}` — currently a placeholder toast. The hidden `<input type="file">` does not exist. Photos are not in `Editor`'s local state — they would need to be part of `useEditorState` or managed via `ADD_PHOTO`/`DELETE_PHOTO` dispatch actions, with `state.photos` passed down.
 
-**useDiaries()** (`src/lib/storage/useDiaries.ts`): Reads once on mount, returns `{ entries, isReady }`. The strip can use this hook to get the full entry list on mount and build its lookup map. No new storage keys are needed.
+`autosaveValue` (lines 41–44) is `{ mood, text, textAlign }` — photos are absent. This is the primary wiring gap.
 
-**No index helper exists**: The design agent must specify building a local `Map<string, DiaryEntry>` from `readDiaries()` results inside the strip hook, e.g. `new Map(entries.map(e => [e.date, e]))`.
+`saveFn` (lines 47–58): `photos: []` is hardcoded on line 54. This must become `photos: state.photos` (or `v.photos` if photos are included in `autosaveValue`).
 
-### 4. Calendar MoodIcon Size
+### 5. `useEditorState` — photos absent
 
-`CalendarDayCell.tsx` line 48: `<MoodIcon id={entry.mood} size={32} />`. The strip cells should match or be slightly smaller (24–28px) to fit the tighter horizontal cell layout. The design agent should specify `size={24}` for strip cells given their constrained width (~44px touch target).
+`EditorState` (lines 7–18) has no `photos` field. `EditorAction` union (lines 21–32) has no `ADD_PHOTO` or `DELETE_PHOTO`. `LOAD_ENTRY` reducer (lines 52–69) destructures `{ id, createdAt, mood, text, textAlign }` from the entry — `photos` is discarded. `MARK_SAVED` snapshot (lines 79–85) captures `{ mood, text, textAlign }` — no photos.
 
-### 5. Navigation / Routing
+Required additions to `useEditorState.ts`:
+- `EditorState.photos: Photo[]`
+- `EditorAction: | { type: 'ADD_PHOTO'; photo: Photo } | { type: 'DELETE_PHOTO'; id: string }`
+- `LOAD_ENTRY` case: spread `entry.photos ?? []` into state
+- `MARK_SAVED` case: snapshot does not need photos (snapshot is used only for dirty detection of text/mood/align)
+- `INITIAL_STATE.photos: []`
+- Import `Photo` from `@/lib/storage`
 
-`Editor.tsx` uses `useRouter()` from `next/navigation` for `router.back()` and `router.push(Routes.list)`. These are navigation events to other screens — not involved in the date-strip switch. The strip switch is pure state: call `saveFn`, then `setCurrentDate(newDate)`. No `router.push`, no `router.replace`, no URL mutation. This satisfies REQ-010's invariant 5 ("inline — no history-stack push, no URL change").
+### 6. `saveFn` in `Editor.tsx`
 
-`Routes` in `src/lib/navigation/routes.ts` does not need to change.
+Line 54: `photos: []`. Must change to `photos: state.photos`. Note: `saveFn` captures `state.persistedId`, `state.persistedCreatedAt`, `currentDate` in its dependency array (line 58). After adding `state.photos`, it must also be in the dep array or the save will use a stale photos reference.
 
-### 6. Existing Tests
+Two implementation options:
+- Option A: add `photos` to `autosaveValue` shape (then `v.photos` in the callback) — requires changing `AutosaveValue` type used in `useHorizontalDatePicker.ts` too
+- Option B: keep `autosaveValue` as `{mood, text, textAlign}` and add `state.photos` directly to `saveFn` closure deps — simpler, no `useHorizontalDatePicker` interface change
 
-- `Editor.test.tsx` uses `vi.useFakeTimers()` + `act(() => { vi.advanceTimersByTime(1000); })` for autosave testing — this pattern applies directly to testing the flush-before-switch sequence.
-- `useEditorState.test.ts` uses `renderHook` with direct `dispatch` calls and tests `LOAD_ENTRY` firing on initial mount. Tests for date-change re-loading would follow the same `renderHook({ initialProps: { date: 'YYYY-MM-DD' } })` + `rerender({ date: '...' })` pattern.
-- No scrollable-strip or IntersectionObserver tests exist. The strip uses CSS `overflow-x: auto` (no IntersectionObserver needed), so no new testing infrastructure is required.
-- Mocking setup: `setupNextNavigation.ts` exposes `mockRouter` with `replace` already mocked alongside `push` and `back` — available if needed, though the strip won't call it.
+Option A is preferred for correctness — see Constraint 3 below.
+
+### 7. `useToast` — signature and role support
+
+`useToast.ts` lines 40–45: `show(message: string, durationMs = 1800): void`. No role parameter — role is on `<Toast role>` prop, not on `show()`. `Toast.tsx` line 26: `role?: 'status' | 'alert'`. The current `Editor.tsx` only mounts one `<Toast>` with no role override (defaults to `'status'`). For error toasts ("파일이 너무 큽니다"), passing `role="alert"` is accessible — but the current architecture does not allow per-call role switching through `useToast`. Either: mount a second `<Toast role="alert">` for error cases, or accept that the existing single toast with default `role="status"` is used for all messages (permissible for MVP).
+
+### 8. `autosaveValue` — photos not included
+
+As noted in §4 and §6, `autosaveValue` (line 41–44 of `Editor.tsx`) does not include photos. Photo changes will not trigger the `useAutosave` debounce. The cleanest fix is to add `photos: Photo[]` to `autosaveValue` and update `AutosaveValue` in `useHorizontalDatePicker.ts` accordingly — that type only carries `mood | text | textAlign` now and the hook only passes it to `saveFn`, so the addition is non-breaking.
+
+### 9. `generateId` — confirmed
+
+`src/lib/storage/uuid.ts` line 20: `export function generateId(): string` using `crypto.randomUUID()`. Exported via `@/lib/storage` index line 42. Ready to import in the new `photoBase64.ts` utility.
+
+### 10. Horizontal scroll patterns — reuse
+
+`HorizontalDatePicker.tsx` (lines 41–46): `overflow-x: auto; scrollSnapType: 'x mandatory'; WebkitOverflowScrolling: 'touch'; gap: 4; no-scrollbar class`. `DateCell.tsx` (lines 50, 58): `scroll-snap-align-center` Tailwind class and `scrollSnapAlign: 'center'` inline style. The carousel should use `overflow-x: auto; scroll-snap-type: x mandatory` with `scroll-snap-align: start` per Invariant 8 in intake. The `no-scrollbar` utility class already exists on the project's Tailwind config (used in `HorizontalDatePicker`) — can be reused on `PhotoCarousel`.
+
+### 11. `useDialogControl` — backdrop tap
+
+`useDialogControl.ts` uses `<dialog>` backdrop detection. This is for modal dialogs. The delete overlay on photo thumbnails is an inline overlay rendered within the carousel, not a `<dialog>`. Tap-outside dismissal for the overlay should use a `pointerdown` listener on `document` that checks `!ref.current?.contains(e.target)`, not `useDialogControl`. No existing hook covers this pattern.
+
+### 12. Long-press hooks — none exist
+
+Zero results for `longPress`, `touchstart`, `pointerdown` in source. `useLongPress.ts` must be created from scratch in `src/lib/hooks/`.
+
+### 13. `navigator.vibrate` in tests
+
+Vitest runs in `environment: 'node'` by default (`vitest.config.ts` line 4). Files using `// @vitest-environment happy-dom` get the happy-dom DOM APIs. In happy-dom, `navigator.vibrate` is not implemented (returns `undefined`). The intake's required feature-detect `if (navigator.vibrate) navigator.vibrate(50)` will be silently skipped in tests — no stub needed. In Playwright Chromium, `navigator.vibrate` exists and returns `true` without actually vibrating (the API is present but the browser silently ignores it). No special handling needed.
+
+### 14. File-size status
+
+| File | Current lines | After REQ-011 change |
+|---|---|---|
+| `Editor.tsx` | 192 | +30–50 (file input ref, photo dispatch wiring) → ~230 |
+| `EditorToolbar.tsx` | 108 | +5–10 (disabled prop, photoCount prop) → ~115 |
+| `useEditorState.ts` | 110 | +20–30 (photos field, ADD_PHOTO, DELETE_PHOTO) → ~135 |
+| `EditorBody.tsx` | 122 | +5 (PhotoCarousel slot) → ~127 |
+
+All are already over the 100-line budget. The new code (`PhotoCarousel`, `useLongPress`, `photoBase64`) must live in separate files — not folded into any of these.
+
+### 15. `Image()` dimensions extraction in happy-dom
+
+`new Image()` exists in happy-dom but `naturalWidth`/`naturalHeight` are always `0` unless the environment actually decodes image data (it doesn't). Unit tests for `photoBase64.ts` must mock the `Image` load cycle. Recommended pattern: in tests, replace `Image` with a class that fires `onload` synchronously and returns fixed dimensions. The utility function should accept an injectable `ImageConstructor` param or the test can mock `globalThis.Image`. In Playwright E2E, real Chromium decodes the image properly so `naturalWidth`/`naturalHeight` work.
 
 ---
 
 ## Concrete Integration Points
 
-| File | Change Required |
+| File | Change |
 |---|---|
-| `src/app/diary/[date]/_components/EditorBody.tsx` (84 lines) | Add `stripOpen: boolean` + `onDateLabelTap: () => void` props. Convert date `<p>` to a tappable `<button>`. Render `<HorizontalDatePicker>` below date line when `stripOpen`. |
-| `src/app/diary/[date]/_components/Editor.tsx` (171 lines — ALREADY OVER 100) | Add `useState(date)` for `currentDate`. Add `stripOpen` state. Wire `handleDateSwitch(newDate)` which calls `saveFn(autosaveValue)` then `setCurrentDate(newDate)`. Pass `stripOpen` and `onDateLabelTap` to `EditorBody`. |
-| `src/lib/hooks/useEditorState.ts` (110 lines — ALREADY OVER 100) | No code change required; the hook already responds to `date` param changes via `useEffect([date])`. |
-| `src/design-system/MoodIcon.tsx` | No change. Used as-is with `size={24}` in strip cells. |
-
-New files to create (all under the 100-line budget individually):
-- `src/app/diary/[date]/_components/HorizontalDatePicker.tsx` — scroll container + maps date range to cells
-- `src/app/diary/[date]/_components/DateCell.tsx` — single cell: `MoodIcon` or numeric, highlight logic
-- `src/lib/hooks/useHorizontalDatePicker.ts` — toggle state + date range generation + entry map lookup
+| `src/lib/hooks/useEditorState.ts` | Add `photos: Photo[]` to `EditorState`; add `ADD_PHOTO` / `DELETE_PHOTO` to `EditorAction`; update `LOAD_ENTRY` to spread `entry.photos`; INITIAL_STATE.photos: [] |
+| `src/app/diary/[date]/_components/Editor.tsx` | Change `photos: []` to `photos: state.photos` in `saveFn`; add `state.photos` to `saveFn` dep array; add `photos: state.photos` to `autosaveValue`; replace `onGalleryTap` placeholder with file-input wiring; mount `<PhotoCarousel>` between EditorBody and EditorToolbar |
+| `src/app/diary/[date]/_components/EditorToolbar.tsx` | Add `disabled?: boolean` (gallery button) and `photoCount?: number` props |
+| `src/app/diary/[date]/_components/EditorBody.tsx` | No change needed — carousel mounts in `Editor.tsx` between `<EditorBody>` and `<EditorToolbar>` |
+| `src/lib/hooks/useHorizontalDatePicker.ts` | Add `photos: Photo[]` to `AutosaveValue` type — see Constraint 3 |
+| `src/lib/storage/index.ts` | Already exports `MAX_PHOTO_DATAURL_BYTES`, `MAX_PHOTOS_PER_ENTRY` — no change needed |
 
 ---
 
-## Architecture Constraints That Must Be Honored
+## Architecture Constraints
 
-1. `saveFn` must be called synchronously before `setCurrentDate(newDate)`. No async gap between save and state transition — both are synchronous (localStorage is synchronous).
-2. `LOAD_ENTRY` dispatches from `useEditorState`'s `useEffect` when `date` changes — this is automatic if `currentDate` state is used. The strip must NOT dispatch `LOAD_ENTRY` directly (that would bypass the hook's single-load gate).
-3. `MoodIcon` called with `size` as a plain integer (e.g. `size={24}`). No string variant name.
-4. No new localStorage keys. Strip reads `readDiaries()` and constructs a transient in-memory lookup.
-5. Save-failure handling: catch `QuotaExceededError` from `upsertDiary`, call `toast.show('저장에 실패했어요...', undefined, 'alert')` — reuse the existing `toast` instance in `Editor.tsx`. Block `setCurrentDate` on failure.
-6. Korean strings only for all user-visible text (aria-labels, labels).
-7. All new files under ~100 lines. `Editor.tsx` is already at 171 lines — any additions should extract rather than inline.
+1. `upsertDiary` does not catch `QuotaExceededError` — it propagates. `saveFn` in `Editor.tsx` also does not currently catch it. REQ-011 must add a try/catch around `upsertDiary` in `saveFn` (or in `useAutosave`) and call `toast.show('저장에 실패했어요...')`. This is a pre-existing gap that REQ-011's larger photos make urgent.
+
+2. The Vitest environment is `node` by default. Components using `useEditorState` (which calls `readDiaries` / `localStorage`) override to `// @vitest-environment happy-dom` at the file level. `useLongPress.ts` tests will need `// @vitest-environment happy-dom` for pointer event simulation.
+
+3. `AutosaveValue` in `useHorizontalDatePicker.ts` is a shared type. If photos are added to it, the `handleDateSelect` callback passes `autosaveValue` (including photos) to `saveFn`, which is correct — the photos at the time of date-switch will be saved. This is the right behavior.
+
+4. The `MARK_SAVED` action currently snapshots `{ mood, text, textAlign }` for dirty detection. Photos are not tracked in the snapshot. This is acceptable: `isDirty` in `Editor.tsx` only checks text/mood/align. Photos flow through the save but are not part of dirty-flag logic — photo adds/deletes go directly to `upsertDiary` via autosave without needing a separate dirty signal.
 
 ---
 
 ## Risks Specific to This Architecture
 
-**Data loss during debounce mid-flight**: `useAutosave` has no flush method. The date-switch handler must call `saveFn(autosaveValue)` eagerly (same pattern as `handleExplicitSave`). The pending debounce timer will then fire a duplicate save — harmless because `upsertDiary` is idempotent. This is safe by design but must be explicitly documented in the implementation.
+1. **base64 + localStorage 5 MB limit**: `limits.ts` sets `MAX_PHOTO_DATAURL_BYTES = 150 * 1024` (150 KB per image). However, the intake's REQ says to reject files where `file.size > 5_242_880`. A 5 MB file encodes to ~6.7 MB base64 — the per-file limit in `limits.ts` (150 KB base64) is much stricter than the intake's 5 MB file cap. These two limits are **inconsistent**. Implementation must choose one: the `limits.ts` constant (150 KB dataUrl string length) or the intake's 5 MB file size cap. Both must be enforced in the `photoBase64.ts` utility; the stricter dataUrl length check should be primary.
 
-**`currentDate` vs URL mismatch**: Once `currentDate` state diverges from the URL path param, the browser URL stays stale (e.g. URL shows `/diary/2026-05-20` while the editor shows May 22nd's entry). This is intentional per REQ-010 (no URL change), but it means the back button will navigate to whatever was before `/diary/2026-05-20` on the stack, not return to May 20th. This is correct behavior per the PRD's history-stack model. The implementation must NOT use `router.replace` to keep the URL in sync — that would still push a history entry and break the expected back behavior.
+2. **`Image()` + `naturalWidth`/`naturalHeight` in happy-dom**: Returns 0/0 unless mocked. Tests for `photoBase64.ts` must inject a mock Image constructor. This is not difficult but is easy to forget.
 
-**`useDiaries` reads only on mount**: If the strip is mounted while the user is mid-session and has saved an entry (via autosave), the in-memory entry map built from `useDiaries` may be stale for the current date. The strip hook should call `readDiaries()` directly (not `useDiaries`) to get the freshest view on each render or on each strip-open event. This avoids a one-time stale snapshot problem.
+3. **Long-press vs scroll on carousel**: `pointerdown` starts the 500 ms timer; `pointermove` must cancel it if displacement exceeds 5 px. Without the move-slop check, normal horizontal scrolling will trigger the delete overlay on every thumbnail. The `useLongPress` hook must track `startX/startY` from `pointerdown` and cancel on `pointermove` beyond threshold.
 
-**`Editor.tsx` file size**: Already at 171 lines. Adding `currentDate` state, `stripOpen` state, and `handleDateSwitch` will push it further. The 100-line rule is already violated; extraction (e.g., pulling date-switch logic into `useHorizontalDatePicker`) is required to keep the file manageable.
+4. **`saveFn` does not catch `QuotaExceededError`**: Current code will throw an unhandled exception if storage is full. With photos, this becomes much more likely. Must wrap `upsertDiary` in try/catch.
 
-**`useEditorState.ts` file size**: Already at 110 lines. No new code goes here, but it's on the radar.
+5. **Multiple rapid gallery taps**: No `isProcessing` guard exists. FileReader's `onload` fires asynchronously, and a second tap before the first resolves opens another file dialog. A `useRef<boolean>` flag in the gallery tap handler is needed.
+
+6. **`useHorizontalDatePicker.AutosaveValue` type coupling**: If photos are added to `AutosaveValue`, any future REQ that adds a new field to `autosaveValue` must also update this type. The coupling is mild but documented.
+
+7. **`navigator.vibrate` in Playwright**: Available in Chromium desktop (returns `true`, silently no-ops). Will not block E2E tests. Safe.
 
 ---
 
-## Suggested Component/File Structure for the New Feature
+## Suggested Component / File Structure for the New Feature
 
 ```
-src/app/diary/[date]/_components/
-  HorizontalDatePicker.tsx       # scroll container, maps date range → DateCell array
-  DateCell.tsx                   # single cell: MoodIcon (size=24) or day number, highlight
-
-src/lib/hooks/
-  useHorizontalDatePicker.ts     # toggle open/close, build ±30-day range, build date→entry Map
-                                 # exposes: isOpen, toggle(), dateRange, entryMap
+src/
+  lib/
+    hooks/
+      useLongPress.ts                   # NEW: pointer-event long-press hook
+      useLongPress.test.ts              # NEW: happy-dom, fake timers
+  app/
+    diary/[date]/
+      _components/
+        PhotoCarousel.tsx               # NEW: carousel + per-thumbnail overlay
+        PhotoCarousel.test.tsx          # NEW: add/delete/overlay/empty-hide
+  lib/
+    storage/
+      photoBase64.ts                    # NEW: FileReader util + size check
+      photoBase64.test.ts               # NEW: mock Image + FileReader
 ```
 
-`Editor.tsx` changes (kept minimal — delegate logic to `useHorizontalDatePicker`):
-- `const [currentDate, setCurrentDate] = useState(date);`
-- `const strip = useHorizontalDatePicker(currentDate);`
-- `handleDateSwitch(newDate)`: `try { saveFn(autosaveValue); setCurrentDate(newDate); strip.close(); } catch { toast.show('저장에 실패했어요...'); }`
+Files modified (not created):
+- `src/lib/hooks/useEditorState.ts` — add `photos`, `ADD_PHOTO`, `DELETE_PHOTO`
+- `src/app/diary/[date]/_components/Editor.tsx` — wire photos into autosave + saveFn + mount carousel
+- `src/app/diary/[date]/_components/EditorToolbar.tsx` — add `disabled` / `photoCount` props
 
-`EditorBody.tsx` changes:
-- Add `stripOpen`, `onDateLabelTap`, `onDateSelect`, `stripEntries` props (or accept the strip node as a `stripSlot` render prop to avoid coupling).
-- Convert the date `<p>` at line 68 to a `<button>` with `aria-label="날짜 선택"`.
-- Render `<HorizontalDatePicker>` between the date line and the textarea when `stripOpen`.
+Note: `photoBase64.ts` belongs under `src/lib/storage/` alongside `uuid.ts` and `limits.ts` because it is a storage-layer concern (encodes + validates before calling `upsertDiary`). Alternatively it can live in a new `src/lib/photo/` module — either is acceptable. The storage sub-path is simpler given existing patterns.
+
+---
+
+## File Budget Warnings
+
+All four files being modified are already over the 100-line rule:
+
+| File | Lines now | Projected after REQ-011 | Action |
+|---|---|---|---|
+| `Editor.tsx` | 192 | ~230 | Extract photo-related handler functions into a `usePhotoHandlers` hook or inline in the new file; at minimum, move file-input JSX to a sub-component `GalleryInput.tsx` |
+| `EditorToolbar.tsx` | 108 | ~115 | Minor, acceptable if gallery props are 2–3 lines; split SVG icons into separate file if needed |
+| `useEditorState.ts` | 110 | ~135 | Move the reducer function out to `editorReducer.ts`, keep hook in `useEditorState.ts` |
+| `EditorBody.tsx` | 122 | ~127 | Minor; no split required this REQ but flagged for next |
+
+The new files should be sized from the start within budget:
+- `PhotoCarousel.tsx` — target <90 lines (thumbnails + overlay only, no FileReader logic)
+- `useLongPress.ts` — target <40 lines
+- `photoBase64.ts` — target <60 lines
 
 ---
 
 ## Verdict
 PASS
+
+All architectural dependencies are in place and verified. The primary integration gaps — `state.photos` missing from `useEditorState`, `photos: []` hardcoded in `saveFn`, and photos absent from `autosaveValue` — are clearly located and have straightforward fixes. No unknown subsystems. File-size violations are pre-existing and manageable through the proposed extractions.

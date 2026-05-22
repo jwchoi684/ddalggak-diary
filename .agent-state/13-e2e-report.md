@@ -1,59 +1,58 @@
-# E2E Report — REQ-010: 가로 날짜 피커 (Horizontal Date Picker)
+# E2E Report — REQ-011: 사진 첨부 (Photo Attachment)
 
 ## Summary
 
-4 of 4 Playwright specs passed in 13.0s (Chromium, Desktop Chrome). The two new specs for REQ-010 (`horizontal-date-picker.spec.ts`) both passed, confirming the core date-switch user journey is correct and regression-free against the full existing suite.
+6 of 6 Playwright specs passed in 22.5 s (Chromium, Desktop Chrome). The two new specs for REQ-011 (`photos.spec.ts` PE1 and PE2) both passed, and all 4 pre-existing specs remain green. The L-1 security-hardening pass (MIME-prefix guard added to `photoBase64.ts`) does not affect happy-path E2E flows because `FileReader.readAsDataURL` always produces a `data:image/...` prefix for valid image files.
 
 ## Scenario Tested
 
-**REQ-010 — Horizontal Date Picker on the Diary Editor**
+**REQ-011 — Photo Attachment on the Diary Editor**
 
-A user on the diary editor taps the "날짜 선택" button to reveal a horizontal date strip, taps a different date cell, and the editor content switches to that date without navigating away or corrupting the original entry.
+PE1: A user opens a diary entry with no photos, uploads a 1x1 PNG via the gallery icon, sees the carousel appear with one thumbnail, waits for the autosave debounce, reloads the page, and confirms the carousel and thumbnail are still present (persistence through `localStorage` autosave path).
+
+PE2: A user opens a diary entry that already has 10 photos seeded in localStorage; the gallery icon button must be in a `disabled` state, enforcing the hard 10-photo cap.
 
 ## Steps
 
-**E1 — date switch with both entries seeded**
-1. Seed localStorage with entries for DATE_A (yesterday) and DATE_B (today).
-2. Navigate to `/diary/DATE_A`; assert textarea shows "Entry A text".
-3. Click "날짜 선택" button; assert listbox "가로 캘린더" is visible.
-4. Click the option for DATE_B (full Korean locale label via `toKoreanLabel`).
-5. Assert URL remains `/diary/DATE_A` (no navigation occurred).
-6. Assert textarea now shows "Entry B text".
-7. Assert listbox is closed.
-8. Assert localStorage still contains DATE_A entry with original text unchanged.
+**PE1 — add photo → autosave → reload persistence**
+1. Seed localStorage via `seedDiariesOnceScript` with a base entry (no photos) for `2026-05-15`.
+2. Navigate to `/diary/2026-05-15`; assert `[data-testid="photo-carousel"]` has count 0.
+3. Call `page.setInputFiles('input[type="file"]', '1x1.png')` to simulate gallery selection.
+4. Assert `[data-testid="photo-carousel"]` is visible and `[data-testid^="photo-thumb-"]` has count 1.
+5. Wait 1 500 ms (autosave debounce is 1 000 ms + buffer).
+6. `page.reload()` — `seedDiariesOnceScript` does NOT re-seed because the key already exists.
+7. Assert carousel is still visible and thumbnail count is still 1.
 
-**E2 — date switch from a no-mood entry does not persist partial data**
-1. Seed localStorage with only DATE_B; DATE_A has no entry.
-2. Navigate to `/diary/DATE_A`; mood picker opens automatically.
-3. Dismiss mood picker via "닫기" button.
-4. Fill textarea with "Unsaved text no mood" (no mood selected).
-5. Click "날짜 선택"; assert strip opens.
-6. Click DATE_B cell; assert textarea shows "Entry B only".
-7. Assert localStorage contains no entry for DATE_A (save guard exits early when `mood === undefined`).
+**PE2 — 10-photo cap disables gallery button**
+1. Seed localStorage via `seedDiariesScript` with an entry containing 10 pre-built `Photo` objects for `2026-05-16`.
+2. Navigate to `/diary/2026-05-16`.
+3. Assert `page.getByRole('button', { name: '갤러리' })` is disabled.
 
 ## Test Files Added / Updated
 
-- `e2e/horizontal-date-picker.spec.ts` — 2 test cases (written in Phase 9; no changes in this phase)
-- `e2e/_helpers/seedDiaries.ts` — `seedDiariesScript` localStorage seed utility (shared with `editor.spec.ts`)
+- `e2e/photos.spec.ts` — 2 cases PE1 + PE2 (added during REQ-011 cycle 2; unchanged in L-1 hardening pass)
+- `e2e/_helpers/seedDiaries.ts` — `seedDiariesOnceScript` helper (added during REQ-011 cycle-1 fix; unchanged in L-1 pass)
 
 ## Commands Run
 
 ```
-npm run test:e2e
+npm run test:e2e   →   playwright test (6 specs)
 ```
 
 ## Results
 
 | # | File | Test | Result | Duration |
-|---|------|------|--------|----------|
-| 1 | horizontal-date-picker.spec.ts | E1: switch date A → B, URL stays at A | PASS | 3.9s |
-| 2 | horizontal-date-picker.spec.ts | E2: no-mood date switch, no partial persist | PASS | 1.5s |
-| 3 | calendar.spec.ts | 캘린더 FAB → 오늘 에디터 이동 | PASS | 3.2s |
-| 4 | editor.spec.ts | 빈 셀 → 무드 → 입력 → 저장 → 캘린더 무드 표시 | PASS | 4.9s |
+|---|---|---|---|---|
+| 1 | calendar.spec.ts | 캘린더 화면 진입 후 FAB 탭 시 오늘 일기 에디터로 이동 | PASS | 5.4 s |
+| 2 | editor.spec.ts | 캘린더 빈 셀 → 무드 선택 → 본문 입력 → 자동 저장 → 뒤로 → 캘린더에 무드 표시 | PASS | 3.5 s |
+| 3 | horizontal-date-picker.spec.ts | E1: switch date A → B, URL stays at A | PASS | 1.4 s |
+| 4 | horizontal-date-picker.spec.ts | E2: no-mood date switch, no partial persist | PASS | 1.5 s |
+| 5 | photos.spec.ts | PE1: 사진 추가 → 자동 저장 → 재진입 시 카로젤 보존 | PASS | 3.9 s |
+| 6 | photos.spec.ts | PE2: 10장이면 갤러리 버튼 disabled | PASS | 0.8 s |
 
-**Total: 4 passed, 0 failed — 13.0s**
+**Total: 6 passed, 0 failed — 22.5 s**
 
-Browser: Chromium (Desktop Chrome profile). Config: `playwright.config.ts`, `testDir: ./e2e`, `timeout: 30_000`, `fullyParallel: false`.
+Browser: Chromium (Desktop Chrome). Config: `playwright.config.ts`, port 3001, `next dev --port 3001`, `workers: 1`, `fullyParallel: false`, `expect.timeout: 15 000 ms`.
 
 ## Failures
 
@@ -65,9 +64,10 @@ No failures occurred. `trace: 'on-first-retry'` is configured; no traces were pr
 
 ## Not Tested
 
-- Month boundary scrolling in the date strip (strip renders ±15 days; scroll past that boundary is a stretch goal).
-- Keyboard navigation within the date strip listbox.
-- Mobile viewport (config targets Desktop Chrome; mobile-first layout validated by unit tests).
+- Long-press delete overlay via Playwright pointer events — reliable 500 ms hold simulation deferred to REQ-012 cycle.
+- Firefox / WebKit — single-browser (Chromium) coverage intentional for MVP; deferred.
+- Storage-quota exhaustion path — requires injecting a near-limit localStorage mock; deferred.
+- MIME-prefix rejection path (L-1 guard) — covered by unit test PB7 in `src/lib/storage/__tests__/photoBase64.test.ts`; no E2E equivalent required as the guard is a synchronous JS check with no browser-rendering dependency.
 
 ## Verdict
 PASS

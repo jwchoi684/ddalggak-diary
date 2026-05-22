@@ -2,13 +2,14 @@
 
 import { useState, useMemo, useCallback } from 'react';
 import { readDiaries } from '@/lib/storage';
-import type { DiaryEntry, MoodId } from '@/lib/storage';
+import type { DiaryEntry, MoodId, Photo } from '@/lib/storage';
 
 // AutosaveValue matches the shape used in Editor.tsx
 export type AutosaveValue = {
   mood: MoodId | undefined;
   text: string;
   textAlign: 'left' | 'center';
+  photos: Photo[];
 };
 
 export interface UseHorizontalDatePickerOptions {

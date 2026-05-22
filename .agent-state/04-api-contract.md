@@ -1,221 +1,266 @@
-# API / Interface Contract — REQ-010
+# API / Interface Contract — REQ-011
 
 ## Summary
 
-REQ-010 is a pure client-side React feature with no HTTP, RPC, WebSocket, or queue boundaries. This contract defines the TypeScript interface and behavioral contracts for five units: one new hook, two new components, and two modified components. It also states the read-only storage contracts this feature depends on.
-
----
+REQ-011 introduces photo attachment to the diary editor. It adds one storage utility (`addPhotoFromFile`), one hook (`useLongPress`), one component (`PhotoCarousel`), two new reducer actions (`ADD_PHOTO`, `DELETE_PHOTO`) with a matching new field (`photos: Photo[]`) in `EditorState`, an extended `AutosaveValue` type, and one new optional prop (`galleryDisabled?: boolean`) on `EditorToolbar`. No HTTP endpoints, RPC methods, or backend changes are involved. All contracts are TypeScript-level, within the client module boundary.
 
 ## Contract Type
 
-Component and hook interface contracts (TypeScript, React, client-side only).
+Internal TypeScript function/hook/component interfaces. No network boundary.
 
 ---
 
 ## Interfaces
 
-### 1. `useHorizontalDatePicker(opts)` — NEW hook
+### 1. `addPhotoFromFile` — `src/lib/storage/photoBase64.ts`
 
-**File:** `src/lib/hooks/useHorizontalDatePicker.ts`
-
-```ts
-export interface UseHorizontalDatePickerOptions {
-  currentDate: string;                        // "YYYY-MM-DD", caller maintains
-  saveFn: (v: AutosaveValue) => void;         // synchronous; throws on QuotaExceededError
-  autosaveValue: AutosaveValue;               // { mood: MoodId | undefined; text: string; textAlign: 'left' | 'center' }
-  onDateChange: (newDate: string) => void;    // called only on successful save
-  onSaveError: (msg: string) => void;         // called with Korean error string on save failure
+```typescript
+export interface AddPhotoResult {
+  ok: true;
+  photo: Photo;
 }
 
-export interface UseHorizontalDatePickerReturn {
-  isOpen: boolean;
-  toggle: () => void;
-  close: () => void;
-  dateRange: string[];                        // 61 ISO date strings: currentDate −30d to +30d, ascending
-  entryMap: Map<string, DiaryEntry>;          // keyed by "YYYY-MM-DD"; at most one entry per key
-  handleDateSelect: (newDate: string) => void;
+export interface AddPhotoError {
+  ok: false;
+  reason: 'count_exceeded' | 'size_exceeded' | 'load_failed';
 }
 
-export function useHorizontalDatePicker(
-  opts: UseHorizontalDatePickerOptions
-): UseHorizontalDatePickerReturn;
+export type AddPhotoOutcome = AddPhotoResult | AddPhotoError;
+
+export async function addPhotoFromFile(
+  file: File,
+  currentPhotoCount: number,
+  ImageCtor?: typeof Image,
+): Promise<AddPhotoOutcome>;
 ```
 
-**Caller responsibilities:**
-- `currentDate` must be a valid ISO date string in "YYYY-MM-DD" format.
-- `saveFn` must be the same function reference produced by `Editor.tsx`'s `useCallback`; its `useCallback` deps array must include `currentDate` (not the stale URL `date` prop).
-- `autosaveValue` must reflect the current editor field values at the moment `handleDateSelect` is called (not a snapshot from a previous render).
-- `onDateChange` must call `setCurrentDate` in `Editor.tsx`; it must not be called if save throws.
-- `onSaveError` must route to the existing `toast.show()` instance in `Editor.tsx` — do not mount a second `<Toast>`.
+Caller responsibilities:
+- Pass a `File` from a change event on `<input type="file" accept="image/*">`.
+- Pass `state.photos.length` as `currentPhotoCount` at the moment of the call.
+- Pass `ImageCtor` only in tests; omit in production.
+- Reset `fileInputRef.current.value = ''` before awaiting this function.
 
-**Callee guarantees:**
-- `handleDateSelect(newDate)` always calls `saveFn(autosaveValue)` first (synchronously), then calls `onDateChange(newDate)` and `close()` only if `saveFn` does not throw.
-- If `saveFn` throws, calls `onSaveError(msg)` and leaves `isOpen` true and `currentDate` unchanged.
-- Tapping the same date as `currentDate` results in a no-op save call (which returns early when mood is undefined) followed by `close()` — `onDateChange` is NOT called for same-date taps.
-- `dateRange` is derived via `useMemo([currentDate])` — re-derived whenever `currentDate` changes.
-- `entryMap` is derived via `useMemo([isOpen])` — recomputes fresh from `readDiaries()` on each strip open; stale data between opens is accepted by design.
+Callee guarantees:
+- Never throws. Always resolves with `AddPhotoOutcome`.
+- Count is checked before FileReader is started. If `currentPhotoCount >= MAX_PHOTOS_PER_ENTRY`, returns `{ ok: false, reason: 'count_exceeded' }` synchronously (wrapped in a resolved promise).
+- After FileReader resolves, checks `dataUrl.length > MAX_PHOTO_DATAURL_BYTES`. Returns `{ ok: false, reason: 'size_exceeded' }` if exceeded.
+- Extracts `naturalWidth`/`naturalHeight` via `new (ImageCtor ?? globalThis.Image)()`. Returns `{ ok: false, reason: 'load_failed' }` if `img.onerror` fires or FileReader emits an error event.
+- On success, returns `{ ok: true, photo }` where `photo` conforms to the `Photo` type: `id` from `generateId()`, `dataUrl`, `width`, `height`, `addedAt` as ISO 8601 string.
 
-**Invariants callers MUST honor:**
-- Do not call `handleDateSelect` with a non-ISO string.
-- Do not mutate the returned `dateRange` array or `entryMap`.
-- `onDateChange` must be stable across renders (wrap in `useCallback` or use `useState` setter directly).
+Invariants:
+- `dataUrl` is always a base64 data URL (`data:image/*;base64,...`). `URL.createObjectURL` is never used.
+- Photos appended to the array always appear at the tail (append order, not prepend).
 
 ---
 
-### 2. `<HorizontalDatePicker>` — NEW component
+### 2. `useLongPress` — `src/lib/hooks/useLongPress.ts`
 
-**File:** `src/app/diary/[date]/_components/HorizontalDatePicker.tsx`
-
-```ts
-export interface HorizontalDatePickerProps {
-  currentDate: string;                        // "YYYY-MM-DD"
-  dateRange: string[];                        // 61 items, ascending — from useHorizontalDatePicker
-  entryMap: Map<string, DiaryEntry>;
-  onDateSelect: (date: string) => void;       // routes to handleDateSelect
+```typescript
+export interface LongPressOptions {
+  onLongPress: () => void;
+  delayMs?: number;   // default: 500
+  slopPx?: number;    // default: 5
 }
 
-export function HorizontalDatePicker(props: HorizontalDatePickerProps): JSX.Element;
-```
-
-**Caller responsibilities:**
-- Rendered only when `stripOpen === true` (inside `{stripOpen && <HorizontalDatePicker .../>}` gate in `EditorBody`). Component assumes it is always mounted in an open state.
-- `dateRange` must be sorted ascending; `dateRange[0]` is the earliest date.
-- `onDateSelect` must be stable across renders (is `handleDateSelect` from hook, which is stable).
-
-**Callee guarantees:**
-- On mount, fires a `useEffect` that calls `scrollRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'instant' })`. Fails silently if no selected element found.
-- Renders a `div` with `role="listbox"` and `aria-label="가로 캘린더"`.
-- Does not mount during SSR (`stripOpen` initializes to `false`; no additional `mounted` flag required).
-- Maps `dateRange` to `<DateCell>` items; passes `entry={entryMap.get(date)}` (may be `undefined`).
-
----
-
-### 3. `<DateCell>` — NEW component
-
-**File:** `src/app/diary/[date]/_components/DateCell.tsx`
-
-```ts
-export interface DateCellProps {
-  date: string;                               // "YYYY-MM-DD"
-  entry: DiaryEntry | undefined;              // undefined when no diary exists for this date
-  isSelected: boolean;
-  isToday: boolean;
-  onSelect: (date: string) => void;
+export interface LongPressHandlers {
+  onPointerDown:  (e: React.PointerEvent) => void;
+  onPointerUp:    (e: React.PointerEvent) => void;
+  onPointerMove:  (e: React.PointerEvent) => void;
+  onPointerCancel:(e: React.PointerEvent) => void;
+  onPointerLeave: (e: React.PointerEvent) => void;
 }
 
-export function DateCell(props: DateCellProps): JSX.Element;
+export function useLongPress(options: LongPressOptions): LongPressHandlers;
 ```
 
-**Caller responsibilities:**
-- `isSelected` must be `date === currentDate`.
-- `isToday` must be `date === new Date().toISOString().slice(0, 10)` (computed once per strip render, not per cell).
-- `onSelect` is the same `onDateSelect` from the parent — must be stable.
+Caller responsibilities:
+- Spread the returned handlers onto the target element: `<div {...longPressHandlers}>`.
+- Provide a stable `onLongPress` reference (wrap in `useCallback`) to avoid spurious re-renders.
 
-**Callee guarantees:**
-- Renders a `<button>` with `role="option"`, `aria-selected={isSelected}`, `aria-label` in Korean (e.g., `"2026년 5월 22일"`).
-- When `entry` is defined and `entry.mood` is a valid `MoodId`: renders `<MoodIcon id={entry.mood} size={24} />` centered, day number below in `text-xs text-meta`.
-- When `entry` is defined but `entry.mood` is falsy: renders `•` placeholder at 24px line-height — never crashes.
-- When `entry` is undefined: renders day number only in `text-sm text-charcoal`, centered.
-- Selected state: applies `bg-peach rounded-full` to the full 44×64px cell.
-- Today (not selected): renders a `w-1 h-1 rounded-full bg-peach` dot below the day number.
-- Today + selected: peach pill only; dot omitted.
-- Day number format: `date.slice(-2).replace(/^0/, '')` — "1"–"31", never zero-padded.
-- Does NOT call `onSelect` when `isSelected` is true (same-date no-op is handled by the hook; the component may still call `onSelect(date)` and rely on the hook to ignore it).
+Callee guarantees:
+- Timer fires `onLongPress` exactly once after `delayMs` ms of uninterrupted hold.
+- Timer is cleared on `onPointerUp`, `onPointerCancel`, `onPointerLeave`, and on `onPointerMove` where displacement from `pointerdown` exceeds `slopPx` in any direction.
+- No state or timer leaks when the target unmounts (internal `useEffect` cleanup clears any pending timer).
+- Does not call `preventDefault` or `stopPropagation` — caller owns event handling.
+
+Invariants:
+- Short press (< `delayMs`) never fires `onLongPress`.
+- `slopPx` default of 5 prevents accidental long-press during horizontal scroll.
 
 ---
 
-### 4. `<EditorBody>` props — MODIFIED
+### 3. `PhotoCarousel` — `src/app/diary/[date]/_components/PhotoCarousel.tsx`
 
-**File:** `src/app/diary/[date]/_components/EditorBody.tsx`
+```typescript
+export interface PhotoCarouselProps {
+  photos: Photo[];
+  onDelete: (id: string) => void;
+  /** No-op by default. Wired by REQ-012 for full-screen viewer. */
+  onThumbnailTap?: (id: string) => void;
+}
 
-New props added to `EditorBodyProps`:
-
-```ts
-stripOpen: boolean;
-onDateLabelTap: () => void;
-dateRange: string[];
-entryMap: Map<string, DiaryEntry>;
-onDateSelect: (date: string) => void;
+export function PhotoCarousel(props: PhotoCarouselProps): React.ReactElement | null;
 ```
 
-All five props are required in the updated interface. The single call site (`Editor.tsx`) is updated simultaneously.
+Caller responsibilities:
+- Pass `state.photos` directly; do not copy.
+- Provide `onDelete` that dispatches `DELETE_PHOTO`.
+- Conditionally render only when `photos.length > 0` OR let the component return `null` internally — either is acceptable; the component returns `null` when the array is empty, so double-guarding in the parent is safe but not required.
 
-**Caller responsibilities (Editor.tsx):**
-- Pass `strip.isOpen`, `strip.toggle`, `strip.dateRange`, `strip.entryMap`, `strip.handleDateSelect` directly from the hook return value.
-- All five props must always be provided — no partial application.
+Callee guarantees:
+- Returns `null` when `photos.length === 0`. No DOM nodes rendered.
+- Each thumbnail is `88px × 88px`, `border-radius: 12px`, `object-fit: cover`.
+- Carousel container: `overflow-x: auto`, `scroll-snap-type: x mandatory`, `gap: 8px`, `padding: 4px`, `no-scrollbar` utility class.
+- Each thumbnail wrapper has `scroll-snap-align: start`, `flex-shrink: 0`.
+- Long-press (≥ 500 ms) sets an active overlay on that thumbnail and calls `navigator.vibrate(50)` with feature detection (`if (navigator.vibrate)`).
+- Tapping outside the active overlay (`document` pointerdown, `!overlayRef.contains(e.target)`) clears `activeId`. The listener is attached only when `activeId !== null` and removed on cleanup.
+- Tapping "삭제" in the overlay calls `onDelete(photo.id)` immediately; no secondary confirmation for MVP.
+- Short tap (< 500 ms) calls `onThumbnailTap(photo.id)` if provided; otherwise no-op.
 
-**Callee guarantees (EditorBody):**
-- The existing date `<p>` at line 68 is replaced with a `<button type="button" aria-expanded={stripOpen} aria-haspopup="listbox" aria-label="날짜 선택">`.
-- When `stripOpen` is true, renders `<HorizontalDatePicker currentDate={date} dateRange={dateRange} entryMap={entryMap} onDateSelect={onDateSelect} />` between the date button and the textarea.
-- Strip is inline (reflow, not overlay) — pushes textarea content down.
-- Chevron `▾` rotates 180° when `stripOpen` via CSS transform with 150ms transition.
+Test selectors:
+- Carousel container: `data-testid="photo-carousel"`, `role="list"`
+- Each thumbnail `<img>`: `data-testid="photo-thumb-{id}"`, `alt="첨부 사진"`, wrapper `role="listitem"`
+- Delete overlay: `data-testid="delete-overlay-{id}"`
+- Delete button: `aria-label="사진 삭제"`, `role="button"`, `min-h-[44px] min-w-[44px]`
 
-**Backward compatibility:**
-- The external call site is only `Editor.tsx`. No other consumer of `EditorBody` exists. Both files are updated in the same commit.
-- Removing or renaming any of the five new props is a breaking change to that single call site.
+Visual spec:
+- Overlay background: `rgba(0, 0, 0, 0.45)`. Not brand peach.
+- Overlay `border-radius: 12px` (matches thumbnail).
+- Delete button: `text-white text-sm font-medium`.
 
 ---
 
-### 5. `<Editor>` internal state — MODIFIED (external props unchanged)
+### 4. `useEditorState` reducer additions — `src/lib/hooks/useEditorState.ts`
 
-**File:** `src/app/diary/[date]/_components/Editor.tsx`
+```typescript
+// EditorState addition:
+photos: Photo[];
 
-External prop signature `EditorProps { date: string }` is **unchanged**. The page component (`src/app/diary/[date]/page.tsx`) requires no updates.
-
-New internal state:
-
-```ts
-const [currentDate, setCurrentDate] = useState(date);
-// date = URL route param (never changes during component lifetime)
-// currentDate = mutable, tracks strip navigation
+// EditorAction union additions:
+| { type: 'ADD_PHOTO'; photo: Photo }
+| { type: 'DELETE_PHOTO'; id: string }
 ```
 
-**Invariants:**
-- All locations that previously referenced the `date` prop for data operations must switch to `currentDate`: `useEditorState(currentDate)`, `saveFn`'s `upsertDiary` call, and `saveFn`'s `useCallback` dep array.
-- `handleSaveAndBack` and `handleExplicitSave` need no changes — they call `saveFn(autosaveValue)` which now closes over `currentDate`.
-- URL stays at original `date` (stale by design). No `router.replace` to sync URL.
-- The existing `toast` instance in `Editor.tsx` is reused for save-failure messages from the strip — no second `<Toast>` mounted.
+Reducer semantics:
+- `ADD_PHOTO`: returns `{ ...state, photos: [...state.photos, action.photo] }`.
+- `DELETE_PHOTO`: returns `{ ...state, photos: state.photos.filter(p => p.id !== action.id) }`.
+- `LOAD_ENTRY`: spreads `action.entry.photos ?? []` into state.
+- `MARK_SAVED` snapshot: remains `{ mood, text, textAlign }` — photos are excluded from dirty detection.
+- `INITIAL_STATE`: `photos: []`.
+
+Invariants:
+- `ADD_PHOTO` never validates count — count guard is in `addPhotoFromFile` and `handleGalleryTap`. The reducer is always called with a pre-validated `Photo`.
+- `DELETE_PHOTO` is idempotent if the `id` is not found (filter returns unchanged array).
+- `photos` is never `undefined`; it is always an array.
 
 ---
 
-## Storage Contracts Read
+### 5. `AutosaveValue` type extension — `src/lib/hooks/useHorizontalDatePicker.ts`
 
-This feature reads from `localStorage` via existing storage functions. It does NOT write directly; writes occur only through the reused `saveFn`.
+```typescript
+export type AutosaveValue = {
+  mood: MoodId | undefined;
+  text: string;
+  textAlign: 'left' | 'center';
+  photos: Photo[];   // NEW — required field
+};
+```
 
-| Function | Contract |
+Caller responsibilities:
+- Every construction of `AutosaveValue` (the `useMemo` in `Editor.tsx`) must include `photos: state.photos`.
+- `useHorizontalDatePicker` passes `autosaveValue` to `saveFn` on date-switch. Photos at the moment of switch are included — this is correct behavior.
+
+Callee guarantees:
+- No behavior change inside `useHorizontalDatePicker` beyond accepting and forwarding the field.
+
+Backward compatibility note:
+- This is a **required field addition** on an internal type. There are no external consumers. The only construction site is `Editor.tsx`. TypeScript will catch any missed update at compile time.
+
+---
+
+### 6. `EditorToolbar` — new prop `galleryDisabled?: boolean`
+
+```typescript
+// Addition to EditorToolbarProps:
+galleryDisabled?: boolean;   // default: false
+```
+
+Caller responsibilities:
+- Pass `galleryDisabled={state.photos.length >= MAX_PHOTOS_PER_ENTRY}`.
+
+Callee guarantees:
+- When `true`: sets `disabled` HTML attribute on the gallery `<button>`, applies `opacity-50 cursor-not-allowed` Tailwind classes, and sets `aria-disabled="true"` (implied by native `disabled`).
+- When `false` or absent: no behavioral or visual change.
+- Existing `onGalleryTap`, `aria-label="갤러리"`, `min-h-[44px] min-w-[44px]`, and `text-meta` color are unchanged.
+
+Backward compatibility: optional prop, safe default. Existing snapshots referencing `EditorToolbar` may need updating because the rendered DOM differs when `galleryDisabled` is true. No breaking change when prop is absent.
+
+---
+
+## Storage Contracts
+
+| Constant | Location | Value | Enforcement point |
+|---|---|---|---|
+| `MAX_PHOTOS_PER_ENTRY` | `src/lib/storage/limits.ts` (exported via `index.ts`) | `10` | `addPhotoFromFile` + `handleGalleryTap` |
+| `MAX_PHOTO_DATAURL_BYTES` | `src/lib/storage/limits.ts` (exported via `index.ts`) | `150 * 1024` (153 600) | `addPhotoFromFile` after FileReader resolves |
+
+These constants are the single source of truth. Do not hardcode numeric literals in component or hook code.
+
+`upsertDiary` may throw `QuotaExceededError` (a `DOMException`) when localStorage is full. `saveFn` in `Editor.tsx` must wrap the call in `try/catch` and show the toast `"저장에 실패했어요. 다시 시도해주세요."` on any thrown error. `MARK_SAVED` must not be dispatched when the catch branch executes.
+
+---
+
+## Korean Error / Toast Strings (exact, source of truth)
+
+| Scenario | Exact string |
 |---|---|
-| `readDiaries(): DiaryEntry[]` | Returns all diary entries from `localStorage` key `ddalkkak:diaries:v1`. Each entry conforms to the REQ-002 schema: `{ id, date: "YYYY-MM-DD", mood: MoodId, text: string, textAlign: 'left'|'center', photos: string[], createdAt: string, updatedAt: string }`. Returns `[]` on SSR or parse failure. Must not throw. |
-| `upsertDiary(entry: DiaryEntry): void` | Already used by `saveFn` (REQ-009). This feature does NOT call `upsertDiary` directly. The hook calls `saveFn(autosaveValue)`, which internally calls `upsertDiary`. May throw `DOMException` with name `"QuotaExceededError"` on storage full. |
-
-No new localStorage keys are introduced. No schema migration required.
-
----
-
-## Caller Invariants
-
-1. `dateRange` passed to `<HorizontalDatePicker>` MUST be sorted ascending (earliest date first).
-2. `entryMap` MUST contain at most one `DiaryEntry` per date key.
-3. `onDateSelect` / `onDateChange` / `onSaveError` callbacks MUST be stable across renders (use `useCallback` or `useState` setters).
-4. `saveFn` MUST close over `currentDate` (not the stale URL `date` prop) — `saveFn`'s `useCallback` dep array MUST include `currentDate`.
-5. `autosaveValue` passed to `useHorizontalDatePicker` MUST reflect live editor field values at call time, not a stale snapshot.
-6. `<HorizontalDatePicker>` MUST only be mounted when `stripOpen === true` (via `{stripOpen && ...}` gate) — it must never render server-side.
-7. `isSelected` prop on `<DateCell>` MUST equal `date === currentDate` — no other heuristic.
-8. `isToday` prop on `<DateCell>` MUST be computed from the system date at strip-open time, not at module load time.
-9. The existing `<Toast>` instance in `Editor.tsx` MUST be reused for strip save-failure messages — a second `<Toast>` mount is forbidden.
-10. `handleDateSelect` MUST call `saveFn` before calling `onDateChange` — order is non-negotiable to prevent data loss.
-11. `setCurrentDate(newDate)` MUST NOT be called if `saveFn` throws — no optimistic navigation.
-12. All user-visible strings (aria-labels, toast messages, UI copy) MUST be Korean.
+| `photos.length >= MAX_PHOTOS_PER_ENTRY` | `"최대 10장입니다"` |
+| `dataUrl.length > MAX_PHOTO_DATAURL_BYTES` | `"파일이 너무 큽니다"` |
+| Image load failure (`img.onerror` / FileReader error) | `"사진을 불러오지 못했어요"` |
+| `QuotaExceededError` from `upsertDiary` | `"저장에 실패했어요. 다시 시도해주세요."` |
+| Delete overlay button label | `"삭제"` (visible text) |
+| Delete overlay aria-label | `"사진 삭제"` |
+| Gallery button aria-label | `"갤러리"` (unchanged) |
+| Thumbnail alt text | `"첨부 사진"` |
 
 ---
 
-## Backward Compatibility Statement
+## Validation Rules
 
-- `Editor` external props (`EditorProps { date: string }`): **unchanged**. Zero impact on `page.tsx`.
-- `EditorBody` adds five required props. The only caller is `Editor.tsx`, updated in the same commit. No other consumer exists.
-- `useEditorState` and `useAutosave`: no changes.
-- `MoodIcon`, `Toast`, `useToast`, `readDiaries`, `upsertDiary`: no changes.
-- No new `localStorage` keys; no schema migration.
-- New files (`HorizontalDatePicker.tsx`, `DateCell.tsx`, `useHorizontalDatePicker.ts`) have no existing callers — no backward-compat burden.
+- Count: `currentPhotoCount >= MAX_PHOTOS_PER_ENTRY` → reject before FileReader.
+- Size: `dataUrl.length > MAX_PHOTO_DATAURL_BYTES` → reject after FileReader resolves.
+- Image decode: `img.onerror` → reject with `reason: 'load_failed'`.
+- FileReader error: `reader.onerror` → reject with `reason: 'load_failed'`.
+- Duplicate processing guard: `isProcessing.current === true` in `handleGalleryTap` → silent no-op (no toast).
+- Long-press slop: pointer displacement `> slopPx` (default 5 px) cancels timer → overlay not shown.
+- `dataUrl` format: must be a base64 data URL. Blob URLs are disallowed.
+- File input: `accept="image/*"`, no `multiple` attribute. Single-file selection only.
+
+---
+
+## Error Handling
+
+- All errors from `addPhotoFromFile` are surfaced as `AddPhotoError` objects (no thrown exceptions). The caller (`handleFileChange`) is responsible for showing the appropriate toast.
+- `upsertDiary` errors are caught in `saveFn` via try/catch. Any `Error` (not just `QuotaExceededError`) causes the error toast and skips `MARK_SAVED`.
+- `navigator.vibrate` is called only after `if (navigator.vibrate)` feature detection; no error handling needed.
+
+---
+
+## Auth / Permission Rules
+
+Not applicable. No network calls. No authentication boundary.
+
+---
+
+## Backward Compatibility
+
+| Change | Impact | Safe? |
+|---|---|---|
+| `EditorState` gains `photos: Photo[]` | All existing test fixtures construct state via `useEditorState` return or spread — TypeScript catches missing field | Yes, if `INITIAL_STATE.photos = []` |
+| `EditorAction` union grows | `default` branch in reducer handles unknown actions safely | Yes |
+| `AutosaveValue` gains `photos: Photo[]` (required) | Single construction site in `Editor.tsx` — TypeScript enforces update | Yes, compile-time safe |
+| `EditorToolbar` gains `galleryDisabled?: boolean` | Optional; defaults to `false`; no behavior change when absent | Yes |
+| `saveFn` no longer hardcodes `photos: []` | Existing localStorage entries have `photos: []`; `LOAD_ENTRY` spreads `entry.photos ?? []` | No migration needed |
 
 ---
 

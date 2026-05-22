@@ -1,4 +1,4 @@
-import type { DiaryEntry, SearchConversation } from '@/lib/storage';
+import type { DiaryEntry, SearchConversation, Photo } from '@/lib/storage';
 
 /**
  * Factory for valid DiaryEntry test fixtures.
@@ -16,6 +16,23 @@ export function makeDiary(overrides?: Partial<DiaryEntry>): DiaryEntry {
     photos: [],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+  };
+  return { ...base, ...overrides };
+}
+
+/**
+ * Factory for valid Photo test fixtures.
+ * Generates a unique id per call; override any field with `overrides`.
+ */
+let photoCounter = 0;
+export function makePhoto(overrides?: Partial<Photo>): Photo {
+  photoCounter += 1;
+  const base: Photo = {
+    id: `photo-id-${photoCounter}`,
+    dataUrl: 'data:image/png;base64,abc',
+    width: 100,
+    height: 80,
+    addedAt: new Date().toISOString(),
   };
   return { ...base, ...overrides };
 }

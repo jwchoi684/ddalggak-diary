@@ -2,12 +2,13 @@
 
 import { useReducer, useEffect, type Dispatch } from 'react';
 import { readDiaries } from '@/lib/storage';
-import type { MoodId, DiaryEntry } from '@/lib/storage';
+import type { MoodId, DiaryEntry, Photo } from '@/lib/storage';
 
 export interface EditorState {
   mood: MoodId | undefined;
   text: string;
   textAlign: 'left' | 'center';
+  photos: Photo[];
   persistedId: string | undefined;
   persistedCreatedAt: string | undefined;
   snapshot: { mood: MoodId | undefined; text: string; textAlign: 'left' | 'center' };
@@ -25,6 +26,8 @@ export type EditorAction =
   | { type: 'TOGGLE_ALIGN' }
   | { type: 'INSERT_TIME'; nextText: string }
   | { type: 'MARK_SAVED'; id: string; createdAt: string }
+  | { type: 'ADD_PHOTO'; photo: Photo }
+  | { type: 'DELETE_PHOTO'; id: string }
   | { type: 'OPEN_MOOD_SHEET' }
   | { type: 'CLOSE_MOOD_SHEET' }
   | { type: 'SET_MORE_MENU'; open: boolean }
@@ -37,6 +40,7 @@ const INITIAL_STATE: EditorState = {
   mood: undefined,
   text: '',
   textAlign: 'left',
+  photos: [],
   persistedId: undefined,
   persistedCreatedAt: undefined,
   snapshot: EMPTY_SNAPSHOT,
@@ -53,7 +57,7 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
       if (!action.entry) {
         return { ...INITIAL_STATE, isLoaded: true, moodSheetMode: 'initial' };
       }
-      const { id, createdAt, mood, text, textAlign } = action.entry;
+      const { id, createdAt, mood, text, textAlign, photos } = action.entry;
       const ta = textAlign ?? 'left';
       const snapshot = { mood, text, textAlign: ta };
       return {
@@ -61,6 +65,7 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
         mood,
         text,
         textAlign: ta,
+        photos: photos ?? [],
         persistedId: id,
         persistedCreatedAt: createdAt,
         snapshot,
@@ -83,6 +88,10 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
         persistedCreatedAt: action.createdAt,
         snapshot: { mood: state.mood, text: state.text, textAlign: state.textAlign },
       };
+    case 'ADD_PHOTO':
+      return { ...state, photos: [...state.photos, action.photo] };
+    case 'DELETE_PHOTO':
+      return { ...state, photos: state.photos.filter((p) => p.id !== action.id) };
     case 'OPEN_MOOD_SHEET':
       return { ...state, moodSheetMode: 'change' };
     case 'CLOSE_MOOD_SHEET':

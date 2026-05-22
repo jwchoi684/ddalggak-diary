@@ -51,6 +51,7 @@ interface EditorToolbarProps {
   onTimeInsert: () => void;
   onGalleryTap: () => void;
   onExplicitSave: () => void;
+  galleryDisabled?: boolean;
 }
 
 export function EditorToolbar({
@@ -60,6 +61,7 @@ export function EditorToolbar({
   onTimeInsert,
   onGalleryTap,
   onExplicitSave,
+  galleryDisabled = false,
 }: EditorToolbarProps) {
   return (
     <div
@@ -70,7 +72,8 @@ export function EditorToolbar({
         type="button"
         aria-label="갤러리"
         onClick={onGalleryTap}
-        className="text-meta min-h-[44px] min-w-[44px] inline-flex items-center justify-center"
+        disabled={galleryDisabled}
+        className={`text-meta min-h-[44px] min-w-[44px] inline-flex items-center justify-center${galleryDisabled ? ' opacity-50 cursor-not-allowed' : ''}`}
       >
         {GalleryIcon}
       </button>

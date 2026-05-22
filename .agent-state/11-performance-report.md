@@ -1,55 +1,60 @@
-# Performance Review Report — REQ-010
+# Performance Review Report — REQ-011
 
 ## Summary
 
-REQ-010 adds a collapsible horizontal date strip (61 cells, ±30 days) to the diary editor. All performance characteristics are acceptable for a single-user, localStorage-backed, mobile-first app. No blocking issues were found. Three non-blocking observations are noted.
+REQ-011 adds base64 photo attachment to the client-side diary editor. The feature touches localStorage read/write on every autosave, carousel rendering, pointer-event handling, and the FileReader/Image decode pipeline. All identified costs are proportionate for a single-user, mobile-first, localStorage-backed app. No blocking performance issues were found.
 
 ## Scope
 
-Files reviewed:
-- `src/lib/hooks/useHorizontalDatePicker.ts`
-- `src/app/diary/[date]/_components/HorizontalDatePicker.tsx`
-- `src/app/diary/[date]/_components/DateCell.tsx`
-- `src/app/diary/[date]/_components/Editor.tsx`
-- `src/app/diary/[date]/_components/EditorBody.tsx`
+Files examined:
+
+- `src/lib/storage/photoBase64.ts`
 - `src/lib/storage/diaries.ts`
-- `.agent-state/03-technical-design.md`, `.agent-state/09-code-review-report.md`
+- `src/lib/storage/limits.ts`
+- `src/lib/storage/index.ts`
+- `src/app/diary/[date]/_components/PhotoCarousel.tsx`
+- `src/lib/hooks/useLongPress.ts`
+- `.agent-state/03-technical-design.md`
+- `.agent-state/07-implementation-report.md`
+- `.agent-state/09-code-review-report.md`
 
 ## Findings
 
-**1. Re-render churn from `useHorizontalDatePicker` when strip is closed.**
+### 1. upsertDiary read-all/write-all cost with photos included
 
-`useHorizontalDatePicker` is called unconditionally inside `Editor` on every render. When the strip is closed (the common state while typing), the hook runs three `useMemo` and two `useCallback` computations on every render. `dateRange` is memoized on `[currentDate]` — stable while typing, so it does not recompute. `entryMap` is memoized on `[isOpen]` — stable while typing (strip stays closed), so it does not recompute. `handleDateSelect` is memoized on `[currentDate, saveFn, autosaveValue, onDateChange, onSaveError]`. `autosaveValue` is a `useMemo` keyed on `[state.mood, state.text, state.textAlign]`; each character typed changes `state.text`, which recreates `autosaveValue`, which invalidates `handleDateSelect`. Additionally, `onSaveError` is an inline arrow `(msg) => toast.show(msg)` (Editor line 69) that is recreated on every render, which also invalidates `handleDateSelect`. In practice this means `handleDateSelect` is recreated on every keystroke. Because the strip is not mounted when closed (`{stripOpen && <HorizontalDatePicker .../>}`), this recreated callback never reaches any mounted component; it is dropped immediately. The churn is therefore limited to a single `useCallback` invocation per keystroke inside the hook — roughly equivalent to allocating a small closure object. For a textarea in a single-user diary app this cost is negligible.
+`upsertDiary` calls `readDiaries()` (JSON.parse of the entire diaries key) then `writeAllDiaries()` (JSON.stringify of the entire array). With photos included, a single autosave on an entry with 10 photos at 150 KB each serializes a 1.5 MB base64 payload as a JSON string inside a larger JSON array. At a 1-second debounce rate, this fires at most once per second during active photo operations and at keystroke-debounce rate during text entry.
 
-**2. 61 DateCell render cost when strip opens.**
+For a single-user app with a realistic diary corpus (e.g., 365 entries, one with 10 photos), the entire diaries key can approach 2–3 MB. JSON.parse and JSON.stringify of a 2 MB string on a mid-range mobile device takes roughly 5–15 ms synchronously on the main thread. This is perceptible if it coincides with a frame, but the debounced trigger means it does not happen per-keystroke — only after the 1-second idle. This cost is acceptable for MVP. The documented risk (PRD §3.9, design report, implementation report) is acknowledged. No architectural change is warranted at this scale.
 
-Each `DateCell` is a small functional component: two string operations (`date.slice(-2).replace(...)` for `dayNumber` and `date === today` / `date === currentDate` comparisons), one conditional branch for `entry`, and one optional `MoodIcon`. None of these are expensive. The 61 cells are rendered in a single pass on mount. There is no virtualization, which is appropriate — 61 cells at 44px width each fit in ~2900px of scroll width; all are allocated but only ~7-9 are visible. A 61-element DOM is within normal browser capacity.
+Observation: because photos are stored as base64 strings inside JSON, the effective serialization cost is higher than binary storage would be (roughly 1.37x overhead from base64 encoding). At 10 photos this yields ~2 MB of JSON data inside the broader key. Still within the browser's single-call synchronous budget for a personal-use app.
 
-`onSelect` is passed as `onDateSelect` from `HorizontalDatePicker` to each `DateCell` as a prop, with each cell capturing its own `date` via `() => onSelect(date)` in the `onClick`. This inline arrow is created per cell per render, but since `HorizontalDatePicker` only mounts on open, and renders only once (no internal state changes during the strip's lifetime unless `onDateSelect` itself changes), this is effectively a one-time allocation of 61 arrow functions. Acceptable.
+### 2. autosaveValue recomputation per photo mutation
 
-**3. `scrollIntoView` on mount.**
+`autosaveValue` is a `useMemo` depending on `[state.mood, state.text, state.textAlign, state.photos]`. Each `ADD_PHOTO` or `DELETE_PHOTO` dispatch creates a new array reference, triggering the memo and starting the 1-second debounce. This is correct and intentional. During text typing, `state.photos` is a stable reference (same array, not re-created), so photo inclusion in the memo does not add any per-keystroke cost beyond what existed before.
 
-`HorizontalDatePicker` uses `useEffect([], [])` — the empty dependency array ensures the DOM query and `scrollIntoView` call fire exactly once, on mount. It does not re-fire on subsequent renders. This is correct.
+### 3. Carousel render cost (up to 10 img elements)
 
-**4. `readDiaries()` cost per open.**
+Each `<Thumb>` renders one `<img src={photo.dataUrl}>`. The browser decodes a base64 image once on first paint and caches the decoded bitmap. Subsequent renders of the same `src` string do not re-decode. With up to 10 images at 88x88 px display size (the source may be larger), the combined GPU upload cost is negligible. The carousel is conditionally rendered (`photos.length > 0`) so the zero-photo case has zero DOM overhead. No virtualization is needed at 10 items.
 
-`readDiaries()` performs one `localStorage.getItem` and one `JSON.parse` of the full diary array. For a personal diary app the array is bounded by roughly one entry per day of use (typically tens to low hundreds of entries). `JSON.parse` of a few hundred small objects on modern mobile hardware takes well under 1ms. The `entryMap` memo is keyed on `[isOpen]`, so this runs once on open and once on close. The close-time recompute is a minor unnecessary cost (noted by the code review), but it is not a performance concern.
+### 4. document.pointerdown listener per Thumb
 
-**5. `buildDateRange` cost.**
+Each `Thumb` attaches a `document.pointerdown` handler only when `isActive === true` (a `useEffect` with `[isActive, onActivate]` dependency). Since `activeId` is a single string in `PhotoCarousel`, at most one `Thumb` has `isActive === true` at any time, meaning at most one `document.pointerdown` listener is active globally. The effect cleanup removes the listener when `isActive` becomes false or when the component unmounts. Listener cost is negligible.
 
-A 61-iteration loop over integer arithmetic and a single `toISOString().slice(0, 10)` call per iteration. This is negligible. It runs once per `currentDate` change (i.e., once per date-cell tap), not per keystroke.
+### 5. useLongPress setTimeout per thumbnail
 
-**6. `Intl.DateTimeFormat` instantiation per render in `DateCell`.**
+A single `setTimeout(500ms)` is created on `pointerDown` and cleared on `pointerUp`, `pointerMove` (beyond slop), `pointerCancel`, or `pointerLeave`. The `useEffect` cleanup in `useLongPress` calls `cancel()` on unmount, preventing leaks when the carousel is unmounted while a press is in flight. One timer per active press — no accumulation.
 
-`DateCell` calls `toKoreanDateLabel(date)` on every render, which instantiates `new Intl.DateTimeFormat('ko-KR', ...)` inside the function body on each call. Since `HorizontalDatePicker` renders 61 `DateCell` instances on mount, this creates 61 `Intl.DateTimeFormat` objects. Modern V8 caches the resolved locale data for `'ko-KR'` so subsequent instantiations do not re-parse locale data, but object construction overhead is still 61x. In contrast, `EditorBody.tsx` correctly uses a module-level `DATE_FMT` singleton. The inconsistency is a minor inefficiency but not a performance problem at this scale — `Intl.DateTimeFormat` construction inside a one-time mount of 61 cells is not a hot path.
+### 6. FileReader + Image decode pipeline
 
-**7. CSS `scroll-snap-type: x mandatory` on mobile Chromium.**
+`readAsDataUrl` is async (browser off-main-thread); the main thread is not blocked during file reading. The subsequent `getDimensions` call (setting `img.src = dataUrl`) schedules a microtask for the `onload` callback once the browser decodes the already-loaded base64 string. This is a one-time cost per photo add, not on any hot path. The MIME-type prefix guard (`data:image/`) fires synchronously before the `Image` decode step, short-circuiting invalid files cheaply.
 
-CSS scroll snap is GPU-composited in all modern browsers including mobile Chromium (Chrome for Android, WebView). It does not involve a JS scroll listener and does not block the main thread during scrolling. The `WebkitOverflowScrolling: 'touch'` style enables momentum scrolling on iOS. No performance concern.
+### 7. Size guard ordering
 
-**8. `Editor.tsx` re-render frequency with strip wired.**
+The size check (`dataUrl.length > MAX_PHOTO_DATAURL_BYTES`) fires after the MIME guard but before `getDimensions`. This is the correct order: a non-image file is rejected cheaply, then an oversized file is rejected without triggering the Image decode, and only valid small images proceed to dimension extraction. No wasted work.
 
-Typing in the textarea dispatches `SET_TEXT` into `useEditorState`, which re-renders `Editor`. Each re-render calls `useHorizontalDatePicker` (always-on hook). As discussed in finding #1, `autosaveValue` changes on every keystroke (by design — it tracks live text), which causes `handleDateSelect` to be recreated, but since the strip is unmounted while closed the callback is never propagated to any child. `dateRange` and `entryMap` are stable during typing (their deps do not change). Net re-render work added to each keystroke: one `useMemo` equality check (autosaveValue deps changed), one `useMemo` equality check (dateRange deps unchanged — skip), one `useMemo` equality check (entryMap deps unchanged — skip), one `useCallback` recreation (handleDateSelect). This is a typical React overhead per keystroke and is within expected norms for a mobile app of this kind.
+### 8. localStorage quota boundary
+
+10 photos × 150 KB = 1.5 MB per entry (base64 string length). The 5 MB total localStorage cap leaves approximately 3.5 MB for all other diary entries and conversations. A user with several photo-heavy entries could approach the quota. The `saveFn` try/catch on `QuotaExceededError` surfaces a Korean toast and skips `MARK_SAVED`. This is the only guard; there is no proactive quota check or automatic compression. This is a known, accepted risk per PRD §3.9.
 
 ## Blocking Issues
 
@@ -57,11 +62,11 @@ None.
 
 ## Non-Blocking Suggestions
 
-1. **`Intl.DateTimeFormat` in `DateCell.tsx` — move to module-level singleton.** `toKoreanDateLabel` instantiates a new formatter on each call. Elevating `new Intl.DateTimeFormat('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })` to a module-level constant (matching the `DATE_FMT` pattern already used in `EditorBody.tsx`) eliminates 61 object allocations per strip open. Low priority, but it is a straightforward one-line fix and makes the pattern consistent across the codebase.
+1. **Consider a proactive quota estimate before committing the write.** Currently the app discovers quota exhaustion only after `localStorage.setItem` throws. A pre-write estimate (`navigator.storage.estimate()` is async and not available in all environments, but a rough heuristic of `existingDataSize + newPhotoSize > threshold` could provide an earlier, friendlier warning before the user adds a photo that will fail to save). This is a v2 improvement; the current try/catch guard is acceptable for MVP.
 
-2. **`onSaveError` inline arrow causes `handleDateSelect` recreation on every Editor render.** Wrapping `(msg) => toast.show(msg)` at Editor line 69 in a `useCallback([toast.show])` would stabilize the reference and prevent `handleDateSelect` from being recreated on every keystroke. Since the strip is unmounted while closed this has zero observable impact today, but the fix is trivial and preempts the issue if the strip ever supports live preview updates without closing.
+2. **`upsertDiary` deserializes the entire corpus on every autosave.** For future REQs that increase photo counts or add more per-entry data, consider indexing the diary array by `id` in a separate key (or switching to IndexedDB, already noted as a v2 plan). No action needed now, but this is the single most impactful future optimization given that JSON.parse of a large blob is the dominant cost on the save path.
 
-3. **`entryMap` recomputes on strip close (as well as open).** The `eslint-disable` on `useMemo([isOpen])` is intentional and documented. A minimal mitigation without using a ref hack would be to check `if (!isOpen) return prev` inside the memo factory — but `useMemo` does not expose `prev`. This is acceptable as-is for the current scale; note it before the diary corpus grows significantly.
+3. **`onThumbnailTap={() => {}}` inline arrow in `Editor.tsx`** causes `shortTap` (a `useCallback([onThumbnailTap])` inside `PhotoCarousel`) to re-create on every `Editor` render. This has no user-visible cost today because the callback is a no-op, but when REQ-012 wires a real callback, the pattern should be changed to `useCallback(() => {}, [])` at the call site. Flag for REQ-012 implementor.
 
 ## Verdict
 PASS
