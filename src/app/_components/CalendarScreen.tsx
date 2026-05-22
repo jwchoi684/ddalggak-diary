@@ -85,7 +85,7 @@ export function CalendarScreen() {
         month={visibleMonth.getMonth()}
         onPrev={prevMonth}
         onNext={nextMonth}
-        onSearch={() => {}}
+        onSearch={() => router.push(Routes.chat)}
         onStats={() => router.push(Routes.stats)}
         onList={() => router.push(Routes.list)}
         onSettings={() => router.push(Routes.settings)}

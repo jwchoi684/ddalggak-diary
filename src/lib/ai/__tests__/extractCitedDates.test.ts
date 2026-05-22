@@ -58,4 +58,37 @@ describe('extractCitedDates', () => {
     // entry-2 (2026-05-10) appears first in text → first in result
     expect(result[0]).toBe('entry-2');
   });
+
+  it('ECD5: extracts Korean "YYYY년 M월 D일" form', () => {
+    const entryDateMap = buildEntryDateMap([
+      { id: 'entry-a', date: '2026-05-23' },
+    ]);
+    const result = extractCitedDates(
+      '2026년 5월 23일에는 브라우저에서 딸깍일기 테스트를 했어.',
+      entryDateMap,
+    );
+    expect(result).toEqual(['entry-a']);
+  });
+
+  it('ECD6: extracts short Korean "M월 D일" form using year from entry map', () => {
+    const entryDateMap = buildEntryDateMap([
+      { id: 'entry-a', date: '2026-05-23' },
+      { id: 'entry-b', date: '2026-05-24' },
+    ]);
+    const result = extractCitedDates(
+      '5월 23일과 5월 24일에 기록을 남겼어요.',
+      entryDateMap,
+    );
+    expect(result).toHaveLength(2);
+    expect(result).toContain('entry-a');
+    expect(result).toContain('entry-b');
+  });
+
+  it('ECD7: extracts dot-separated "YYYY.M.D" form', () => {
+    const entryDateMap = buildEntryDateMap([
+      { id: 'entry-a', date: '2026-05-23' },
+    ]);
+    const result = extractCitedDates('2026.5.23 일기를 보면…', entryDateMap);
+    expect(result).toEqual(['entry-a']);
+  });
 });

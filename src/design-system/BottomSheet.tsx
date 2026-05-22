@@ -38,9 +38,10 @@ export function BottomSheet({
       ref={ref}
       onClick={onDialogClick}
       data-open={open}
-      className="bg-paper p-6 w-full max-w-[var(--container-mobile)] m-0 mt-auto"
+      className="bg-paper p-6 w-full max-w-[var(--container-mobile)]"
       style={{
         borderRadius: '24px 24px 0 0',
+        margin: 'auto auto 0 auto',
         translate: open ? 'none' : '0 100%',
         transition: 'translate 300ms ease',
       }}

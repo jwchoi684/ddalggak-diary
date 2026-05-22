@@ -7,6 +7,15 @@ import { CitedDiaryChip } from './CitedDiaryChip';
 interface MessageBubbleProps {
   message: ChatMessage;
   onCitedDiaryTap?: (diaryId: string) => void;
+  /** Maps diary id → ISO "YYYY-MM-DD". Used to render chip labels like "5월 23일". */
+  diaryDateById?: Map<string, string>;
+}
+
+function chipLabel(diaryId: string, dateMap?: Map<string, string>): string {
+  const iso = dateMap?.get(diaryId);
+  if (!iso) return `📌 ${diaryId}`;
+  const [, m, d] = iso.split('-');
+  return `📌 ${Number(m)}월 ${Number(d)}일`;
 }
 
 /**
@@ -16,7 +25,7 @@ interface MessageBubbleProps {
  * Assistant messages: left-aligned, white/paper background.
  * Cited diary chips rendered below assistant message content.
  */
-export function MessageBubble({ message, onCitedDiaryTap }: MessageBubbleProps) {
+export function MessageBubble({ message, onCitedDiaryTap, diaryDateById }: MessageBubbleProps) {
   const isUser = message.role === 'user';
 
   return (
@@ -43,6 +52,7 @@ export function MessageBubble({ message, onCitedDiaryTap }: MessageBubbleProps) 
               <CitedDiaryChip
                 key={diaryId}
                 diaryId={diaryId}
+                label={chipLabel(diaryId, diaryDateById)}
                 onTap={onCitedDiaryTap}
               />
             ))}

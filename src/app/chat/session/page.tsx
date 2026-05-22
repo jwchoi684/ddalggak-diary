@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { EmptyState } from '@/design-system/EmptyState';
 import { PERSONA_MAP } from '@/design-system/personas';
@@ -29,6 +29,12 @@ export default function ActiveChatPage() {
     diaryEntries,
     onSessionEnd: () => {},
   });
+
+  const diaryDateById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const e of diaryEntries) m.set(e.id, e.date);
+    return m;
+  }, [diaryEntries]);
 
   useEffect(() => {
     scrollBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -91,6 +97,7 @@ export default function ActiveChatPage() {
         )}
         {state.messages.map((msg) => (
           <MessageBubble key={msg.id} message={msg}
+            diaryDateById={diaryDateById}
             onCitedDiaryTap={(id) => {
               const e = diaryEntries.find((d) => d.id === id);
               if (e) router.push(Routes.diary(e.date));
