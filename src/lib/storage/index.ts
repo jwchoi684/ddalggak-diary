@@ -36,7 +36,7 @@ export {
 } from './conversations';
 
 // Settings operations
-export { readSettings, writeSettings } from './settings';
+export { readSettings, writeSettings, writeAllSettings } from './settings';
 
 // Utilities
 export { generateId } from './uuid';

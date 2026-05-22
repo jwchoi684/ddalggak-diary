@@ -88,6 +88,7 @@ export function CalendarScreen() {
         onSearch={() => {}}
         onStats={() => router.push(Routes.stats)}
         onList={() => router.push(Routes.list)}
+        onSettings={() => router.push(Routes.settings)}
       />
       {isReady && (
         <CalendarGrid

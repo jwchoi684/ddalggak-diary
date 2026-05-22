@@ -44,3 +44,16 @@ export function writeSettings(patch: Partial<Settings>): void {
   const merged: Settings = { ...current, ...patch };
   safeSet(SETTINGS_KEY, JSON.stringify(merged));
 }
+
+/**
+ * Replaces the entire settings object with the given value.
+ * Used by the backup restore flow to apply a full settings snapshot.
+ *
+ * @param settings - Complete replacement object.
+ * @returns void
+ * @throws  `DOMException` (`QuotaExceededError`). Not caught.
+ *          No-op during SSR.
+ */
+export function writeAllSettings(settings: Settings): void {
+  safeSet(SETTINGS_KEY, JSON.stringify(settings));
+}

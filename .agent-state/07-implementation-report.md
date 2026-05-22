@@ -1,10 +1,8 @@
-# Frontend Implementation — REQ-018
+# Frontend Implementation — REQ-019
 
 ## Summary
 
-REQ-018: Read-only past conversation view (mode D) at `/chat/[id]`.
-
-The screen shows a closed conversation's messages without any input element in the DOM. It provides a delete action via `ConfirmDialog` and a "새 대화 시작" bottom banner. The `notFound()` Next.js primitive is called immediately when the conversation id is not found in storage.
+REQ-019: JSON 백업 내보내기/가져오기. Implements a pure backup utility module, a `/settings` route with export and import UI, and a settings entry point from the calendar header gear icon. All data is validated pre-apply, preventing corruption on invalid file upload.
 
 ## Files Changed
 
@@ -12,67 +10,81 @@ The screen shows a closed conversation's messages without any input element in t
 
 | File | Lines | Purpose |
 |---|---|---|
-| `src/app/chat/[id]/_components/ReadOnlyChatHeader.tsx` | 81 | Header: ‹ back + persona emoji + "{label} (종료됨)" center + optional 🗑 delete icon button |
-| `src/app/chat/[id]/page.tsx` | 112 | ReadOnlyChatPage — uses `useConversations()` + `useParams()`, renders messages, bottom banner, ConfirmDialog; calls `notFound()` for unknown ids |
+| `src/lib/backup/backup.ts` | 176 | Pure backup utility: `buildBackup`, `exportBackup`, `validateBackup`, `applyBackup` |
+| `src/app/settings/page.tsx` | 197 | Settings screen with "백업 내보내기" and "백업 가져오기" buttons, file input, ImportModeDialog, Toast |
+
+### Modified production files
+
+| File | Change |
+|---|---|
+| `src/lib/storage/settings.ts` | Added `writeAllSettings(settings)` — full-replace primitive needed by backup restore |
+| `src/lib/storage/index.ts` | Re-exports `writeAllSettings` |
+| `src/lib/navigation/routes.ts` | Added `Routes.settings = '/settings'` |
+| `src/app/_components/CalendarHeader.tsx` | Added optional `onSettings?` prop + gear `SettingsIcon` + IconButton render |
+| `src/app/_components/CalendarScreen.tsx` | Passes `onSettings={() => router.push(Routes.settings)}` to `CalendarHeader` |
 
 ### New test files
 
 | File | Lines | Cases |
 |---|---|---|
-| `src/app/chat/[id]/__tests__/page.test.tsx` | 177 | 5 (RC1–RC5) |
+| `src/lib/backup/__tests__/backup.test.ts` | 323 | 17 (BU1–BU6, multiple per group) |
+| `src/app/settings/__tests__/page.test.tsx` | 191 | 5 (SP1–SP3) |
 
 ## Behavior Added
 
-1. Route `/chat/[id]` renders a past conversation in read-only mode.
-2. `notFound()` is called synchronously when the conversation id is absent from `useConversations()` after `isReady === true`.
-3. Loading skeleton shown while `isReady === false`.
-4. No `<textarea>` or `<input type="text">` is ever mounted — `ChatComposer` is absent from the component tree entirely.
-5. Header center shows `{persona.emoji}` + `{persona.label} (종료됨)` per REQ-018 spec.
-6. Header right renders a trash `IconButton` (label `대화 삭제`) that opens a `ConfirmDialog` with `destructive` mode.
-7. Confirm → `removeConversation(id)` → `router.push(Routes.chat)` (`/chat`).
-8. Cited diary chips in `MessageBubble` tap → look up entry by id in `useDiaries()` → `router.push(Routes.diary(entry.date))`.
-9. Bottom banner: "종료된 대화입니다. 추가 질문은 새 대화에서 해주세요." + "새 대화 시작" button → `/chat/new`.
-10. Back button (header left) → `router.push(Routes.chat)` (returns to conversation list, REQ-015).
+1. `buildBackup()` reads all three localStorage keys via existing storage layer functions and returns a `BackupV1` object.
+2. `exportBackup()` serializes `buildBackup()` output to JSON, creates a Blob URL, simulates an anchor click to trigger download with filename `ddalkkak-backup-YYYYMMDD-HHmm.json`, then revokes the URL. No-op during SSR.
+3. `validateBackup(text)` parses JSON, checks `version === 1`, verifies `diaries` and `conversations` are arrays. Returns `{ ok: false, reason }` on any failure; never throws. Settings field absent → defaults to `{}`.
+4. `applyBackup(backup, 'overwrite')` replaces all three keys directly using `writeAllDiaries`, `writeAllConversations`, `writeAllSettings`.
+5. `applyBackup(backup, 'merge')` deduplicates by date (diaries) and id (conversations) — existing wins on conflict. Settings are shallow-merged with existing keys taking precedence.
+6. `/settings` page renders "백업 내보내기" and "백업 가져오기" buttons.
+7. Import: hidden `<input type="file" accept=".json">` reads file text, calls `validateBackup`. Invalid → toast "파일 형식이 올바르지 않아요" (no mutation). Valid → shows `ImportModeDialog` with "덮어쓰기" and "머지" choices.
+8. On mode confirm: `applyBackup(backup, mode)` → toast "가져오기를 완료했어요" → `router.refresh()`.
+9. Settings icon (gear) added to `CalendarHeader` right cluster; links to `/settings`.
 
 ## Existing Patterns Reused
 
-- `MessageBubble` from `src/app/chat/session/_components/MessageBubble` — no movement needed; imported via relative path `../session/_components/MessageBubble`.
-- `CitedDiaryChip` — indirectly used via `MessageBubble` (already integrated).
-- `ConfirmDialog` from `@/design-system/ConfirmDialog` — identical pattern to diary editor delete flow.
-- `EmptyState` from `@/design-system/EmptyState` — persona-not-found fallback.
-- `IconButton` from `@/design-system/IconButton` — back chevron and trash icon.
-- `useConversations` from `@/lib/storage/useConversations` — same hook used by `ChatPage`.
-- `useDiaries` from `@/lib/storage/useDiaries` — same hook used by `ActiveChatPage`.
-- `PERSONA_MAP` from `@/design-system/personas` — O(1) persona lookup.
-- `removeConversation` from `@/lib/storage` — existing storage primitive.
-- `Routes` from `@/lib/navigation` — typed route builder for `Routes.chat`, `Routes.diary(date)`.
-- Test pattern: `setupNextNavigation` + `vi.mock` + top-level `await import` — identical to REQ-016/017 tests.
-- `@vitest-environment happy-dom` — consistent with all other UI tests.
+- `Toast` + `useToast` from `@/design-system` — identical usage to `Editor.tsx` and `ActiveChatPage`.
+- `IconButton` from `@/design-system/IconButton` — back button in settings header.
+- `readDiaries`, `writeAllDiaries`, `readConversations`, `writeAllConversations`, `readSettings` from `@/lib/storage` — no new localStorage access outside the storage layer.
+- `useRouter` from `next/navigation` + `router.back()` / `router.refresh()` — same pattern as all other pages.
+- `Routes` from `@/lib/navigation` — typed route builder.
+- Test pattern: `@vitest-environment happy-dom` + `vi.mock` + top-level `await import` — consistent with all UI tests.
+- `setupNextNavigation` helper — same mock setup used by settings page test.
+- `no-direct-localstorage-access` constraint respected: backup module only calls functions from `@/lib/storage`, never accesses `localStorage` directly.
 
 ## Tests Added / Updated
 
-5 new test cases in `src/app/chat/[id]/__tests__/page.test.tsx`:
+**`src/lib/backup/__tests__/backup.test.ts`** — 17 cases:
+- BU1: `buildBackup` returns `version: 1` with arrays; returns empties when storage is cold.
+- BU2: `validateBackup` accepts well-formed JSON; accepts missing settings (defaults to `{}`).
+- BU3: `validateBackup` rejects non-JSON text; rejects empty string.
+- BU4: `validateBackup` rejects version `2`; rejects missing version; rejects non-array `diaries`; rejects `null` `conversations`.
+- BU5: `applyBackup` overwrite replaces all three stores; clears stores when backup arrays are empty.
+- BU6: `applyBackup` merge keeps existing diary on date collision; appends when date is unique; keeps existing conv on id collision; appends when id is unique; existing settings keys win on conflict.
 
-- **RC1** — renders user and assistant messages from seeded conversation.
-- **RC2** — `document.querySelector('textarea')` and `document.querySelector('input[type="text"]')` both return `null`.
-- **RC3** — header contains `"친구 (종료됨)"` (friend persona example).
-- **RC4** — delete button click → `ConfirmDialog` → confirm click → `removeConversation('conv-readonly-1')` called, `router.push('/chat')` called.
-- **RC5** — unknown id with `isReady=true` → `notFound()` throws `'NEXT_NOT_FOUND'`.
+**`src/app/settings/__tests__/page.test.tsx`** — 5 cases:
+- SP1: export button calls `exportBackup()` and shows "백업 파일을 저장했어요" toast.
+- SP2: invalid file → `validateBackup` returns `ok: false` → error toast shown, `applyBackup` NOT called.
+- SP3a: valid file → mode dialog appears → "덮어쓰기" → `applyBackup(backup, 'overwrite')` called + `router.refresh()`.
+- SP3b: valid file → "머지" → `applyBackup(backup, 'merge')` called.
+- SP3c: cancel in mode dialog → `applyBackup` NOT called, dialog dismissed.
 
 ## Commands Run
 
 ```
 npx tsc --noEmit        → 0 errors
 npm run lint            → 0 warnings / 0 errors
-npx vitest run          → 378/378 passed (58 test files)
+npx vitest run          → 400/400 passed (60 test files)
 ```
 
 ## Risks / Follow-ups
 
-1. `page.tsx` is 112 lines — slightly above the 100-line guideline. The file has two distinct conditional render branches (loading state and persona-not-found fallback) plus the main page body; splitting would create unnecessary complexity for a thin page. The guideline allows exception when splitting is unnatural.
-2. `MessageBubble` and `CitedDiaryChip` remain in `session/_components/`. If a third caller emerges these should move to `chat/_components/` shared location. For two callers (session page + [id] page), relative import is acceptable per the prompt instruction.
-3. Initial scroll position is at top by default (no `scrollIntoView` call), matching the spec requirement ("최상단 — 대화 회상용").
-4. No E2E test covers the list → read-only → chip → diary → back → read-only flow. Recommended as a Playwright spec in a follow-up.
+1. `exportBackup` creates a DOM anchor element for download. In test environments (happy-dom), `URL.createObjectURL` may not be available. The settings page test mocks `exportBackup` entirely to avoid this, which is the correct approach.
+2. `applyBackup` merge mode for diaries deduplicates by `date` (enforcing the one-per-day invariant). If the same diary has both a new id and a conflicting date from a different device, the existing entry wins. The PRD's merge-on-conflict rule ("keep existing") is consistently applied.
+3. `settings.ts` grew from 46 → 59 lines with `writeAllSettings`. Remains well within the 100-line guideline.
+4. `CalendarHeader.tsx` is now 102 lines with the gear icon; within tolerance per the guideline's note on SVG/constant data.
+5. No E2E test covers the full export → import round-trip in a real browser. Recommended as a Playwright spec in a follow-up.
 
 ## Verdict
 PASS

@@ -37,4 +37,7 @@ export const Routes = {
 
   /** Stats screen. Always '/stats'. */
   stats: '/stats' as const,
+
+  /** Settings screen. Always '/settings'. */
+  settings: '/settings' as const,
 } as const;

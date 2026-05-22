@@ -1,7 +1,9 @@
-# Intake — REQ-018
-Read-only past conversation view. Input box REMOVED from DOM (not disabled). Trash button → delete via ConfirmDialog. Cited diary chips still work. Korean copy: "(종료됨)", "종료된 대화입니다. 추가 질문은 새 대화에서 해주세요.", "새 대화 시작".
+# Intake — REQ-019
+JSON backup export/import. Single file `{version:1, diaries, conversations, settings}`. Pre-validate before applying. Modes: overwrite | merge (existing wins on id/date conflict).
 
-Deps: REQ-015, REQ-017 DONE.
+Korean: "백업 내보내기", "백업 가져오기", "덮어쓰기", "머지", error/success toasts.
+
+Deps: REQ-002 DONE.
 
 ## Verdict
 PASS

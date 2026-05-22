@@ -1,4 +1,4 @@
-# Release — REQ-018
-All gates PASS. /chat/[id] read-only view shipped. 378/378 unit + 8/8 E2E.
+# Release — REQ-019
+All gates PASS. JSON backup export/import shipped. 400/400 unit + 8/8 E2E. Settings entry via calendar gear icon.
 ## Verdict
 PASS
