@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useEffect, useRef, useCallback, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { EmptyState } from '@/design-system/EmptyState';
 import { PERSONA_MAP } from '@/design-system/personas';
@@ -12,12 +12,19 @@ import { ChatHeader } from './_components/ChatHeader';
 import { MessageBubble, LoadingBubble, ErrorBubble } from './_components/MessageBubble';
 import { SuggestedPromptChips } from './_components/SuggestedPromptChips';
 import { ChatComposer } from './_components/ChatComposer';
+import { PersonaChangeSheet } from './_components/PersonaChangeSheet';
 
 export default function ActiveChatPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const personaId = searchParams.get('personaId') as PersonaId | null;
-  const persona = personaId ? PERSONA_MAP[personaId] : undefined;
+  const initialPersonaId = searchParams.get('personaId') as PersonaId | null;
+
+  // Persona is held in state so the user can swap it mid-session from the header.
+  // Initial value comes from the ?personaId query param (set by /chat/new).
+  const [currentPersonaId, setCurrentPersonaId] = useState<PersonaId | null>(initialPersonaId);
+  const persona = currentPersonaId ? PERSONA_MAP[currentPersonaId] : undefined;
+
+  const [personaSheetOpen, setPersonaSheetOpen] = useState(false);
 
   const { entries: diaryEntries, isReady } = useDiaries();
 
@@ -66,7 +73,8 @@ export default function ActiveChatPage() {
   if (isReady && diaryEntries.length === 0) {
     return (
       <div className="min-h-screen bg-cream flex flex-col" data-testid="active-chat-page">
-        <ChatHeader persona={persona} onBack={endSession} onDone={endSession} />
+        <ChatHeader persona={persona} onBack={endSession} onDone={endSession}
+          onPersonaTap={() => setPersonaSheetOpen(true)} />
         <div className="flex-1 flex items-center justify-center px-4">
           <EmptyState
             title="아직 일기가 없어요. 먼저 일기를 써보세요."
@@ -85,7 +93,8 @@ export default function ActiveChatPage() {
 
   return (
     <div className="min-h-screen bg-cream flex flex-col" data-testid="active-chat-page">
-      <ChatHeader persona={persona} onBack={endSession} onDone={endSession} />
+      <ChatHeader persona={persona} onBack={endSession} onDone={endSession}
+        onPersonaTap={() => setPersonaSheetOpen(true)} />
       <div className="flex-1 overflow-y-auto px-4 py-2 flex flex-col gap-3">
         {state.messages.length === 0 && (
           <div className="flex items-start">
@@ -116,6 +125,15 @@ export default function ActiveChatPage() {
       <ChatComposer value={state.input}
         onChange={(v) => dispatch({ type: 'SET_INPUT', payload: v })}
         onSend={() => sendMessage()} disabled={state.isLoading} />
+      <PersonaChangeSheet
+        open={personaSheetOpen}
+        currentPersonaId={persona.id}
+        onSelect={(id) => {
+          setCurrentPersonaId(id);
+          setPersonaSheetOpen(false);
+        }}
+        onClose={() => setPersonaSheetOpen(false)}
+      />
     </div>
   );
 }

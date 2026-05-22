@@ -84,8 +84,9 @@ describe('ActiveChatPage (REQ-017)', () => {
 
     expect(screen.getByRole('button', { name: '뒤로 가기' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '대화 완료' })).toBeTruthy();
-    // Friend persona label in Korean
-    expect(screen.getByText('친구')).toBeTruthy();
+    // Persona button in header shows the current label (PersonaChangeSheet, closed in
+    // the DOM, also contains "친구" so a plain getByText would match twice).
+    expect(screen.getByTestId('chat-persona-button').textContent).toContain('친구');
   });
 
   it('AC2: sends user message and shows loading bubble, then AI response', async () => {
@@ -171,5 +172,37 @@ describe('ActiveChatPage (REQ-017)', () => {
 
     expect(upsertConversationMock).not.toHaveBeenCalled();
     expect(mockRouter.push).toHaveBeenCalledWith('/chat');
+  });
+
+  it('AC7: tapping header persona button opens picker; selecting a new persona swaps the header label and persists with the new id', async () => {
+    render(<ActiveChatPage />);
+
+    // Open the persona-change sheet from the header.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('chat-persona-button'));
+    });
+
+    // Pick "연인" from the sheet grid.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('persona-change-card-lover'));
+    });
+
+    // Header now reflects the new persona.
+    expect(screen.getByTestId('chat-persona-button').textContent).toContain('연인');
+
+    // Send a message under the new persona so the conversation persists on session end.
+    fireEvent.change(screen.getByRole('textbox', { name: '메시지 입력' }), {
+      target: { value: '톤 바꿔서 보내는 메시지' },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '전송' }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '대화 완료' }));
+    });
+
+    expect(upsertConversationMock).toHaveBeenCalledOnce();
+    const savedConv = upsertConversationMock.mock.calls[0][0];
+    expect(savedConv.personaId).toBe('lover');
   });
 });

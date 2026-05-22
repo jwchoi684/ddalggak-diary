@@ -44,13 +44,18 @@ export const SHAMAN_GUARD =
  * Not exported; callers use PERSONAS / PERSONA_MAP / getPersona instead.
  *
  * Standard template (13 personas):
- *   COMMON_BASE \n\n tone \n\n PERSONA_LOCK_GUARD \n\n SAFETY_FOOTER
+ *   COMMON_BASE \n\n tone \n\n SAFETY_FOOTER
  *
  * Shaman template (extra = SHAMAN_GUARD):
- *   COMMON_BASE \n\n tone \n\n PERSONA_LOCK_GUARD \n\n SHAMAN_GUARD \n\n SAFETY_FOOTER
+ *   COMMON_BASE \n\n tone \n\n SHAMAN_GUARD \n\n SAFETY_FOOTER
+ *
+ * Note: PERSONA_LOCK_GUARD is intentionally NOT injected — REQ-017 originally
+ * locked persona at session start, but the UX now allows mid-session persona
+ * changes from the chat header. The lock guard would make the LLM refuse a
+ * legitimate tone shift the user just performed.
  */
 function assemble(tone: string, extra?: string): string {
-  const parts = [COMMON_BASE, tone, PERSONA_LOCK_GUARD];
+  const parts = [COMMON_BASE, tone];
   if (extra !== undefined) {
     parts.push(extra);
   }

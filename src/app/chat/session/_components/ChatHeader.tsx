@@ -8,6 +8,8 @@ interface ChatHeaderProps {
   persona: Persona;
   onBack: () => void;
   onDone: () => void;
+  /** When provided, the center persona label becomes tappable and opens a picker. */
+  onPersonaTap?: () => void;
 }
 
 function BackIcon() {
@@ -29,10 +31,22 @@ function BackIcon() {
  * ChatHeader — header for the active chat session screen.
  *
  * Left:   ‹ back button (aria "뒤로 가기") → ends session
- * Center: persona emoji + label (no persona-change entry point per PRD §4.6.6)
+ * Center: persona emoji + label — tappable when onPersonaTap is provided, opens picker
  * Right:  "완료" button (aria "대화 완료") → explicit session end
  */
-export function ChatHeader({ persona, onBack, onDone }: ChatHeaderProps) {
+export function ChatHeader({ persona, onBack, onDone, onPersonaTap }: ChatHeaderProps) {
+  const centerInner = (
+    <>
+      <span className="text-2xl" aria-hidden="true">
+        {persona.emoji}
+      </span>
+      <span className="text-sm font-medium text-charcoal flex items-center gap-1">
+        {persona.label}
+        {onPersonaTap && <span aria-hidden="true" className="text-meta text-xs">▾</span>}
+      </span>
+    </>
+  );
+
   return (
     <header className="flex items-center justify-between px-4 pt-4 pb-2">
       <IconButton
@@ -41,12 +55,21 @@ export function ChatHeader({ persona, onBack, onDone }: ChatHeaderProps) {
         onClick={onBack}
       />
 
-      <div className="flex flex-col items-center gap-0.5">
-        <span className="text-2xl" aria-hidden="true">
-          {persona.emoji}
-        </span>
-        <span className="text-sm font-medium text-charcoal">{persona.label}</span>
-      </div>
+      {onPersonaTap ? (
+        <button
+          type="button"
+          aria-label="페르소나 변경"
+          onClick={onPersonaTap}
+          className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg"
+          data-testid="chat-persona-button"
+        >
+          {centerInner}
+        </button>
+      ) : (
+        <div className="flex flex-col items-center gap-0.5">
+          {centerInner}
+        </div>
+      )}
 
       <button
         type="button"

@@ -104,9 +104,9 @@ describe('system prompt drift guard', () => {
     }
   });
 
-  it('every systemPrompt contains PERSONA_LOCK_GUARD', () => {
+  it('no systemPrompt contains PERSONA_LOCK_GUARD (mid-session persona changes are now allowed)', () => {
     for (const persona of PERSONAS) {
-      expect(persona.systemPrompt).toContain(PERSONA_LOCK_GUARD);
+      expect(persona.systemPrompt).not.toContain(PERSONA_LOCK_GUARD);
     }
   });
 
