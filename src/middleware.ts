@@ -11,6 +11,6 @@ export const config = {
     // and the auth subtree. /auth/* is excluded because the PKCE code↔session exchange in
     // /auth/callback must read the verifier cookie set by the browser client; if middleware
     // touches the auth cookies on that hop the exchange fails with callback_failed.
-    '/((?!_next/static|_next/image|favicon.ico|api/chat|auth/.*|.*\\.(?:svg|png|jpg|jpeg|gif|webp|woff2?)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|api/chat|api/auth/.*|auth/.*|.*\\.(?:svg|png|jpg|jpeg|gif|webp|woff2?)$).*)',
   ],
 };
