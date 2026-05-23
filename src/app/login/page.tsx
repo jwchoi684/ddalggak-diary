@@ -9,15 +9,21 @@ const ERROR_MESSAGES: Record<string, string> = {
   otp_expired: '링크가 만료됐어요. 다시 시도해주세요.',
   access_denied: '로그인을 취소했어요.',
   provider_email_needs_verification: '카카오 이메일 인증이 필요해요.',
+  exchange_failed: '세션 발급에 실패했어요. 다시 시도해주세요.',
+  callback_failed: '인증 콜백에 실패했어요. 다시 시도해주세요.',
+  missing_code: '인증 코드가 비어있어요. 다시 시도해주세요.',
 };
 const FALLBACK_ERROR = '로그인에 실패했어요. 잠시 후 다시 시도해주세요.';
+
+function lookupError(code: string | null): string | null {
+  if (!code) return null;
+  return ERROR_MESSAGES[code] ?? FALLBACK_ERROR;
+}
 
 function parseHashError(hash: string): string | null {
   if (!hash || hash.length < 2) return null;
   const params = new URLSearchParams(hash.slice(1));
-  const errorCode = params.get('error_code') ?? params.get('error');
-  if (!errorCode) return null;
-  return ERROR_MESSAGES[errorCode] ?? FALLBACK_ERROR;
+  return lookupError(params.get('error_code') ?? params.get('error'));
 }
 
 function LoginPageInner() {
@@ -27,13 +33,17 @@ function LoginPageInner() {
   const [errorMsg, setErrorMsg] = useState<string>('');
 
   useEffect(() => {
-    const msg = parseHashError(window.location.hash);
+    // Errors arrive in either the hash fragment (Supabase implicit failures) or the
+    // query string (our /auth/callback route on exchange/missing-code failures).
+    const hashMsg = parseHashError(window.location.hash);
+    const queryMsg = lookupError(search.get('error'));
+    const msg = hashMsg ?? queryMsg;
     if (msg) {
       setErrorMsg(msg);
       setStatus('error');
-      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      window.history.replaceState(null, '', '/login');
     }
-  }, []);
+  }, [search]);
 
   async function handleKakaoLogin() {
     setStatus('redirecting');
