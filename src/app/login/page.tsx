@@ -51,18 +51,30 @@ function LoginPageInner() {
 
     const supabase = createSupabaseBrowserClient();
     const origin = window.location.origin;
-    const { error } = await supabase.auth.signInWithOAuth({
+    // Supabase GoTrue forces `account_email profile_image profile_nickname` into the
+    // outbound Kakao scope and the SDK has no way to remove items from it. account_email
+    // is gated behind Kakao 비즈앱 인증 which this app does not have, so Kakao rejects
+    // with KOE205. We work around it by asking Supabase to produce the OAuth URL but not
+    // navigate, then rewrite the `scope` query param to only what Kakao 동의항목 covers
+    // (profile_nickname). PKCE state / redirect_uri / client_id stay intact so the
+    // Supabase callback still validates and exchanges the code.
+    const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'kakao',
       options: {
         redirectTo: `${origin}/auth/callback?next=${encodeURIComponent(redirectTo)}`,
-        scopes: 'profile_nickname',
+        skipBrowserRedirect: true,
       },
     });
 
-    if (error) {
+    if (error || !data?.url) {
       setStatus('error');
-      setErrorMsg(error.message || FALLBACK_ERROR);
+      setErrorMsg(error?.message || FALLBACK_ERROR);
+      return;
     }
+
+    const url = new URL(data.url);
+    url.searchParams.set('scope', 'profile_nickname');
+    window.location.href = url.toString();
   }
 
   return (
