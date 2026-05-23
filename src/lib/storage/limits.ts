@@ -6,10 +6,14 @@
 
 /**
  * Maximum bytes per Photo.dataUrl (base64-encoded).
- * 150 KB base64 ≈ 112 KB binary — fits a compressed 800×800 JPEG comfortably.
- * 10 photos × 150 KB = 1.5 MB per entry, leaving ~3.5 MB for the rest of the corpus.
+ *
+ * 500 KB base64 ≈ 375 KB binary. iPhone JPEGs were getting rejected at the old
+ * 150 KB cap even after on-the-fly compression because the LLM-friendly source
+ * dims don't go much below 700px × 0.4 quality. Bumping to 500 KB lets the
+ * compressor land naturally — 10 photos × 500 KB = 5 MB still fits the
+ * single-entry budget when you don't also have a lot of text.
  */
-export const MAX_PHOTO_DATAURL_BYTES = 150 * 1024;
+export const MAX_PHOTO_DATAURL_BYTES = 500 * 1024;
 
 /**
  * Maximum number of photos per DiaryEntry.photos array.

@@ -5,8 +5,8 @@ import {
 } from '@/lib/storage';
 
 describe('storage capacity constants', () => {
-  it('MAX_PHOTO_DATAURL_BYTES equals 150 * 1024', () => {
-    expect(MAX_PHOTO_DATAURL_BYTES).toBe(150 * 1024);
+  it('MAX_PHOTO_DATAURL_BYTES equals 500 * 1024 (post-compression cap for iPhone uploads)', () => {
+    expect(MAX_PHOTO_DATAURL_BYTES).toBe(500 * 1024);
   });
 
   it('MAX_PHOTOS_PER_ENTRY equals 10', () => {

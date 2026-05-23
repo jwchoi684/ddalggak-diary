@@ -1,8 +1,9 @@
 "use client";
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import type { ChatMessage } from '@/lib/storage';
 import { CitedDiaryChip } from './CitedDiaryChip';
+import { renderContentWithDateLinks } from './renderContentWithDateLinks';
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -28,6 +29,21 @@ function chipLabel(diaryId: string, dateMap?: Map<string, string>): string {
 export function MessageBubble({ message, onCitedDiaryTap, diaryDateById }: MessageBubbleProps) {
   const isUser = message.role === 'user';
 
+  // Build a date → diaryId reverse lookup so dates that the LLM puts inline in
+  // its prose (e.g. "5월 23일") become tappable, not just the chip below.
+  const dateToDiaryId = useMemo(() => {
+    const m = new Map<string, string>();
+    if (diaryDateById) {
+      for (const [id, date] of diaryDateById) m.set(date, id);
+    }
+    return m;
+  }, [diaryDateById]);
+
+  const renderedContent =
+    !isUser && onCitedDiaryTap
+      ? renderContentWithDateLinks(message.content, dateToDiaryId, onCitedDiaryTap)
+      : message.content;
+
   return (
     <div
       className={`flex flex-col gap-1 ${isUser ? 'items-end' : 'items-start'}`}
@@ -41,7 +57,7 @@ export function MessageBubble({ message, onCitedDiaryTap, diaryDateById }: Messa
         }`}
         style={{ boxShadow: isUser ? undefined : 'var(--shadow-card)' }}
       >
-        {message.content}
+        {renderedContent}
       </div>
 
       {!isUser &&
