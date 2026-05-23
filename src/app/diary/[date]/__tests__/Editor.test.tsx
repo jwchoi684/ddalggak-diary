@@ -18,8 +18,14 @@ vi.mock('next/navigation', () => ({
   usePathname:     () => mockUsePathname(),
 }));
 
-// Editor now reads + writes via the Supabase-backed module. Mock that layer;
-// keep the same variable names so the rest of the test body doesn't move.
+// Editor now writes via the dispatcher (settings.storageBackend → cloud/local).
+// Mock dispatcher + the remote layer + useDiaries + useSettings so tests can
+// drive the cloud path without touching real network or storage.
+vi.mock('@/lib/storage/diaries-dispatch', () => ({
+  upsertDiaryDispatch: vi.fn(async () => undefined),
+  removeDiaryDispatch: vi.fn(async () => undefined),
+  listDiariesBoth: vi.fn(async () => []),
+}));
 vi.mock('@/lib/storage/diaries-remote', () => ({
   listDiariesRemote: vi.fn(async () => []),
   upsertDiaryRemote: vi.fn(async () => undefined),
@@ -28,6 +34,9 @@ vi.mock('@/lib/storage/diaries-remote', () => ({
 vi.mock('@/lib/storage/useDiaries', () => ({
   useDiaries: vi.fn(() => ({ entries: [], isReady: true, refresh: vi.fn() })),
   emitDiariesChanged: vi.fn(),
+}));
+vi.mock('@/lib/storage/useSettings', () => ({
+  useSettings: vi.fn(() => ({ settings: { storageBackend: 'cloud' }, isReady: true, update: vi.fn() })),
 }));
 vi.mock('@/lib/storage', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/lib/storage')>();
@@ -42,10 +51,14 @@ vi.mock('@/lib/storage/photoBase64', () => ({
   addPhotoFromFile: vi.fn(),
 }));
 
-const { listDiariesRemote, upsertDiaryRemote, removeDiaryRemote } = await import('@/lib/storage/diaries-remote');
-const readDiariesMock = listDiariesRemote as unknown as ReturnType<typeof vi.fn>;
-const upsertDiaryMock = upsertDiaryRemote as unknown as ReturnType<typeof vi.fn>;
-const removeDiaryMock = removeDiaryRemote as unknown as ReturnType<typeof vi.fn>;
+const { listDiariesBoth, upsertDiaryDispatch, removeDiaryDispatch } = await import('@/lib/storage/diaries-dispatch');
+const readDiariesMock = listDiariesBoth as unknown as ReturnType<typeof vi.fn>;
+const upsertDiaryMock = upsertDiaryDispatch as unknown as ReturnType<typeof vi.fn>;
+const removeDiaryMock = removeDiaryDispatch as unknown as ReturnType<typeof vi.fn>;
+// useEditorState still reads via listDiariesRemote — share the same mock
+// stream so renderEditor's "set up diary list" calls reach both.
+const { listDiariesRemote } = await import('@/lib/storage/diaries-remote');
+const listDiariesRemoteMock = listDiariesRemote as ReturnType<typeof vi.fn>;
 const { addPhotoFromFile } = await import('@/lib/storage/photoBase64');
 const addPhotoFromFileMock = addPhotoFromFile as ReturnType<typeof vi.fn>;
 const { makeDiary, makePhoto } = await import('@/lib/storage/__tests__/fixtures');
@@ -67,6 +80,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   resetNavigationMocks();
   readDiariesMock.mockResolvedValue([]);
+  listDiariesRemoteMock.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -139,7 +153,7 @@ describe('Editor', () => {
     act(() => { vi.advanceTimersByTime(1000); });
 
     expect(upsertDiaryMock).toHaveBeenCalledTimes(1);
-    expect(upsertDiaryMock).toHaveBeenCalledWith(
+    expect(upsertDiaryMock.mock.calls.at(-1)?.[0]).toEqual(
       expect.objectContaining({ text: '새 내용', date: '2026-05-15' }),
     );
     // No toast
@@ -170,7 +184,7 @@ describe('Editor', () => {
     fireEvent.click(btn('저장'));
 
     expect(upsertDiaryMock).toHaveBeenCalledTimes(1);
-    expect(upsertDiaryMock).toHaveBeenCalledWith(
+    expect(upsertDiaryMock.mock.calls.at(-1)?.[0]).toEqual(
       expect.objectContaining({ text: '수정됨' }),
     );
     expect(document.body.textContent).toContain('일기를 저장했어요!');
@@ -227,7 +241,7 @@ describe('Editor', () => {
     fireEvent.click(btn('일기 삭제'));
     fireEvent.click(btn('삭제'));
 
-    expect(removeDiaryMock).toHaveBeenCalledWith(entry.id);
+    expect(removeDiaryMock.mock.calls.at(-1)?.[0]).toBe(entry.id);
     expect(mockRouter.back).toHaveBeenCalledTimes(1);
   });
 
@@ -310,7 +324,7 @@ describe('Editor', () => {
 
     // The current draft (entry A) is now persisted UNDER the new date 2026-05-16
     // — the picker move is "this entry, different date", not "switch entries".
-    expect(upsertDiaryMock).toHaveBeenCalledWith(
+    expect(upsertDiaryMock.mock.calls.at(-1)?.[0]).toEqual(
       expect.objectContaining({ date: '2026-05-16' }),
     );
     // Textarea content stays the same — no reload triggered by the date change.
@@ -376,7 +390,7 @@ describe('Editor', () => {
 
     act(() => { vi.advanceTimersByTime(1000); });
 
-    expect(upsertDiaryMock).toHaveBeenCalledWith(
+    expect(upsertDiaryMock.mock.calls.at(-1)?.[0]).toEqual(
       expect.objectContaining({ photos: expect.arrayContaining([photo]) }),
     );
   });

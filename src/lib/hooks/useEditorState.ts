@@ -1,7 +1,7 @@
 "use client";
 
 import { useReducer, useEffect, useRef, type Dispatch } from 'react';
-import { listDiariesRemote } from '@/lib/storage/diaries-remote';
+import { listDiariesBoth } from '@/lib/storage/diaries-dispatch';
 import type { PickerId, DiaryEntry, Photo } from '@/lib/storage';
 
 export interface EditorState {
@@ -120,7 +120,7 @@ export function useEditorState(date: string): [EditorState, Dispatch<EditorActio
     let cancelled = false;
     (async () => {
       try {
-        const all = await listDiariesRemote();
+        const all = await listDiariesBoth();
         if (cancelled) return;
         const entry = all.find((e) => e.date === initialDateRef.current);
         dispatch({ type: 'LOAD_ENTRY', entry });

@@ -2,19 +2,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act, cleanup } from '@testing-library/react';
 
-// useEditorState now reads from Supabase. Mock the remote layer; readDiariesMock
-// becomes a thin alias that drives listDiariesRemote so the rest of the test
-// body keeps the same shape.
-vi.mock('@/lib/storage/diaries-remote', () => ({
-  listDiariesRemote: vi.fn(async () => []),
+// useEditorState now reads via the dispatcher (cloud + local merge).
+vi.mock('@/lib/storage/diaries-dispatch', () => ({
+  listDiariesBoth: vi.fn(async () => []),
 }));
 vi.mock('@/lib/storage', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/lib/storage')>();
   return { ...original, readDiaries: vi.fn(() => []) };
 });
 
-const { listDiariesRemote } = await import('@/lib/storage/diaries-remote');
-const readDiariesMock = listDiariesRemote as unknown as ReturnType<typeof vi.fn>;
+const { listDiariesBoth } = await import('@/lib/storage/diaries-dispatch');
+const readDiariesMock = listDiariesBoth as unknown as ReturnType<typeof vi.fn>;
 
 const { useEditorState } = await import('@/lib/hooks/useEditorState');
 const { makeDiary, makePhoto } = await import('@/lib/storage/__tests__/fixtures');

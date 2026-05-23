@@ -167,6 +167,12 @@ export interface DiaryEntry {
   createdAt: string;
   /** ISO 8601 timestamp of last edit. Equal to createdAt on first save. */
   updatedAt: string;
+  /**
+   * Origin store for this entry. Set by the reader (useDiaries) — never
+   * persisted to either backend. Used by UI badges and by writers that
+   * need to delete from the original store.
+   */
+  _storedIn?: StorageBackend;
 }
 
 // ─── ChatMessage ─────────────────────────────────────────────────────────────
@@ -230,6 +236,9 @@ export interface SearchConversation {
  *     interface Settings { defaultPersona?: PersonaId; }
  *   }
  */
+/** Where new writes go: in-browser localStorage or Supabase ('cloud'). */
+export type StorageBackend = 'local' | 'cloud';
+
 export interface Settings {
   /**
    * User's preferred display name (REQ-USER-NAME). Optional.
@@ -237,6 +246,14 @@ export interface Settings {
    * Trimmed at write time; absent/empty → personas use generic Korean address.
    */
   userName?: string;
+
+  /**
+   * Destination for new diary writes. Default 'cloud' (Supabase). 'local' keeps
+   * the entry in browser localStorage only — useful for offline drafts and for
+   * users who want to keep everything on-device. Read paths return entries
+   * from both stores.
+   */
+  storageBackend?: StorageBackend;
 
   /**
    * Grammatical/social gender the AI uses to pick Korean address forms

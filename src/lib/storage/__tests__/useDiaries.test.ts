@@ -3,15 +3,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { makeDiary } from './fixtures';
 
-// Mock the Supabase-backed CRUD module — useDiaries now reads from it, not
-// from localStorage. We also mock readDiaries (legacy local) so the migration
-// branch in the hook can be exercised without touching real localStorage.
+// useDiaries reads via the dispatcher (cloud + local merge). Mock it.
+vi.mock('@/lib/storage/diaries-dispatch', () => ({
+  listDiariesBoth: vi.fn(async () => []),
+}));
 vi.mock('@/lib/storage/diaries-remote', () => ({
   listDiariesRemote: vi.fn(async () => []),
   upsertDiaryRemote: vi.fn(async () => undefined),
   removeDiaryRemote: vi.fn(async () => undefined),
 }));
-
 vi.mock('@/lib/storage', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/lib/storage')>();
   return {
@@ -21,8 +21,8 @@ vi.mock('@/lib/storage', async (importOriginal) => {
   };
 });
 
-const { listDiariesRemote } = await import('@/lib/storage/diaries-remote');
-const listMock = listDiariesRemote as ReturnType<typeof vi.fn>;
+const { listDiariesBoth } = await import('@/lib/storage/diaries-dispatch');
+const listMock = listDiariesBoth as ReturnType<typeof vi.fn>;
 
 const { useDiaries } = await import('@/lib/storage/useDiaries');
 

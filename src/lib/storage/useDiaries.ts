@@ -7,6 +7,7 @@ import {
   writeAllDiaries as writeAllLocalDiaries,
 } from '@/lib/storage';
 import { listDiariesRemote, upsertDiaryRemote } from '@/lib/storage/diaries-remote';
+import { listDiariesBoth } from '@/lib/storage/diaries-dispatch';
 
 const MIGRATED_KEY = 'ddalkkak:diaries:migrated-to-supabase:v1';
 const DIARIES_CHANGED_EVENT = 'ddalkkak:diaries-changed';
@@ -25,7 +26,7 @@ export function _resetDiariesCache(): void {
 
 async function fetchAndCache(): Promise<DiaryEntry[]> {
   if (inflight) return inflight;
-  inflight = listDiariesRemote()
+  inflight = listDiariesBoth()
     .then((fresh) => {
       cache = fresh;
       cacheReady = true;

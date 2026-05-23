@@ -3,8 +3,9 @@
 import React, { useState, useRef, useMemo, useCallback, useLayoutEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { generateId, MAX_PHOTOS_PER_ENTRY } from '@/lib/storage';
-import { upsertDiaryRemote, removeDiaryRemote } from '@/lib/storage/diaries-remote';
+import { upsertDiaryDispatch, removeDiaryDispatch } from '@/lib/storage/diaries-dispatch';
 import { emitDiariesChanged } from '@/lib/storage/useDiaries';
+import { useSettings } from '@/lib/storage/useSettings';
 import { Routes } from '@/lib/navigation';
 import { MoodPickerSheet } from '@/design-system/MoodPickerSheet';
 import { ConfirmDialog } from '@/design-system/ConfirmDialog';
@@ -29,6 +30,8 @@ interface EditorProps {
 export function Editor({ date }: EditorProps) {
   const router = useRouter();
   const toast = useToast();
+  const { settings } = useSettings();
+  const storageBackend = settings.storageBackend ?? 'cloud';
 
   // REQ-010: currentDate is mutable; initialised from the URL route param.
   // URL stays at original `date` (stale by design — no router.replace).
@@ -52,9 +55,8 @@ export function Editor({ date }: EditorProps) {
     [state.mood, state.text, state.textAlign, state.photos],
   );
 
-  // saveAt — fire-and-forget Supabase write. Autosave callers don't await,
-  // but failures surface via toast and successes broadcast a refresh event
-  // so calendar/list mounted earlier re-fetches.
+  // saveAt — writes to whichever store the user picked in Settings (default
+  // 'cloud'). Fire-and-forget; failures surface via toast.
   const saveAt = useCallback(
     (v: typeof autosaveValue, atDate: string) => {
       if (!v.mood) return;
@@ -62,11 +64,14 @@ export function Editor({ date }: EditorProps) {
       const createdAt = state.persistedCreatedAt ?? new Date().toISOString();
       void (async () => {
         try {
-          await upsertDiaryRemote({
-            id, date: atDate, mood: v.mood as typeof v.mood & string,
-            text: v.text, textAlign: v.textAlign, photos: v.photos,
-            createdAt, updatedAt: new Date().toISOString(),
-          });
+          await upsertDiaryDispatch(
+            {
+              id, date: atDate, mood: v.mood as typeof v.mood & string,
+              text: v.text, textAlign: v.textAlign, photos: v.photos,
+              createdAt, updatedAt: new Date().toISOString(),
+            },
+            storageBackend,
+          );
           dispatch({ type: 'MARK_SAVED', id, createdAt });
           emitDiariesChanged();
         } catch {
@@ -74,7 +79,7 @@ export function Editor({ date }: EditorProps) {
         }
       })();
     },
-    [state.persistedId, state.persistedCreatedAt, dispatch, toast],
+    [state.persistedId, state.persistedCreatedAt, dispatch, toast, storageBackend],
   );
 
   const saveFn = useCallback(
@@ -135,9 +140,12 @@ export function Editor({ date }: EditorProps) {
     const id = state.persistedId;
     dispatch({ type: 'SET_DELETE_DIALOG', open: false });
     if (id) {
+      // Try both stores so we don't leak an entry if the user toggled backend
+      // between writes (deleting from the "wrong" store is a no-op).
       void (async () => {
         try {
-          await removeDiaryRemote(id);
+          await removeDiaryDispatch(id, 'cloud').catch(() => undefined);
+          await removeDiaryDispatch(id, 'local').catch(() => undefined);
           emitDiariesChanged();
         } catch {
           toast.show('삭제에 실패했어요. 다시 시도해주세요.');

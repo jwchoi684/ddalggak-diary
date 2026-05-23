@@ -20,6 +20,7 @@ export type {
   ChatMessage,
   SearchConversation,
   Settings,
+  StorageBackend,
 } from './types';
 
 // Diary operations

@@ -32,7 +32,19 @@ export function DiaryListCard({ entry, onTap }: DiaryListCardProps) {
       aria-label={ariaLabel}
       onClick={onTap}
     >
-      <Card className="p-4">
+      <Card className="p-4 relative">
+        {entry._storedIn && (
+          <span
+            aria-label={entry._storedIn === 'cloud' ? '클라우드 저장' : '로컬 저장'}
+            className={`absolute top-2 right-2 text-[10px] px-1.5 py-0.5 rounded-full ${
+              entry._storedIn === 'cloud'
+                ? 'bg-peach-light/40 text-peach-dark'
+                : 'bg-meta/15 text-meta'
+            }`}
+          >
+            {entry._storedIn === 'cloud' ? '☁ 클라우드' : '📱 로컬'}
+          </span>
+        )}
         <MoodIcon id={entry.mood} size={64} className="mx-auto" />
         <p className="text-meta text-sm text-center mt-2">
           {formatListDate(entry.date)}

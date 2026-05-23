@@ -110,6 +110,12 @@ export default function SettingsPage() {
     }
   }, [settings.userName, settings.gender]);
 
+  const storageBackend = settings.storageBackend ?? 'cloud';
+  function handleToggleBackend(next: 'local' | 'cloud') {
+    updateSettings({ storageBackend: next });
+    toast.show(next === 'cloud' ? '클라우드 저장으로 변경했어요' : '로컬 저장으로 변경했어요');
+  }
+
   function handleSaveProfile() {
     const trimmed = userNameDraft.trim();
     updateSettings({
@@ -232,6 +238,45 @@ export default function SettingsPage() {
             </button>
             <p className="text-meta text-xs leading-relaxed">
               비워두면 일반 호칭으로 부릅니다. AI 채팅의 페르소나가 이 호칭과 성별을 반영해 말을 걸어요.
+            </p>
+          </div>
+        </section>
+
+        <section>
+          <h2 className="text-sm font-medium text-meta mb-3 uppercase tracking-wide">
+            저장 위치
+          </h2>
+          <div className="bg-paper rounded-[var(--radius-card-lg)] p-4 space-y-3"
+            style={{ boxShadow: 'var(--shadow-card)' }}>
+            <p className="text-charcoal text-sm">
+              새로 작성하는 일기와 사진을 어디에 저장할까요?
+            </p>
+            <div className="grid grid-cols-2 gap-2" role="radiogroup">
+              {([
+                { v: 'cloud' as const, l: '클라우드 (Supabase)', d: '다른 기기에서도 보임' },
+                { v: 'local' as const, l: '이 기기만 (로컬)', d: '오프라인 / 비공개' },
+              ]).map((opt) => {
+                const active = storageBackend === opt.v;
+                return (
+                  <button
+                    key={opt.v}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    data-testid={`settings-backend-${opt.v}`}
+                    onClick={() => handleToggleBackend(opt.v)}
+                    className={`text-left p-3 rounded-lg text-sm border transition-colors ${
+                      active ? 'bg-peach text-charcoal border-peach' : 'bg-cream text-charcoal border-meta/30'
+                    }`}
+                  >
+                    <div className="font-medium">{opt.l}</div>
+                    <div className="text-xs text-meta mt-0.5">{opt.d}</div>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-meta text-xs leading-relaxed">
+              이미 저장된 일기는 그대로 유지됩니다. 일기 카드에 저장 위치가 표시돼요.
             </p>
           </div>
         </section>
