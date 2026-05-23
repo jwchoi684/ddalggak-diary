@@ -18,13 +18,23 @@ vi.mock('next/navigation', () => ({
   usePathname:     () => mockUsePathname(),
 }));
 
+// Editor now reads + writes via the Supabase-backed module. Mock that layer;
+// keep the same variable names so the rest of the test body doesn't move.
+vi.mock('@/lib/storage/diaries-remote', () => ({
+  listDiariesRemote: vi.fn(async () => []),
+  upsertDiaryRemote: vi.fn(async () => undefined),
+  removeDiaryRemote: vi.fn(async () => undefined),
+}));
+vi.mock('@/lib/storage/useDiaries', () => ({
+  useDiaries: vi.fn(() => ({ entries: [], isReady: true, refresh: vi.fn() })),
+  emitDiariesChanged: vi.fn(),
+}));
 vi.mock('@/lib/storage', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/lib/storage')>();
   return {
     ...original,
     readDiaries: vi.fn(() => []),
-    upsertDiary: vi.fn(),
-    removeDiary: vi.fn(),
+    writeAllDiaries: vi.fn(),
   };
 });
 
@@ -32,10 +42,10 @@ vi.mock('@/lib/storage/photoBase64', () => ({
   addPhotoFromFile: vi.fn(),
 }));
 
-const { readDiaries, upsertDiary, removeDiary } = await import('@/lib/storage');
-const readDiariesMock = readDiaries as ReturnType<typeof vi.fn>;
-const upsertDiaryMock = upsertDiary as ReturnType<typeof vi.fn>;
-const removeDiaryMock = removeDiary as ReturnType<typeof vi.fn>;
+const { listDiariesRemote, upsertDiaryRemote, removeDiaryRemote } = await import('@/lib/storage/diaries-remote');
+const readDiariesMock = listDiariesRemote as unknown as ReturnType<typeof vi.fn>;
+const upsertDiaryMock = upsertDiaryRemote as unknown as ReturnType<typeof vi.fn>;
+const removeDiaryMock = removeDiaryRemote as unknown as ReturnType<typeof vi.fn>;
 const { addPhotoFromFile } = await import('@/lib/storage/photoBase64');
 const addPhotoFromFileMock = addPhotoFromFile as ReturnType<typeof vi.fn>;
 const { makeDiary, makePhoto } = await import('@/lib/storage/__tests__/fixtures');
@@ -56,7 +66,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
   resetNavigationMocks();
-  readDiariesMock.mockReturnValue([]);
+  readDiariesMock.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -82,7 +92,7 @@ function btn(labelOrText: string): HTMLButtonElement {
 
 describe('Editor', () => {
   it('C1: new entry — empty textarea, showModal called, delete button absent', async () => {
-    readDiariesMock.mockReturnValue([]);
+    readDiariesMock.mockResolvedValue([]);
     await renderEditor();
 
     const textarea = document.querySelector('textarea');
@@ -97,7 +107,7 @@ describe('Editor', () => {
 
   it('C2: existing entry — textarea filled, delete visible in more menu', async () => {
     const entry = makeDiary({ date: '2026-05-15', mood: 'joy', text: '행복한 하루' });
-    readDiariesMock.mockReturnValue([entry]);
+    readDiariesMock.mockResolvedValue([entry]);
     await renderEditor();
 
     const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
@@ -111,7 +121,7 @@ describe('Editor', () => {
 
   it('C3: 1-per-day — existing entry for date shown even if navigated as new', async () => {
     const entry = makeDiary({ date: '2026-05-20', mood: 'calm', text: '조용한 날' });
-    readDiariesMock.mockReturnValue([entry]);
+    readDiariesMock.mockResolvedValue([entry]);
     await renderEditor('2026-05-20');
 
     const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
@@ -120,7 +130,7 @@ describe('Editor', () => {
 
   it('C4: autosave — typing + 1000ms → upsertDiary called, no toast', async () => {
     const entry = makeDiary({ date: '2026-05-15', mood: 'joy', text: '' });
-    readDiariesMock.mockReturnValue([entry]);
+    readDiariesMock.mockResolvedValue([entry]);
     await renderEditor();
 
     const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
@@ -137,7 +147,7 @@ describe('Editor', () => {
   });
 
   it('C5: autosave guard — upsertDiary not called when mood is undefined', async () => {
-    readDiariesMock.mockReturnValue([]); // new entry, mood=undefined
+    readDiariesMock.mockResolvedValue([]); // new entry, mood=undefined
     await renderEditor();
 
     const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
@@ -150,7 +160,7 @@ describe('Editor', () => {
 
   it('C6: explicit save — ✓ tap → upsertDiary called + save toast shown', async () => {
     const entry = makeDiary({ date: '2026-05-15', mood: 'joy', text: 'original' });
-    readDiariesMock.mockReturnValue([entry]);
+    readDiariesMock.mockResolvedValue([entry]);
     await renderEditor();
 
     const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
@@ -168,7 +178,7 @@ describe('Editor', () => {
 
   it('C7: save icon absent when not dirty', async () => {
     const entry = makeDiary({ date: '2026-05-15', mood: 'joy', text: '변경 없음' });
-    readDiariesMock.mockReturnValue([entry]);
+    readDiariesMock.mockResolvedValue([entry]);
     await renderEditor();
 
     // No changes — isDirty=false — ✓ icon (aria-label="저장") must not be in the DOM
@@ -178,7 +188,7 @@ describe('Editor', () => {
 
   it('C8: dirty + back → unsaved dialog shown; router.back not called', async () => {
     const entry = makeDiary({ date: '2026-05-15', mood: 'joy', text: 'original' });
-    readDiariesMock.mockReturnValue([entry]);
+    readDiariesMock.mockResolvedValue([entry]);
     await renderEditor();
 
     const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
@@ -192,7 +202,7 @@ describe('Editor', () => {
 
   it('C9: "저장하고 나가기" → upsertDiary + router.back called', async () => {
     const entry = makeDiary({ date: '2026-05-15', mood: 'joy', text: 'original' });
-    readDiariesMock.mockReturnValue([entry]);
+    readDiariesMock.mockResolvedValue([entry]);
     await renderEditor();
 
     const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
@@ -210,7 +220,7 @@ describe('Editor', () => {
 
   it('C10: delete confirm → removeDiary(id) + router.back', async () => {
     const entry = makeDiary({ date: '2026-05-15', mood: 'joy', text: '삭제할 일기' });
-    readDiariesMock.mockReturnValue([entry]);
+    readDiariesMock.mockResolvedValue([entry]);
     await renderEditor();
 
     fireEvent.click(btn('더보기'));
@@ -223,7 +233,7 @@ describe('Editor', () => {
 
   it('C11: mood icon tap → mood sheet opens with mode=change and selectedMoodId', async () => {
     const entry = makeDiary({ date: '2026-05-15', mood: 'joy', text: '' });
-    readDiariesMock.mockReturnValue([entry]);
+    readDiariesMock.mockResolvedValue([entry]);
     await renderEditor();
 
     showModalMock.mockClear();
@@ -241,7 +251,7 @@ describe('Editor', () => {
     vi.setSystemTime(new Date('2026-05-15T14:30:00.000'));
 
     const entry = makeDiary({ date: '2026-05-15', mood: 'joy', text: 'before' });
-    readDiariesMock.mockReturnValue([entry]);
+    readDiariesMock.mockResolvedValue([entry]);
     await renderEditor();
 
     const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
@@ -254,7 +264,7 @@ describe('Editor', () => {
 
   it('C-strip-1: tapping date label opens strip (aria-expanded toggles)', async () => {
     const entry = makeDiary({ date: '2026-05-15', mood: 'joy', text: 'hello' });
-    readDiariesMock.mockReturnValue([entry]);
+    readDiariesMock.mockResolvedValue([entry]);
     await renderEditor();
 
     // Date toggle button (aria-label="날짜 선택")
@@ -279,7 +289,7 @@ describe('Editor', () => {
   it('C-strip-2: tapping a different date cell rebinds the current draft to the new date (no reload, no separate entry)', async () => {
     const entryA = makeDiary({ date: '2026-05-15', mood: 'joy', text: 'date A content' });
     const entryB = makeDiary({ date: '2026-05-16', mood: 'calm', text: 'date B content' });
-    readDiariesMock.mockReturnValue([entryA, entryB]);
+    readDiariesMock.mockResolvedValue([entryA, entryB]);
     await renderEditor('2026-05-15');
 
     fireEvent.click(document.querySelector('button[aria-label="날짜 선택"]')!);
@@ -311,7 +321,7 @@ describe('Editor', () => {
 
   it('C-strip-3: switching dates does NOT re-open MoodPickerSheet (the draft is preserved, not reloaded)', async () => {
     const entryA = makeDiary({ date: '2026-05-15', mood: 'joy', text: 'A' });
-    readDiariesMock.mockReturnValue([entryA]);
+    readDiariesMock.mockResolvedValue([entryA]);
     await renderEditor('2026-05-15');
 
     showModalMock.mockClear();
@@ -339,7 +349,7 @@ describe('Editor', () => {
 
   it('C-photo-1: tapping gallery button triggers .click() on hidden file input', async () => {
     const entry = makeDiary({ date: '2026-05-15', mood: 'joy', text: '' });
-    readDiariesMock.mockReturnValue([entry]);
+    readDiariesMock.mockResolvedValue([entry]);
     await renderEditor();
 
     const clickSpy = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(() => {});
@@ -351,7 +361,7 @@ describe('Editor', () => {
 
   it('C-photo-2: file change → addPhotoFromFile ok → upsertDiary includes new photo', async () => {
     const entry = makeDiary({ date: '2026-05-15', mood: 'joy', text: '' });
-    readDiariesMock.mockReturnValue([entry]);
+    readDiariesMock.mockResolvedValue([entry]);
     const photo = makePhoto();
     addPhotoFromFileMock.mockResolvedValue({ ok: true, photo });
 
@@ -373,7 +383,7 @@ describe('Editor', () => {
 
   it('C-photo-3: addPhotoFromFile count_exceeded → toast "최대 10장입니다"', async () => {
     const entry = makeDiary({ date: '2026-05-15', mood: 'joy', text: '' });
-    readDiariesMock.mockReturnValue([entry]);
+    readDiariesMock.mockResolvedValue([entry]);
     addPhotoFromFileMock.mockResolvedValue({ ok: false, reason: 'count_exceeded' });
 
     await renderEditor();
@@ -390,7 +400,7 @@ describe('Editor', () => {
   it('C-viewer-1: short-tap thumbnail → showModal called for PhotoViewer', async () => {
     vi.useFakeTimers();
     const photo = makePhoto();
-    readDiariesMock.mockReturnValue([makeDiary({ date: '2026-05-15', mood: 'joy', photos: [photo] })]);
+    readDiariesMock.mockResolvedValue([makeDiary({ date: '2026-05-15', mood: 'joy', photos: [photo] })]);
     await renderEditor();
 
     const countBefore = showModalMock.mock.calls.length;
@@ -408,7 +418,7 @@ describe('Editor', () => {
   it('C-viewer-2: click viewer close button → closeMock called', async () => {
     vi.useFakeTimers();
     const photo = makePhoto();
-    readDiariesMock.mockReturnValue([makeDiary({ date: '2026-05-15', mood: 'joy', photos: [photo] })]);
+    readDiariesMock.mockResolvedValue([makeDiary({ date: '2026-05-15', mood: 'joy', photos: [photo] })]);
     await renderEditor();
 
     const thumb = document.querySelector(`[data-testid="photo-thumb-${photo.id}"]`)!;
@@ -429,7 +439,7 @@ describe('Editor', () => {
 
   it('C-photo-4: upsertDiary throws → toast "저장에 실패했어요" and MARK_SAVED not dispatched', async () => {
     const entry = makeDiary({ date: '2026-05-15', mood: 'joy', text: 'original' });
-    readDiariesMock.mockReturnValue([entry]);
+    readDiariesMock.mockResolvedValue([entry]);
     await renderEditor();
 
     upsertDiaryMock.mockImplementation(() => { throw new Error('QuotaExceededError'); });

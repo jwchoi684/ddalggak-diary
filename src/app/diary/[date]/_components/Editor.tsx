@@ -2,7 +2,9 @@
 
 import React, { useState, useRef, useMemo, useCallback, useLayoutEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { upsertDiary, removeDiary, generateId, MAX_PHOTOS_PER_ENTRY } from '@/lib/storage';
+import { generateId, MAX_PHOTOS_PER_ENTRY } from '@/lib/storage';
+import { upsertDiaryRemote, removeDiaryRemote } from '@/lib/storage/diaries-remote';
+import { emitDiariesChanged } from '@/lib/storage/useDiaries';
 import { Routes } from '@/lib/navigation';
 import { MoodPickerSheet } from '@/design-system/MoodPickerSheet';
 import { ConfirmDialog } from '@/design-system/ConfirmDialog';
@@ -50,23 +52,27 @@ export function Editor({ date }: EditorProps) {
     [state.mood, state.text, state.textAlign, state.photos],
   );
 
-  // saveAt — generalized save that takes the date explicitly. saveFn (used by
-  // autosave) is just saveAt bound to the current picker date.
+  // saveAt — fire-and-forget Supabase write. Autosave callers don't await,
+  // but failures surface via toast and successes broadcast a refresh event
+  // so calendar/list mounted earlier re-fetches.
   const saveAt = useCallback(
     (v: typeof autosaveValue, atDate: string) => {
       if (!v.mood) return;
       const id = state.persistedId ?? generateId();
       const createdAt = state.persistedCreatedAt ?? new Date().toISOString();
-      try {
-        upsertDiary({
-          id, date: atDate, mood: v.mood, text: v.text, textAlign: v.textAlign,
-          photos: v.photos, createdAt, updatedAt: new Date().toISOString(),
-        });
-      } catch {
-        toast.show('저장에 실패했어요. 다시 시도해주세요.');
-        return;
-      }
-      dispatch({ type: 'MARK_SAVED', id, createdAt });
+      void (async () => {
+        try {
+          await upsertDiaryRemote({
+            id, date: atDate, mood: v.mood as typeof v.mood & string,
+            text: v.text, textAlign: v.textAlign, photos: v.photos,
+            createdAt, updatedAt: new Date().toISOString(),
+          });
+          dispatch({ type: 'MARK_SAVED', id, createdAt });
+          emitDiariesChanged();
+        } catch {
+          toast.show('저장에 실패했어요. 다시 시도해주세요.');
+        }
+      })();
     },
     [state.persistedId, state.persistedCreatedAt, dispatch, toast],
   );
@@ -126,8 +132,18 @@ export function Editor({ date }: EditorProps) {
   }
 
   function handleDelete() {
-    if (state.persistedId) removeDiary(state.persistedId);
+    const id = state.persistedId;
     dispatch({ type: 'SET_DELETE_DIALOG', open: false });
+    if (id) {
+      void (async () => {
+        try {
+          await removeDiaryRemote(id);
+          emitDiariesChanged();
+        } catch {
+          toast.show('삭제에 실패했어요. 다시 시도해주세요.');
+        }
+      })();
+    }
     router.back();
   }
 

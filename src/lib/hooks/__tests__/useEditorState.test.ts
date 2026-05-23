@@ -2,14 +2,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act, cleanup } from '@testing-library/react';
 
-// Storage mock must be declared before any imports that use @/lib/storage
+// useEditorState now reads from Supabase. Mock the remote layer; readDiariesMock
+// becomes a thin alias that drives listDiariesRemote so the rest of the test
+// body keeps the same shape.
+vi.mock('@/lib/storage/diaries-remote', () => ({
+  listDiariesRemote: vi.fn(async () => []),
+}));
 vi.mock('@/lib/storage', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/lib/storage')>();
   return { ...original, readDiaries: vi.fn(() => []) };
 });
 
-const { readDiaries } = await import('@/lib/storage');
-const readDiariesMock = readDiaries as ReturnType<typeof vi.fn>;
+const { listDiariesRemote } = await import('@/lib/storage/diaries-remote');
+const readDiariesMock = listDiariesRemote as unknown as ReturnType<typeof vi.fn>;
 
 const { useEditorState } = await import('@/lib/hooks/useEditorState');
 const { makeDiary, makePhoto } = await import('@/lib/storage/__tests__/fixtures');
@@ -18,7 +23,7 @@ const { makeDiary, makePhoto } = await import('@/lib/storage/__tests__/fixtures'
 await import('@/lib/storage/__tests__/setup');
 
 beforeEach(() => {
-  readDiariesMock.mockReturnValue([]);
+  readDiariesMock.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -39,7 +44,7 @@ describe('useEditorState', () => {
   });
 
   it('empty storage → isLoaded=true, moodSheetMode="initial"', async () => {
-    readDiariesMock.mockReturnValue([]);
+    readDiariesMock.mockResolvedValue([]);
     const { result } = renderHook(() => useEditorState('2026-05-15'));
     await act(async () => {});
     expect(result.current[0].isLoaded).toBe(true);
@@ -50,7 +55,7 @@ describe('useEditorState', () => {
 
   it('existing entry → fields prefilled, moodSheetMode="closed"', async () => {
     const entry = makeDiary({ date: '2026-05-15', mood: 'sad', text: 'yesterday' });
-    readDiariesMock.mockReturnValue([entry]);
+    readDiariesMock.mockResolvedValue([entry]);
     const { result } = renderHook(() => useEditorState('2026-05-15'));
     await act(async () => {});
     const [state] = result.current;
@@ -66,7 +71,7 @@ describe('useEditorState', () => {
 
   it('SET_TEXT makes isDirty=true; reverting to original makes isDirty=false', async () => {
     const entry = makeDiary({ date: '2026-05-15', text: 'original' });
-    readDiariesMock.mockReturnValue([entry]);
+    readDiariesMock.mockResolvedValue([entry]);
     const { result } = renderHook(() => useEditorState('2026-05-15'));
     await act(async () => {});
 
@@ -87,7 +92,7 @@ describe('useEditorState', () => {
   });
 
   it('ES-photo-1: ADD_PHOTO appends photo to state.photos', async () => {
-    readDiariesMock.mockReturnValue([]);
+    readDiariesMock.mockResolvedValue([]);
     const { result } = renderHook(() => useEditorState('2026-05-15'));
     await act(async () => {});
 
@@ -104,7 +109,7 @@ describe('useEditorState', () => {
     const photo1 = makePhoto();
     const photo2 = makePhoto();
     const entry = makeDiary({ date: '2026-05-15', photos: [photo1, photo2] });
-    readDiariesMock.mockReturnValue([entry]);
+    readDiariesMock.mockResolvedValue([entry]);
     const { result } = renderHook(() => useEditorState('2026-05-15'));
     await act(async () => {});
 
@@ -120,14 +125,14 @@ describe('useEditorState', () => {
     const photo1 = makePhoto();
     const photo2 = makePhoto();
     const entryWithPhotos = makeDiary({ date: '2026-05-15', photos: [photo1, photo2] });
-    readDiariesMock.mockReturnValue([entryWithPhotos]);
+    readDiariesMock.mockResolvedValue([entryWithPhotos]);
     const { result } = renderHook(() => useEditorState('2026-05-15'));
     await act(async () => {});
 
     expect(result.current[0].photos).toHaveLength(2);
 
     // Re-render with a date having no entry (photos should default to [])
-    readDiariesMock.mockReturnValue([]);
+    readDiariesMock.mockResolvedValue([]);
     const { result: r2 } = renderHook(() => useEditorState('2026-05-20'));
     await act(async () => {});
 
@@ -136,7 +141,7 @@ describe('useEditorState', () => {
 
   it('MARK_SAVED resets snapshot → isDirty=false after save', async () => {
     const entry = makeDiary({ date: '2026-05-15', text: 'original' });
-    readDiariesMock.mockReturnValue([entry]);
+    readDiariesMock.mockResolvedValue([entry]);
     const { result } = renderHook(() => useEditorState('2026-05-15'));
     await act(async () => {});
     const [, dispatch] = result.current;

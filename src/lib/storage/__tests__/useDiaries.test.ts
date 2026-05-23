@@ -3,60 +3,59 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { makeDiary } from './fixtures';
 
-// Mock @/lib/storage before importing the hook
+// Mock the Supabase-backed CRUD module — useDiaries now reads from it, not
+// from localStorage. We also mock readDiaries (legacy local) so the migration
+// branch in the hook can be exercised without touching real localStorage.
+vi.mock('@/lib/storage/diaries-remote', () => ({
+  listDiariesRemote: vi.fn(async () => []),
+  upsertDiaryRemote: vi.fn(async () => undefined),
+  removeDiaryRemote: vi.fn(async () => undefined),
+}));
+
 vi.mock('@/lib/storage', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/lib/storage')>();
   return {
     ...original,
     readDiaries: vi.fn(() => []),
+    writeAllDiaries: vi.fn(),
   };
 });
 
-const { readDiaries } = await import('@/lib/storage');
-const readDiariesMock = readDiaries as ReturnType<typeof vi.fn>;
+const { listDiariesRemote } = await import('@/lib/storage/diaries-remote');
+const listMock = listDiariesRemote as ReturnType<typeof vi.fn>;
 
 const { useDiaries } = await import('@/lib/storage/useDiaries');
 
-describe('useDiaries — initial state', () => {
-  beforeEach(() => {
-    readDiariesMock.mockReturnValue([]);
-  });
-
-  it('isReady and entries are set after renderHook (effects run during render in happy-dom)', async () => {
-    // happy-dom flushes useEffect synchronously inside renderHook.
-    // After the hook renders and effects fire, isReady transitions to true.
-    const { result } = renderHook(() => useDiaries());
-    await act(async () => {});
-    // isReady must be true after effects; entries come from readDiaries mock (empty)
-    expect(result.current.isReady).toBe(true);
-    expect(result.current.entries).toEqual([]);
-  });
+beforeEach(() => {
+  listMock.mockReset();
+  listMock.mockResolvedValue([]);
+  // Ensure the migration branch is treated as already done so it doesn't
+  // perturb the test expectations.
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem('ddalkkak:diaries:migrated-to-supabase:v1', '1');
+  }
 });
 
-describe('useDiaries — after mount effect', () => {
-  beforeEach(() => {
-    readDiariesMock.mockReturnValue([]);
-  });
-
-  it('sets isReady=true and entries from readDiaries after effect flushes', async () => {
+describe('useDiaries (Supabase-backed)', () => {
+  it('after mount, isReady=true and entries comes from listDiariesRemote', async () => {
     const diary = makeDiary();
-    readDiariesMock.mockReturnValue([diary]);
+    listMock.mockResolvedValue([diary]);
     const { result } = renderHook(() => useDiaries());
     await act(async () => {});
     expect(result.current.isReady).toBe(true);
     expect(result.current.entries).toEqual([diary]);
   });
 
-  it('sets isReady=true and entries=[] when readDiaries returns []', async () => {
-    readDiariesMock.mockReturnValue([]);
+  it('isReady=true with empty entries when the remote list is empty', async () => {
+    listMock.mockResolvedValue([]);
     const { result } = renderHook(() => useDiaries());
     await act(async () => {});
     expect(result.current.isReady).toBe(true);
     expect(result.current.entries).toEqual([]);
   });
 
-  it('sets entries.length=3 when readDiaries returns 3 entries', async () => {
-    readDiariesMock.mockReturnValue([makeDiary(), makeDiary(), makeDiary()]);
+  it('sets entries.length=3 when listDiariesRemote returns 3 entries', async () => {
+    listMock.mockResolvedValue([makeDiary(), makeDiary(), makeDiary()]);
     const { result } = renderHook(() => useDiaries());
     await act(async () => {});
     expect(result.current.isReady).toBe(true);
