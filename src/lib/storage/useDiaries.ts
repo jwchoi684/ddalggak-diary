@@ -24,6 +24,18 @@ export function useDiaries(): { entries: DiaryEntry[]; isReady: boolean } {
   useEffect(() => {
     setEntries(readDiaries());
     setIsReady(true);
+
+    // Stay in sync with edits made in another tab AND with same-tab writes
+    // dispatched as a synthetic 'storage' event by the writer. Without this,
+    // a calendar/list screen rendered earlier kept showing the pre-edit mood
+    // even after returning from the editor.
+    function handleStorage(e: StorageEvent) {
+      if (e.key === null || e.key.includes('diaries')) {
+        setEntries(readDiaries());
+      }
+    }
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
   }, []);
 
   return { entries, isReady };

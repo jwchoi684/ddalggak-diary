@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Suspense, useState } from 'react';
+import React, { Suspense, useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useDiaries } from '@/lib/storage/useDiaries';
 import { Routes } from '@/lib/navigation';
@@ -23,6 +23,14 @@ function ListPageContent() {
 
   const [sort, setSort] = useState<'asc' | 'desc'>('desc');
   const { entries, isReady } = useDiaries();
+
+  // Prefetch editor for every entry shown in this month so taps feel instant.
+  useEffect(() => {
+    if (!isReady) return;
+    for (const e of entries) {
+      if (e.date.slice(0, 7) === activeMonth) router.prefetch(Routes.diary(e.date));
+    }
+  }, [isReady, entries, activeMonth, router]);
 
   const filtered = isReady
     ? entries.filter((e) => e.date.slice(0, 7) === activeMonth)

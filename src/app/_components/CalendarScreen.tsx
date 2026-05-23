@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useDiaries } from '@/lib/storage/useDiaries';
 import { Routes } from '@/lib/navigation';
@@ -57,6 +57,16 @@ export function CalendarScreen() {
     () => router.push(Routes.diary(today)),
     [router, today],
   );
+
+  // Prefetch the editor route for dates with an entry + today so taps feel
+  // instant. Editor is a heavy client bundle (PhotoCarousel, MoodPickerSheet,
+  // HorizontalDatePicker); without prefetch the first tap blocks ~300-800ms
+  // on bundle download.
+  useEffect(() => {
+    if (!isReady) return;
+    router.prefetch(Routes.diary(today));
+    for (const e of entries) router.prefetch(Routes.diary(e.date));
+  }, [isReady, entries, router, today]);
 
   // Pointer-event swipe (threshold ±40px, vertical scroll unaffected)
   const pointerStartX = useRef<number | null>(null);

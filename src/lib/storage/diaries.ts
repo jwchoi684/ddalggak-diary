@@ -33,6 +33,17 @@ export function readDiaries(): DiaryEntry[] {
  */
 export function writeAllDiaries(entries: DiaryEntry[]): void {
   safeSet(DIARIES_KEY, JSON.stringify(entries));
+  // Same-tab notify — `storage` event only fires in OTHER tabs by spec, so we
+  // dispatch one ourselves. Hooks (useDiaries, useConversations, …) listen for
+  // it to refresh after the editor writes. Guarded for node test env (no
+  // window) and for envs where the StorageEvent constructor isn't mocked.
+  if (typeof window !== 'undefined' && typeof StorageEvent === 'function') {
+    try {
+      window.dispatchEvent(new StorageEvent('storage', { key: DIARIES_KEY }));
+    } catch {
+      // ignore — best-effort
+    }
+  }
 }
 
 /**
