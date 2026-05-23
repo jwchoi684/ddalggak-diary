@@ -51,14 +51,7 @@ export function MoodIcon({ id, size, className }: MoodIconProps) {
         height={size}
         onError={() => setImgFailed(true)}
         className={className}
-        // multiply blend lets the artwork's white background fall away on the
-        // app's cream surface — the source PNGs ship without an alpha channel.
-        style={{
-          width: size,
-          height: size,
-          objectFit: 'contain',
-          mixBlendMode: 'multiply',
-        }}
+        style={{ width: size, height: size, objectFit: 'contain' }}
       />
     );
   }
