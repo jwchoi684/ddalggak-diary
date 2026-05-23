@@ -60,7 +60,14 @@ function ActiveChatPageInner() {
     if (persona) {
       persistSession(conversationId, persona, state.messages, startedAtRef.current);
     }
-    router.push(Routes.chat);
+    router.push(Routes.calendar);
+  }, [conversationId, persona, state.messages, router]);
+
+  const openList = useCallback(() => {
+    if (persona) {
+      persistSession(conversationId, persona, state.messages, startedAtRef.current);
+    }
+    router.push('/chat/list');
   }, [conversationId, persona, state.messages, router]);
 
   if (!persona) {
@@ -82,7 +89,7 @@ function ActiveChatPageInner() {
   if (isReady && diaryEntries.length === 0) {
     return (
       <div className="min-h-screen bg-cream flex flex-col" data-testid="active-chat-page">
-        <ChatHeader persona={persona} onBack={endSession} onDone={endSession}
+        <ChatHeader persona={persona} onListTap={openList} onDone={endSession}
           onPersonaTap={() => setPersonaSheetOpen(true)} />
         <div className="flex-1 flex items-center justify-center px-4">
           <EmptyState
@@ -102,7 +109,7 @@ function ActiveChatPageInner() {
 
   return (
     <div className="min-h-screen bg-cream flex flex-col" data-testid="active-chat-page">
-      <ChatHeader persona={persona} onBack={endSession} onDone={endSession}
+      <ChatHeader persona={persona} onListTap={openList} onDone={endSession}
         onPersonaTap={() => setPersonaSheetOpen(true)} />
       <div className="flex-1 overflow-y-auto px-4 py-2 flex flex-col gap-3">
         {state.messages.length === 0 && (

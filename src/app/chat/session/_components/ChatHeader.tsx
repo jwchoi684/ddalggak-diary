@@ -6,23 +6,23 @@ import type { Persona } from '@/lib/storage';
 
 interface ChatHeaderProps {
   persona: Persona;
-  onBack: () => void;
+  /** Opens the past-conversations list. */
+  onListTap: () => void;
   onDone: () => void;
   /** When provided, the center persona label becomes tappable and opens a picker. */
   onPersonaTap?: () => void;
 }
 
-function BackIcon() {
+function ListIcon() {
   return (
-    <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
-      <path
-        d="M13 16 L7 10 L13 4"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        fill="none"
-      />
+    <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="7" y1="5" x2="17" y2="5" />
+      <line x1="7" y1="10" x2="17" y2="10" />
+      <line x1="7" y1="15" x2="17" y2="15" />
+      <line x1="3" y1="5" x2="3.01" y2="5" />
+      <line x1="3" y1="10" x2="3.01" y2="10" />
+      <line x1="3" y1="15" x2="3.01" y2="15" />
     </svg>
   );
 }
@@ -30,11 +30,11 @@ function BackIcon() {
 /**
  * ChatHeader — header for the active chat session screen.
  *
- * Left:   ‹ back button (aria "뒤로 가기") → ends session
+ * Left:   ☰ list button (aria "리스트 보기") → past conversations
  * Center: persona emoji + label — tappable when onPersonaTap is provided, opens picker
  * Right:  "완료" button (aria "대화 완료") → explicit session end
  */
-export function ChatHeader({ persona, onBack, onDone, onPersonaTap }: ChatHeaderProps) {
+export function ChatHeader({ persona, onListTap, onDone, onPersonaTap }: ChatHeaderProps) {
   const centerInner = (
     <>
       <span className="text-2xl" aria-hidden="true">
@@ -50,9 +50,9 @@ export function ChatHeader({ persona, onBack, onDone, onPersonaTap }: ChatHeader
   return (
     <header className="flex items-center justify-between px-4 pt-4 pb-2">
       <IconButton
-        icon={<BackIcon />}
-        label="뒤로 가기"
-        onClick={onBack}
+        icon={<ListIcon />}
+        label="리스트 보기"
+        onClick={onListTap}
       />
 
       {onPersonaTap ? (

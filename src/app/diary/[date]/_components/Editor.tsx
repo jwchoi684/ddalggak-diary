@@ -109,6 +109,7 @@ export function Editor({ date }: EditorProps) {
     saveFn(autosaveValue);
     toast.show('일기를 저장했어요!');
     textareaRef.current?.blur();
+    router.push('/');
   }
 
   function handleDelete() {

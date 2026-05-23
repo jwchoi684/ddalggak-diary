@@ -50,7 +50,7 @@ export function ConfirmDialog({
       ref={ref}
       onClick={onDialogClick}
       aria-labelledby="confirm-msg"
-      className={`bg-paper rounded-[var(--radius-card-lg)] p-6 ${className}`}
+      className={`bg-paper rounded-[var(--radius-card-lg)] p-6 m-auto w-[calc(100%-2rem)] max-w-[340px] ${className}`}
       style={{ boxShadow: 'var(--shadow-card)' }}
     >
       <p id="confirm-msg" className="text-charcoal text-base mb-6">

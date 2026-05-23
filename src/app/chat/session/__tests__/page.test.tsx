@@ -83,10 +83,10 @@ afterEach(() => {
 });
 
 describe('ActiveChatPage (REQ-017)', () => {
-  it('AC1: renders header with back button, persona label, and done button', () => {
+  it('AC1: renders header with list button, persona label, and done button', () => {
     render(<ActiveChatPage />);
 
-    expect(screen.getByRole('button', { name: '뒤로 가기' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '리스트 보기' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '대화 완료' })).toBeTruthy();
     // Persona button in header shows the current label (PersonaChangeSheet, closed in
     // the DOM, also contains "친구" so a plain getByText would match twice).
@@ -146,7 +146,7 @@ describe('ActiveChatPage (REQ-017)', () => {
     expect(screen.getByTestId('go-to-calendar-btn')).toBeTruthy();
   });
 
-  it('AC5: "완료" button persists conversation when messages exist and navigates to /chat', async () => {
+  it('AC5: "완료" button persists conversation when messages exist and navigates to calendar', async () => {
     render(<ActiveChatPage />);
 
     const textarea = screen.getByRole('textbox', { name: '메시지 입력' });
@@ -166,7 +166,7 @@ describe('ActiveChatPage (REQ-017)', () => {
     expect(savedConv.isClosed).toBe(true);
     expect(savedConv.personaId).toBe('friend');
     expect(savedConv.messages.length).toBeGreaterThan(0);
-    expect(mockRouter.push).toHaveBeenCalledWith('/chat');
+    expect(mockRouter.push).toHaveBeenCalledWith('/');
   });
 
   it('AC6: empty conversation (0 messages) does NOT call upsertConversation on session end', async () => {
@@ -178,7 +178,7 @@ describe('ActiveChatPage (REQ-017)', () => {
     });
 
     expect(upsertConversationMock).not.toHaveBeenCalled();
-    expect(mockRouter.push).toHaveBeenCalledWith('/chat');
+    expect(mockRouter.push).toHaveBeenCalledWith('/');
   });
 
   it('AC7: tapping header persona button opens picker; selecting a new persona swaps the header label and persists with the new id', async () => {

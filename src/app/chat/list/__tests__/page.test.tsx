@@ -30,7 +30,7 @@ vi.mock('@/lib/utils/formatRelativeTime', () => ({
 const { useConversations } = await import('@/lib/storage/useConversations');
 const useConversationsMock = useConversations as ReturnType<typeof vi.fn>;
 
-const { default: ChatPage } = await import('@/app/chat/page');
+const { default: ChatPage } = await import('@/app/chat/list/page');
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
@@ -159,12 +159,12 @@ describe('ChatPage — sorting', () => {
 });
 
 describe('ChatPage — navigation', () => {
-  it('CL5: new chat button calls router.push("/chat/new")', () => {
+  it('CL5: new chat button routes to /chat (which redirects to a session)', () => {
     render(<ChatPage />);
 
     fireEvent.click(screen.getByTestId('new-chat-button'));
 
-    expect(mockRouter.push).toHaveBeenCalledWith('/chat/new');
+    expect(mockRouter.push).toHaveBeenCalledWith('/chat');
   });
 
   it('CL6: card click calls router.push("/chat/" + id)', () => {
