@@ -8,6 +8,7 @@ import { Toast } from '@/design-system/Toast';
 import { useToast } from '@/design-system/useToast';
 import { IconButton } from '@/design-system/IconButton';
 import { useSettings } from '@/lib/storage/useSettings';
+import { BottomNav } from '@/design-system/BottomNav';
 
 // ─── Icon ─────────────────────────────────────────────────────────────────────
 
@@ -148,13 +149,13 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-cream">
+    <div className="min-h-[100dvh] bg-cream flex flex-col">
       <header className="flex items-center px-4 py-3 gap-2">
         <IconButton icon={<BackIcon />} label="뒤로 가기" onClick={() => router.back()} />
         <h1 className="text-xl font-bold text-charcoal ml-2">설정</h1>
       </header>
 
-      <main className="px-4 pt-4 pb-8 space-y-6">
+      <main className="flex-1 px-4 pt-4 pb-8 space-y-6">
         <section>
           <h2 className="text-sm font-medium text-meta mb-3 uppercase tracking-wide">
             내 정보
@@ -239,6 +240,7 @@ export default function SettingsPage() {
       )}
 
       <Toast message={toast.message} open={toast.open} onClose={toast.hide} />
+      <BottomNav />
     </div>
   );
 }

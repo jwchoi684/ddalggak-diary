@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useDiaries } from '@/lib/storage/useDiaries';
 import { Routes } from '@/lib/navigation';
 import { EmptyState } from '@/design-system/EmptyState';
+import { BottomNav } from '@/design-system/BottomNav';
 import { ListHeader } from './_components/ListHeader';
 import { DiaryListCard } from './_components/DiaryListCard';
 
@@ -33,7 +34,7 @@ function ListPageContent() {
   );
 
   return (
-    <div className="min-h-screen bg-cream">
+    <div className="min-h-[100dvh] bg-cream flex flex-col">
       <ListHeader
         month={activeMonth}
         sort={sort}
@@ -41,7 +42,7 @@ function ListPageContent() {
         onMonthChange={(m) => router.push(Routes.listWithFilter({ month: m }))}
         onSortToggle={() => setSort((s) => (s === 'desc' ? 'asc' : 'desc'))}
       />
-      <main className="px-4 pt-4 pb-8">
+      <main className="flex-1 px-4 pt-4 pb-8">
         {!isReady && LOADING}
         {isReady && sorted.length === 0 && (
           <EmptyState
@@ -70,6 +71,7 @@ function ListPageContent() {
           </div>
         )}
       </main>
+      <BottomNav />
     </div>
   );
 }

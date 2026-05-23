@@ -6,6 +6,7 @@ import { useConversations } from '@/lib/storage/useConversations';
 import { ChatListHeader } from './_components/ChatListHeader';
 import { NewChatButton } from './_components/NewChatButton';
 import { ConversationCard } from './_components/ConversationCard';
+import { BottomNav } from '@/design-system/BottomNav';
 
 export default function ChatPage() {
   const router = useRouter();
@@ -16,10 +17,10 @@ export default function ChatPage() {
   );
 
   return (
-    <div className="min-h-screen bg-cream" data-testid="chat-page">
+    <div className="min-h-[100dvh] bg-cream flex flex-col" data-testid="chat-page">
       <ChatListHeader onBack={() => router.back()} />
 
-      <main className="px-4 pt-4 pb-8">
+      <main className="flex-1 px-4 pt-4 pb-8">
         <div className="mb-3">
           <NewChatButton onClick={() => router.push('/chat/new')} />
         </div>
@@ -49,6 +50,7 @@ export default function ChatPage() {
           </div>
         )}
       </main>
+      <BottomNav />
     </div>
   );
 }

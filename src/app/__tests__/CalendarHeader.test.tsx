@@ -11,9 +11,6 @@ const BASE_PROPS = {
   month: 4,
   onPrev: vi.fn(),
   onNext: vi.fn(),
-  onSearch: vi.fn(),
-  onStats: vi.fn(),
-  onList: vi.fn(),
 };
 
 describe('CalendarHeader — month display', () => {
@@ -44,28 +41,12 @@ describe('CalendarHeader — navigation arrows', () => {
   });
 });
 
-describe('CalendarHeader — icon buttons', () => {
-  it('검색 IconButton has aria-label "검색" and calls onSearch when clicked', () => {
-    const onSearch = vi.fn();
-    render(<CalendarHeader {...BASE_PROPS} onSearch={onSearch} />);
-    const btn = screen.getByRole('button', { name: '검색' });
-    fireEvent.click(btn);
-    expect(onSearch).toHaveBeenCalledTimes(1);
-  });
-
-  it('통계 IconButton has aria-label "통계" and calls onStats when clicked', () => {
-    const onStats = vi.fn();
-    render(<CalendarHeader {...BASE_PROPS} onStats={onStats} />);
-    const btn = screen.getByRole('button', { name: '통계' });
-    fireEvent.click(btn);
-    expect(onStats).toHaveBeenCalledTimes(1);
-  });
-
-  it('리스트 IconButton has aria-label "리스트" and calls onList when clicked', () => {
-    const onList = vi.fn();
-    render(<CalendarHeader {...BASE_PROPS} onList={onList} />);
-    const btn = screen.getByRole('button', { name: '리스트' });
-    fireEvent.click(btn);
-    expect(onList).toHaveBeenCalledTimes(1);
+describe('CalendarHeader — section icons removed in favour of BottomNav', () => {
+  it('does not render the 검색 / 통계 / 리스트 / 설정 IconButtons anymore', () => {
+    render(<CalendarHeader {...BASE_PROPS} />);
+    expect(screen.queryByRole('button', { name: '검색' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '통계' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '리스트' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '설정' })).toBeNull();
   });
 });

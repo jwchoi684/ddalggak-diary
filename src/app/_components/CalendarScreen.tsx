@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useDiaries } from '@/lib/storage/useDiaries';
 import { Routes } from '@/lib/navigation';
 import { FAB } from '@/design-system/FAB';
+import { BottomNav } from '@/design-system/BottomNav';
 import { CalendarHeader } from './CalendarHeader';
 import { CalendarGrid } from './CalendarGrid';
 
@@ -76,30 +77,30 @@ export function CalendarScreen() {
   );
 
   return (
-    <main
-      onPointerDown={onPointerDown}
-      onPointerUp={onPointerUp}
-    >
-      <CalendarHeader
-        year={visibleMonth.getFullYear()}
-        month={visibleMonth.getMonth()}
-        onPrev={prevMonth}
-        onNext={nextMonth}
-        onSearch={() => router.push(Routes.chat)}
-        onStats={() => router.push(Routes.stats)}
-        onList={() => router.push(Routes.list)}
-        onSettings={() => router.push(Routes.settings)}
-      />
-      {isReady && (
-        <CalendarGrid
+    <div className="min-h-[100dvh] flex flex-col">
+      <main
+        onPointerDown={onPointerDown}
+        onPointerUp={onPointerUp}
+        className="flex-1 pb-20"
+      >
+        <CalendarHeader
           year={visibleMonth.getFullYear()}
           month={visibleMonth.getMonth()}
-          diaryByDate={diaryByDate}
-          today={today}
-          onCellTap={onCellTap}
+          onPrev={prevMonth}
+          onNext={nextMonth}
         />
-      )}
-      <FAB icon={PenIcon} label="오늘 일기 쓰기" onClick={onFAB} />
-    </main>
+        {isReady && (
+          <CalendarGrid
+            year={visibleMonth.getFullYear()}
+            month={visibleMonth.getMonth()}
+            diaryByDate={diaryByDate}
+            today={today}
+            onCellTap={onCellTap}
+          />
+        )}
+        <FAB icon={PenIcon} label="오늘 일기 쓰기" onClick={onFAB} className="!bottom-24" />
+      </main>
+      <BottomNav />
+    </div>
   );
 }
