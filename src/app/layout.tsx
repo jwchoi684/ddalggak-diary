@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { OnboardingGate } from "./_components/OnboardingGate";
 
 export const metadata: Metadata = {
   title: "딸깍일기",
@@ -22,7 +23,7 @@ export default function RootLayout({
     <html lang="ko">
       <body>
         <div className="mx-auto min-h-dvh max-w-[420px] bg-cream">
-          {children}
+          <OnboardingGate>{children}</OnboardingGate>
         </div>
       </body>
     </html>

@@ -218,12 +218,25 @@ export interface Settings {
   userName?: string;
 
   /**
+   * Grammatical/social gender the AI uses to pick Korean address forms
+   * (오빠/언니, 형/누나 등). 'neutral' means "don't gender". Set during
+   * /onboarding and editable from settings.
+   */
+  gender?: 'male' | 'female' | 'neutral';
+
+  /**
    * Last persona the user picked for a chat session. Set the first time the
    * user picks on /chat/new and updated whenever they swap personas via the
    * in-session bottom sheet. /chat → "새 채팅" reads this to skip the picker
    * after the first session.
    */
   lastPersonaId?: PersonaId;
+
+  /**
+   * True once the user finishes /onboarding (호칭 + 성별 입력). Gates the rest
+   * of the app on first login.
+   */
+  onboardingCompleted?: boolean;
 
   [key: string]: unknown;
 }

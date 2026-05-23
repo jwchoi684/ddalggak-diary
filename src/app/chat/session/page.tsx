@@ -30,6 +30,10 @@ function ActiveChatPageInner() {
   const { entries: diaryEntries, isReady } = useDiaries();
   const { settings, update: updateSettings } = useSettings();
   const userName = typeof settings.userName === 'string' ? settings.userName : undefined;
+  const gender =
+    settings.gender === 'male' || settings.gender === 'female' || settings.gender === 'neutral'
+      ? settings.gender
+      : undefined;
 
   const startedAtRef = useRef<string>(new Date().toISOString());
   const scrollBottomRef = useRef<HTMLDivElement>(null);
@@ -38,6 +42,7 @@ function ActiveChatPageInner() {
     persona: persona!,
     diaryEntries,
     userName,
+    gender,
     onSessionEnd: () => {},
   });
 

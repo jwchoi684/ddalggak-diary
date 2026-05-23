@@ -112,11 +112,15 @@ const INITIAL_STATE: ChatState = {
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
+type UserGender = 'male' | 'female' | 'neutral';
+
 interface UseChatSessionParams {
   persona: Persona;
   diaryEntries: DiaryEntry[];
   /** Optional user display name. When provided, injected into the system prompt so personas address the user by name. */
   userName?: string;
+  /** Optional gender used so personas pick natural Korean address forms (오빠/언니 등). */
+  gender?: UserGender;
   onSessionEnd: (messages: ChatMessage[], conversationId: string, startedAt: string) => void;
 }
 
@@ -128,13 +132,28 @@ export interface UseChatSessionResult {
   handleRetry: () => Promise<void>;
 }
 
-function buildSystemPromptWithUser(persona: Persona, userName?: string): string {
+function buildSystemPromptWithUser(
+  persona: Persona,
+  userName?: string,
+  gender?: UserGender,
+): string {
   const trimmed = userName?.trim();
-  if (!trimmed) return persona.systemPrompt;
-  const directive =
-    `\n\n[사용자 정보]\n사용자의 이름은 "${trimmed}"입니다. 이 이름으로 사용자를 부르세요. ` +
-    `당신의 톤에 맞게 호칭(님/씨/야 등)을 자연스럽게 붙여도 좋습니다.`;
-  return persona.systemPrompt + directive;
+  const lines: string[] = [];
+  if (trimmed) {
+    lines.push(`사용자의 호칭은 "${trimmed}"입니다. 이 호칭으로 사용자를 부르세요.`);
+    lines.push(`당신의 톤에 맞게 어미(님/씨/야 등)를 자연스럽게 붙여도 좋습니다.`);
+  }
+  if (gender === 'female') {
+    lines.push(
+      `사용자는 여성입니다. 당신의 페르소나에 어울리는 여성형 한국어 호칭(언니/누나/딸 등)을 자연스럽게 사용하세요.`,
+    );
+  } else if (gender === 'male') {
+    lines.push(
+      `사용자는 남성입니다. 당신의 페르소나에 어울리는 남성형 한국어 호칭(오빠/형/아들 등)을 자연스럽게 사용하세요.`,
+    );
+  }
+  if (lines.length === 0) return persona.systemPrompt;
+  return `${persona.systemPrompt}\n\n[사용자 정보]\n${lines.join('\n')}`;
 }
 
 async function streamLLM(
@@ -142,6 +161,7 @@ async function streamLLM(
   sessionMessages: ChatMessage[],
   diaryEntries: DiaryEntry[],
   userName: string | undefined,
+  gender: UserGender | undefined,
   dispatch: React.Dispatch<ChatAction>,
 ): Promise<void> {
   const diariesText = serializeDiariesForLLM(diaryEntries);
@@ -150,7 +170,7 @@ async function streamLLM(
   // Build messages, then override system prompt with the user-name-augmented version.
   // CONTEXT ISOLATION INVARIANT: only sessionMessages (this session only) are passed.
   const llmMessages = buildChatMessages({ persona, diariesText, sessionMessages });
-  const userAwareSystem = `${buildSystemPromptWithUser(persona, userName)}\n\n[일기 목록]\n${diariesText}`;
+  const userAwareSystem = `${buildSystemPromptWithUser(persona, userName, gender)}\n\n[일기 목록]\n${diariesText}`;
   if (llmMessages.length > 0) {
     llmMessages[0] = { ...llmMessages[0], content: userAwareSystem };
   }
@@ -199,6 +219,7 @@ export function useChatSession({
   persona,
   diaryEntries,
   userName,
+  gender,
   onSessionEnd: _onSessionEnd,
 }: UseChatSessionParams): UseChatSessionResult {
   void _onSessionEnd; // reserved for future end-of-session hooks
@@ -226,13 +247,14 @@ export function useChatSession({
           [...state.messages, userMessage],
           diaryEntries,
           userName,
+          gender,
           dispatch,
         );
       } catch {
         dispatch({ type: 'SET_ERROR' });
       }
     },
-    [persona, state.input, state.messages, diaryEntries, userName],
+    [persona, state.input, state.messages, diaryEntries, userName, gender],
   );
 
   const handleRetry = useCallback(async () => {
@@ -241,11 +263,11 @@ export function useChatSession({
     dispatch({ type: 'START_LOADING' });
 
     try {
-      await streamLLM(persona, state.messages, diaryEntries, userName, dispatch);
+      await streamLLM(persona, state.messages, diaryEntries, userName, gender, dispatch);
     } catch {
       dispatch({ type: 'SET_ERROR' });
     }
-  }, [state.pendingUserMessage, state.messages, persona, diaryEntries, userName]);
+  }, [state.pendingUserMessage, state.messages, persona, diaryEntries, userName, gender]);
 
   return {
     state,
