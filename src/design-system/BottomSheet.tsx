@@ -38,7 +38,10 @@ export function BottomSheet({
       ref={ref}
       onClick={onDialogClick}
       data-open={open}
-      className="bg-paper p-6 w-full max-w-[var(--container-mobile)]"
+      // bg-cream so transparent PNGs (mood icons) don't show an anti-aliased
+      // halo against a white surface. The rest of the app's content surface
+      // is cream too, so the sheet sits flush with it visually.
+      className="bg-cream p-6 w-full max-w-[var(--container-mobile)]"
       style={{
         borderRadius: '24px 24px 0 0',
         margin: 'auto auto 0 auto',
