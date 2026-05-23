@@ -1,49 +1,48 @@
-# Requirement Intake — REQ-020 (daily activity icons)
+# Requirement Intake — Kakao-Only Login
 
 ## Restatement
-Tag a diary entry with a daily-activity icon (식사, 운동, 카페, …) in addition to the existing 10 feeling moods. Currently the "일상" sub-tab in `MoodPickerSheet` is a dead stub. This REQ activates it by shipping a fixed, system-defined set of 8 activity items. Selection writes to `DiaryEntry.mood` (same field, widened type). All downstream display paths (calendar, list card, stats chart, AI diary serialization) render activity items via a unified lookup.
+`/login` 페이지에서 **이메일 Magic Link를 완전히 제거**하고 **카카오 로그인 단독**으로 전환한다. 신규 가입과 기존 로그인은 OAuth provider 표준상 동일 흐름이므로 단일 진입점("카카오로 시작하기")이 둘 다 처리한다.
 
 ## In Scope
-- `ActivityId` string-literal union (8 members, fixed).
-- `ACTIVITIES` constant + `ACTIVITY_MAP` / `getActivityItem`, mirroring MOODS pattern:
-  - 식사 🍽️ `#FFD6A5` · 운동 🏃 `#CAFFBF` · 공부 📚 `#BDE0FE` · 카페 ☕ `#D4A5A5` · 산책 🚶 `#B9FBC0` · 여행 ✈️ `#A0C4FF` · 휴식 😴 `#E0BBE4` · 일/업무 💼 `#C8C8C8`
-- `PickerId = MoodId | ActivityId` composite type. `DiaryEntry.mood` widens.
-- `getPickerItem(id: PickerId)` unified lookup used by MoodIcon / serializer / consumers.
-- `MoodIcon` `id` widens to `PickerId`.
-- `MoodPickerSheet`: "일상" sub-tab activates, shows activity grid. "기분" still shows 10 moods. "테마" stays disabled.
-- Storage types update + barrel export of `ActivityId`, `PickerId`.
+- `/login` 페이지를 카카오 OAuth 단독으로 교체. 이메일 input, signInWithOtp 호출, 상태 머신(`idle/sending/sent/error`) 제거.
+- `KakaoLoginButton` 디자인 시스템 컴포넌트 신규 추가 (`src/design-system/KakaoLoginButton.tsx`) — 카카오 가이드라인 컬러 `#FEE500` + 검정 텍스트 + 카카오 말풍선 SVG. 100줄 이내.
+- 카카오 OAuth는 `supabase.auth.signInWithOAuth({ provider: 'kakao', options: { redirectTo: '<origin>/auth/callback?next=<encoded>' } })` 호출.
+- Hash fragment 에러 (`#error=...`) 처리: 만료/실패 시 한글 메시지 표시. 카카오 OAuth는 prefetch 무관하지만 동의 거절/취소 등 fail 케이스를 사용자 친화 메시지로.
+- Supabase Auth Provider에 Kakao 등록 (Management API). 사용자가 제공한 REST API Key + Client Secret 사용.
+- Kakao Developers 콘솔 prerequisite는 README/배포 가이드에만 안내 (코드 변경 X).
+- 기존 `/auth/callback` 라우트는 그대로 (OAuth code exchange 호환).
 
 ## Out of Scope
-- User-defined custom activities (locked to fixed set).
-- Multi-tag (feeling + activity on same entry).
-- Stats split (combined ranking only).
-- Splitting `DiaryEntry.mood` into two fields.
-- "테마" tab content.
+- 다른 SNS 로그인 (Naver/Google/Apple/Facebook). 별도 요청 시.
+- 카카오 message/talk_message 권한.
+- 사용자 탈퇴.
+- KakaoTalk in-app browser detection 분기.
+- Magic Link를 "백업"으로 유지 (사용자 명시: "카카오 가입 로그인만 남겨줘").
+- DB 마이그레이션 (Supabase auth.users 변경 없음, 트리거 기반 profiles 생성도 그대로).
+- 기존 Magic Link로 가입한 사용자(있다면)의 데이터 마이그레이션 — 현재 prod에 매직 링크 가입 user가 0명일 가능성 높음 (방금 배포). 만약 있어도 같은 이메일의 카카오 계정으로 로그인하면 Supabase가 자동 identity link.
 
 ## Invariants
-1. 10 existing `MoodId` literals unchanged (PRD §3.4 lock).
-2. localStorage key + schema unchanged. ActivityId values stored as plain strings in `mood` field — no migration.
-3. Korean strings only.
-4. Activity colors pastel (CLAUDE.md §1.6.2).
-5. 44×44 touch targets.
-6. Card radius 16-20 / shadow per existing tokens.
-7. File-size rule: split to `activities.ts` if `moods.ts` exceeds ~100.
-8. `MoodIcon` remains single emoji rendering boundary.
-9. `DiaryEntry.mood` field name unchanged.
-10. `MoodPickerSheet.onSelect` carries `PickerId`; prop renamed `selectedMoodId` → `selectedId`.
+1. UI 텍스트는 한국어.
+2. 카카오 브랜드 컬러 `#FEE500` / 검정 텍스트. 카카오 가이드라인 (https://developers.kakao.com/docs/latest/ko/kakaologin/design-guide) 준수.
+3. 44×44 최소 터치 타깃 (Button height ≥ 48px 권장).
+4. Card radius / shadow는 기존 tokens.
+5. 100-줄 파일 가이드 (CLAUDE.md).
+6. Korean 라벨: "카카오로 시작하기".
+7. `/auth/callback` 라우트 변경 금지 (현재 OAuth 호환).
+8. `src/middleware.ts` 변경 금지 (auth 보호 로직 동일).
+9. `supabase/schema.sql` 변경 금지 (스키마 그대로).
 
 ## Settled Open Questions
-- Q1 Activity count: 8.
-- Q2 Pastel colors per Q above.
-- Q3 `mood` field stays required.
-- Q4 Sheet always opens on "기분" sub-tab.
-- Q5 `PickerId` in `types.ts`.
-- Q6 `selectedMoodId` → `selectedId`.
-- Q7 Stats: combined chart, no special-casing.
-- Q8 LLM serializer: switch from MOOD_MAP to getPickerItem.
+- Q1 Magic Link 처리: **완전 제거** (사용자 직접 결정).
+- Q2 카카오 동의항목: 닉네임 필수 + 이메일 선택. 추가 scope 없음.
+- Q3 hash error 메시지: 같은 commit에 포함 (간단한 useEffect 한 줄로 처리 가능).
+- Q4 신규 가입 UX: 별도 가입 흐름 없음 (OAuth는 가입/로그인 단일 entry).
+- Q5 카카오 키 저장: Supabase Auth Provider 측 (Management API로 등록). 앱 코드/env에는 없음.
+- Q6 KakaoLoginButton: `src/design-system/` 에 신규. 재사용성 + CLAUDE.md 컴포넌트 재사용 규칙 준수.
 
 ## Dependencies
-REQ-002 / 003 / 005 / 008 / 009 / 014 — all DONE.
+- Supabase Auth (이미 배포됨, project `vrkkqnmooynogditnquu`).
+- Kakao Developers 앱 등록 (사용자가 제공할 REST API Key + Client Secret) — **prerequisite, 코드 작업 후에도 키 등록 전까진 prod 동작 불가**.
 
 ## Verdict
 PASS

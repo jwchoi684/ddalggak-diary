@@ -1,76 +1,39 @@
-# API Contract — REQ-020
+# API Contract — Kakao-Only Login
 
-## Type Surface (TypeScript only, no HTTP)
+## Browser → Supabase
+**Call**: `supabase.auth.signInWithOAuth(params)`
+- `params.provider`: `'kakao'`
+- `params.options.redirectTo`: `${window.location.origin}/auth/callback?next=${encodeURIComponent(redirectTo)}`
+- `params.options.scopes`: omitted (use Kakao defaults — profile_nickname).
 
-### `src/lib/storage/types.ts`
-```ts
-export type ActivityId = 'meal'|'exercise'|'study'|'cafe'|'walk'|'travel'|'rest'|'work';
-export type PickerId   = MoodId | ActivityId;
+**Response**: `{ data: { provider, url }, error }`. supabase-js automatically navigates to `url` (Kakao consent).
 
-export interface Activity {
-  id: ActivityId;
-  emoji: string;
-  label: string;
-  color: string;   // pastel hex
-}
+## Kakao → Supabase callback (external)
+Supabase hosted callback `https://vrkkqnmooynogditnquu.supabase.co/auth/v1/callback` consumes Kakao `code`, exchanges with Kakao for token, then redirects to the app's `options.redirectTo`:
+- success: appended `?code=<exchange_code>` → handled by `src/app/auth/callback/route.ts` (unchanged).
+- failure: `#error=<code>&error_code=<sub>&error_description=...` in hash fragment → handled by login page hash-parser.
 
-export interface DiaryEntry {
-  // …
-  mood: PickerId;  // widened from MoodId
-}
-```
+## Login Page → /auth/callback (success)
+Existing contract preserved: `GET /auth/callback?code=...&next=/` → `supabase.auth.exchangeCodeForSession(code)` → `redirect(next)`.
 
-### `src/design-system/activities.ts`
-```ts
-export const ACTIVITIES: readonly Activity[]
-export const ACTIVITY_MAP: Record<ActivityId, Activity>
-export function getActivityItem(id: ActivityId): Activity  // throws on unknown
-```
+## Hash Error Vocabulary (parsed → Korean)
+| error_code | Korean message |
+|---|---|
+| `otp_expired` | 링크가 만료됐어요. 다시 시도해주세요. |
+| `access_denied` (user cancelled) | 로그인을 취소했어요. |
+| `provider_email_needs_verification` | 카카오 이메일 인증이 필요해요. |
+| (unknown) | 로그인에 실패했어요. 잠시 후 다시 시도해주세요. |
 
-### `src/design-system/picker.ts`
-```ts
-export type PickerItem = Mood | Activity
-export function getPickerItem(id: PickerId): PickerItem    // throws on unknown
-export function isActivityId(id: PickerId): id is ActivityId
-```
-
-### `src/design-system/MoodIcon.tsx`
-```ts
-interface MoodIconProps { id: PickerId; size: number; className?: string; }
-```
-
-### `src/design-system/MoodPickerSheet.tsx` (prop rename)
-```ts
-interface MoodPickerSheetProps {
-  open: boolean;
-  date: string;
-  selectedId?: PickerId;             // was selectedMoodId?: MoodId
-  mode: 'initial' | 'change';
-  onSelect: (id: PickerId) => void;  // widened from MoodId
-  onClose: () => void;
-  onCancelInitial?: () => void;
+## Supabase Management API (already applied this session)
+`PATCH /v1/projects/{ref}/config/auth`
+```json
+{
+  "external_kakao_enabled": true,
+  "external_kakao_client_id": "<rest_api_key>",
+  "external_kakao_secret": "<client_secret>"
 }
 ```
-
-## Storage
-- localStorage key unchanged.
-- `DiaryEntry.mood` value space grows from 10 MoodIds to 18 PickerIds.
-- Existing entries valid.
-- No new keys / no migration.
-
-## Korean Strings
-- Sub-tab labels existing: 기분 / 일상 (no change).
-- New activity labels: 식사 / 운동 / 공부 / 카페 / 산책 / 여행 / 휴식 / 일/업무.
-
-## Caller Invariants
-1. `MoodIcon` is sole emoji rendering boundary. Callers pass `PickerId` only.
-2. `getPickerItem` is the canonical mood/activity lookup. Direct `MOOD_MAP` access deprecated.
-3. `MoodPickerSheet.onSelect` receives `PickerId`.
-4. `DiaryEntry.mood` always set (required field unchanged).
-
-## Backward Compatibility
-- MoodId is a subtype of PickerId — all existing call sites compile without change.
-- One rename (`selectedMoodId` → `selectedId`) — single call site in `Editor.tsx`.
+Applied ✓.
 
 ## Verdict
 PASS

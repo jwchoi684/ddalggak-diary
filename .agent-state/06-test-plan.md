@@ -1,32 +1,35 @@
-# Test Plan — REQ-020
+# Test Plan — Kakao-Only Login
 
-## New unit tests
+## Unit tests (vitest + RTL)
+`src/app/__tests__/login-page.test.tsx`:
+1. Renders Kakao button with Korean label "카카오로 시작하기".
+2. Click invokes `supabase.auth.signInWithOAuth({ provider: 'kakao', options: { redirectTo: ... } })`.
+3. Email input from prior implementation is NOT present (regression guard).
+4. On mount with `window.location.hash = '#error=access_denied&error_code=otp_expired'`, page shows "링크가 만료됐어요. 다시 시도해주세요."
+5. Unknown error_code falls back to generic Korean message.
 
-### `src/design-system/__tests__/activities.test.ts` (~4 cases)
-- AC1: ACTIVITIES has exactly 8 unique ids
-- AC2: All colors are valid 6+1 hex (#XXXXXX or 7-char incl '#')
-- AC3: ACTIVITY_MAP completeness and equality with ACTIVITIES.length
-- AC4: getActivityItem throws on unknown id (bypass via `as any`)
+## Mock surface
+- `vi.mock('@/lib/supabase/client', () => ({ createSupabaseBrowserClient: () => ({ auth: { signInWithOAuth: signInSpy } }) }))`.
 
-### `src/design-system/__tests__/picker.test.ts` (~3 cases)
-- PC1: getPickerItem('joy') returns the joy Mood
-- PC2: getPickerItem('meal') returns the meal Activity
-- PC3: isActivityId('joy')=false, isActivityId('meal')=true
+## Integration / E2E
+- Real Kakao OAuth flow cannot be exercised in CI (requires real Kakao account + consent screen). Manual smoke after deploy.
+- Existing Playwright suite (`e2e/`) already exercises the calendar/list/diary flows post-auth; those tests bypass `/login` by other means (or run pre-middleware integration). No new E2E added in this commit.
 
-## Extended tests
+## Regression checks
+- `npm run build` must complete (Next 15 Suspense rule applies — keep `Suspense` wrapper on login page from prior commit).
+- All existing unit tests stay green.
 
-### `src/design-system/__tests__/MoodPickerSheet.test.tsx`
-- Add MPS-N: tap "일상" sub-tab → grid shows 8 ACTIVITIES items (not the 10 moods)
-- Add MPS-N+1: selecting an activity fires onSelect with the ActivityId
-- Existing cases remain valid (selectedMoodId → selectedId rename)
+## Commands to run
+```bash
+npx tsc --noEmit
+npm run lint
+npx vitest run
+npm run build
+```
 
-## Compatibility / regression
-- All existing tests pass after prop rename + type widening.
-- `MoodIcon`, `serializeDiariesForLLM`, `Editor`, `useEditorState` tests should remain green.
-
-## Mock strategy
-- Pure constant tests need no mocks.
-- MoodPickerSheet test uses existing happy-dom + showModal mock pattern.
+## Not applicable
+- DB-layer tests (no DB change).
+- API-route tests (no API change; `/auth/callback` untouched).
 
 ## Verdict
 PASS

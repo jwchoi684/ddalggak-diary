@@ -1,9 +1,12 @@
-# E2E Report — REQ-020
+# E2E Report — Kakao-Only Login
 
-No new E2E spec for daily-activity picker — covered by unit tests in `MoodPickerSheet.test.tsx` (sub-tab activation + onSelect with ActivityId). The activity flow shares the existing mood selection path end-to-end, which is already covered by `e2e/editor.spec.ts` and `e2e/horizontal-date-picker.spec.ts`.
+Not exercised in automated E2E. Real Kakao OAuth requires a Kakao test account, interactive consent screen, and CORS/cookie behavior that Playwright cannot reliably mock without intercepting the entire OAuth round trip. Existing post-auth E2E specs (`e2e/editor.spec.ts`, etc.) bypass `/login` and continue to pass.
 
-## Pre-existing E2E
-8/8 still pass after type widening — no regression.
+Manual smoke plan after deploy:
+1. Open prod URL in private window → middleware redirects to `/login`.
+2. Click "카카오로 시작하기" → Kakao consent → returns to `/`.
+3. Click 설정 → 로그아웃 → back to `/login`.
+4. Test cancel flow: click button, deny consent on Kakao screen → `/login?#error=access_denied` → Korean "로그인을 취소했어요" visible.
 
 ## Verdict
-PASS
+PASS (no automated E2E; manual smoke pending after Vercel deploy of this commit)

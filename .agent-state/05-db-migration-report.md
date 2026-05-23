@@ -1,6 +1,8 @@
-# DB / Migration Report — REQ-020
+# DB / Migration Report — Kakao-Only Login
 
-Type-level widening only. localStorage key `ddalkkak:diaries:v1` and JSON structure unchanged. New ActivityId values are valid `mood` field values from now on; existing entries (MoodId values) remain valid. No backfill, no migration.
+No schema changes. Supabase `auth.users` already supports OAuth identities via `auth.identities` table (built-in). `handle_new_user` trigger fires for any new `auth.users` row regardless of provider, so Kakao sign-ups auto-create their `profiles` row.
+
+No data backfill, no migration script.
 
 ## Verdict
-PASS — N/A
+PASS

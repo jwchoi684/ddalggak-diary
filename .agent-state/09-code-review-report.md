@@ -1,22 +1,22 @@
-# Code Review — REQ-020
+# Code Review — Kakao-Only Login
 
-## Summary
-Additive type-safe feature. PickerId = MoodId | ActivityId; getPickerItem as unified lookup. 417 tests pass, lint+typecheck clean. No blocking issues.
+## Diff scope
+3 files (2 source + 1 test):
+- `src/design-system/KakaoLoginButton.tsx` (NEW, 35 lines)
+- `src/app/login/page.tsx` (REWRITE, 87 lines vs prior 85)
+- `src/app/__tests__/login-page.test.tsx` (NEW, 71 lines)
 
-## Files Reviewed
-- types/index/MoodIcon/MoodPickerSheet/serializeDiaries/useEditorState/useHorizontalDatePicker/useMoodStats/MoodBarChart/Editor/EditorBody
-- New: activities.ts, picker.ts, BottomNav.tsx, tests
+## Findings
+- **Correctness** — OAuth call shape matches `@supabase/supabase-js` v2 `signInWithOAuth({provider, options:{redirectTo}})`. `redirectTo` is constructed only on the client (uses `window.location.origin`), avoiding SSR origin guessing. Hash parser strips the hash via `replaceState` so a remount doesn't re-trigger. ✓
+- **Naming/Reuse** — Button moved into `src/design-system/` per CLAUDE.md UI component reuse rule. Pure presentation; no Supabase coupling. ✓
+- **File size** — KakaoLoginButton 35 lines, LoginPage 87 lines. Both under 100-line guide. ✓
+- **Test coverage** — Includes regression guard (no email input) so Magic Link cannot silently come back. ✓
+- **A11y** — Button has `aria-label`. Error region uses `role="alert"`. ✓
+- **No leftover Magic Link references** — search confirms: no `signInWithOtp` outside node_modules.
+- **No changes to** `auth/callback`, `middleware`, supabase clients, schema. As designed. ✓
 
-## Non-Blocking Suggestions (1 applied immediately)
-1. **APPLIED**: `MoodBarChart` switched from direct `MOOD_MAP[moodId]` to `getPickerItem(moodId)` to honor the API-contract invariant that getPickerItem is the canonical lookup.
-2. (Deferred) `setActiveCategory('feeling')` called during render with `prevOpen` ref — works correctly, idiomatic alternative is `useEffect([open])` but current pattern is functionally identical.
-3. (Deferred) Two `item.id as PickerId` casts in MoodPickerSheet are correct but could be removed with a single `PickerItem[]` type widening at declaration. Cosmetic.
-
-## Positive Notes
-- `satisfies readonly Activity[]` correctly enforces shape without widening literal types.
-- Unified `getPickerItem` boundary scales cleanly to future picker categories.
-- Korean label exhaustiveness test in `activities.test.ts` guards against drift.
-- No `any`, no `@ts-ignore`, all assertions provably correct.
+## Nits (non-blocking)
+- The inline SVG path is a simplified speech bubble, not the official Kakao mark. Sufficient for MVP. Brand swap is a one-line edit if Kakao asset wanted later.
 
 ## Verdict
 PASS
