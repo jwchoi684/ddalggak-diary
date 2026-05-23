@@ -216,5 +216,14 @@ export interface Settings {
    * Trimmed at write time; absent/empty → personas use generic Korean address.
    */
   userName?: string;
+
+  /**
+   * Last persona the user picked for a chat session. Set the first time the
+   * user picks on /chat/new and updated whenever they swap personas via the
+   * in-session bottom sheet. /chat → "새 채팅" reads this to skip the picker
+   * after the first session.
+   */
+  lastPersonaId?: PersonaId;
+
   [key: string]: unknown;
 }

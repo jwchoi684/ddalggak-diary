@@ -28,7 +28,7 @@ function ActiveChatPageInner() {
   const [personaSheetOpen, setPersonaSheetOpen] = useState(false);
 
   const { entries: diaryEntries, isReady } = useDiaries();
-  const { settings } = useSettings();
+  const { settings, update: updateSettings } = useSettings();
   const userName = typeof settings.userName === 'string' ? settings.userName : undefined;
 
   const startedAtRef = useRef<string>(new Date().toISOString());
@@ -134,6 +134,7 @@ function ActiveChatPageInner() {
         currentPersonaId={persona.id}
         onSelect={(id) => {
           setCurrentPersonaId(id);
+          updateSettings({ lastPersonaId: id });
           setPersonaSheetOpen(false);
         }}
         onClose={() => setPersonaSheetOpen(false)}

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { IconButton } from '@/design-system/IconButton';
 import { PERSONAS } from '@/design-system/personas';
 import type { PersonaId } from '@/lib/storage';
+import { useSettings } from '@/lib/storage/useSettings';
 import { PersonaCard } from './_components/PersonaCard';
 
 function CloseIcon() {
@@ -17,8 +18,10 @@ function CloseIcon() {
 
 export default function PersonaPickerPage() {
   const router = useRouter();
+  const { update } = useSettings();
 
   const handleSelect = (id: PersonaId) => {
+    update({ lastPersonaId: id });
     router.push(`/chat/session?personaId=${id}`);
   };
 
