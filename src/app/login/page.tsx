@@ -2,15 +2,16 @@
 
 import React, { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import { KakaoLoginButton } from '@/design-system/KakaoLoginButton';
 
 const ERROR_MESSAGES: Record<string, string> = {
-  otp_expired: '링크가 만료됐어요. 다시 시도해주세요.',
   access_denied: '로그인을 취소했어요.',
-  provider_email_needs_verification: '카카오 이메일 인증이 필요해요.',
-  exchange_failed: '세션 발급에 실패했어요. 다시 시도해주세요.',
-  callback_failed: '인증 콜백에 실패했어요. 다시 시도해주세요.',
+  kakao_token_failed: '카카오 토큰 발급에 실패했어요.',
+  kakao_user_failed: '카카오 사용자 정보를 가져오지 못했어요.',
+  kakao_config_missing: '서버 설정에 문제가 있어요. 관리자에게 문의해주세요.',
+  user_create_failed: '계정 생성에 실패했어요.',
+  link_failed: '세션 발급에 실패했어요.',
+  verify_failed: '세션 검증에 실패했어요.',
   missing_code: '인증 코드가 비어있어요. 다시 시도해주세요.',
 };
 const FALLBACK_ERROR = '로그인에 실패했어요. 잠시 후 다시 시도해주세요.';
@@ -45,36 +46,13 @@ function LoginPageInner() {
     }
   }, [search]);
 
-  async function handleKakaoLogin() {
+  function handleKakaoLogin() {
+    // Self-managed Kakao OAuth (see /api/auth/kakao/start). We can't use Supabase's
+    // hosted Kakao provider because GoTrue requires account_email which the app's
+    // Kakao Developers account isn't 비즈앱-verified to request.
     setStatus('redirecting');
     setErrorMsg('');
-
-    const supabase = createSupabaseBrowserClient();
-    const origin = window.location.origin;
-    // Supabase GoTrue forces `account_email profile_image profile_nickname` into the
-    // outbound Kakao scope and the SDK has no way to remove items from it. account_email
-    // is gated behind Kakao 비즈앱 인증 which this app does not have, so Kakao rejects
-    // with KOE205. We work around it by asking Supabase to produce the OAuth URL but not
-    // navigate, then rewrite the `scope` query param to only what Kakao 동의항목 covers
-    // (profile_nickname). PKCE state / redirect_uri / client_id stay intact so the
-    // Supabase callback still validates and exchanges the code.
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: 'kakao',
-      options: {
-        redirectTo: `${origin}/auth/callback?next=${encodeURIComponent(redirectTo)}`,
-        skipBrowserRedirect: true,
-      },
-    });
-
-    if (error || !data?.url) {
-      setStatus('error');
-      setErrorMsg(error?.message || FALLBACK_ERROR);
-      return;
-    }
-
-    const url = new URL(data.url);
-    url.searchParams.set('scope', 'profile_nickname');
-    window.location.href = url.toString();
+    window.location.href = `/api/auth/kakao/start?next=${encodeURIComponent(redirectTo)}`;
   }
 
   return (
