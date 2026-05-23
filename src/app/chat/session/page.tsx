@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useCallback, useMemo, useState } from 'react';
+import React, { Suspense, useEffect, useRef, useCallback, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { EmptyState } from '@/design-system/EmptyState';
 import { PERSONA_MAP } from '@/design-system/personas';
@@ -15,7 +15,7 @@ import { SuggestedPromptChips } from './_components/SuggestedPromptChips';
 import { ChatComposer } from './_components/ChatComposer';
 import { PersonaChangeSheet } from './_components/PersonaChangeSheet';
 
-export default function ActiveChatPage() {
+function ActiveChatPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialPersonaId = searchParams.get('personaId') as PersonaId | null;
@@ -139,5 +139,13 @@ export default function ActiveChatPage() {
         onClose={() => setPersonaSheetOpen(false)}
       />
     </div>
+  );
+}
+
+export default function ActiveChatPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-cream" />}>
+      <ActiveChatPageInner />
+    </Suspense>
   );
 }

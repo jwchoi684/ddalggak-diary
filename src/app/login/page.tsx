@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { Suspense, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 
@@ -10,7 +10,7 @@ import { createSupabaseBrowserClient } from '@/lib/supabase/client';
  * User enters an email, we call signInWithOtp, and Supabase emails them a link
  * that routes back to /auth/callback. On success the middleware lets them through.
  */
-export default function LoginPage() {
+function LoginPageInner() {
   const search = useSearchParams();
   const redirectTo = search.get('redirectTo') ?? '/';
   const [email, setEmail] = useState('');
@@ -80,5 +80,13 @@ export default function LoginPage() {
         </p>
       )}
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-[100dvh] bg-cream" />}>
+      <LoginPageInner />
+    </Suspense>
   );
 }
