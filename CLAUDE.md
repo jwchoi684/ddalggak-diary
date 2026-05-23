@@ -112,6 +112,36 @@ This repository uses a spec-first, contract-first, test-plan-first development w
 5. Enforce quality gates before release.
    - No commit or PR should be created unless tests, review, security review, and E2E checks have passed or the user explicitly requests a partial handoff.
 
+## Per-change verification loop (MANDATORY)
+
+Every code change — new feature, bug fix, refactor — follows this loop. **Do
+not commit or push without completing it.**
+
+1. **Write/update tests first.** New behavior → new unit test. Changed behavior →
+   updated assertion. Bug fix → regression test that fails before the fix and
+   passes after. If a change has no testable behavior at all (asset rename,
+   pure docs), note it in the commit message.
+2. **Run `npm run verify`** — chains typecheck → lint → vitest → next build.
+   Single command, all four gates must pass.
+3. **Fix loop.** If any gate fails, iterate (code change → re-run verify) until
+   green. Do not skip a failing test by marking it `.skip` unless explicitly
+   approved.
+4. **E2E sanity** when the change touches a real user journey (auth, save,
+   chat, picker, navigation): `npm run verify:full` (adds Playwright). For
+   internal refactors that don't change the user surface, this is optional.
+5. **Only after green** — git add, commit, push.
+
+The shortcut commands:
+
+```bash
+npm run verify       # typecheck + lint + unit tests + build (always before commit)
+npm run verify:full  # verify + Playwright e2e (for user-visible changes)
+```
+
+If a previously-passing test breaks because the underlying behavior moved on
+purpose, **edit the test to match the new contract** — don't silence it. The
+test file is part of the change, not separate from it.
+
 ## Standard Workflow
 
 Use `/feature-flow <feature request>` for full feature implementation.
