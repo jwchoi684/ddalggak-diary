@@ -32,6 +32,13 @@ export function readConversations(): SearchConversation[] {
  */
 export function writeAllConversations(sessions: SearchConversation[]): void {
   safeSet(CONVERSATIONS_KEY, JSON.stringify(sessions));
+  if (typeof window !== 'undefined' && typeof StorageEvent === 'function') {
+    try {
+      window.dispatchEvent(new StorageEvent('storage', { key: CONVERSATIONS_KEY }));
+    } catch {
+      // best-effort
+    }
+  }
 }
 
 /**

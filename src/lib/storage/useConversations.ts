@@ -6,18 +6,6 @@ import { useEffect, useState } from 'react';
 import { readConversations } from '@/lib/storage/conversations';
 import type { SearchConversation } from '@/lib/storage/types';
 
-/**
- * Reads all conversations from localStorage once on mount.
- *
- * Returns `isReady: false` on initial SSR/hydration render so callers can
- * suppress hydration-mismatch content. Transitions to `isReady: true`
- * synchronously after first effect.
- *
- * Never throws. If localStorage unavailable, `readConversations()` returns []
- * and `isReady` still becomes true.
- *
- * Always import via: import { useConversations } from '@/lib/storage/useConversations'
- */
 export function useConversations(): { conversations: SearchConversation[]; isReady: boolean } {
   const [conversations, setConversations] = useState<SearchConversation[]>([]);
   const [isReady, setIsReady] = useState(false);
@@ -25,6 +13,17 @@ export function useConversations(): { conversations: SearchConversation[]; isRea
   useEffect(() => {
     setConversations(readConversations());
     setIsReady(true);
+
+    // Re-read on cross-tab edits and on same-tab synthetic events dispatched
+    // by writeAllConversations (so deleting a chat from the list updates the
+    // UI immediately without a reload).
+    function handleStorage(e: StorageEvent) {
+      if (e.key === null || e.key.includes('conversations')) {
+        setConversations(readConversations());
+      }
+    }
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
   }, []);
 
   return { conversations, isReady };

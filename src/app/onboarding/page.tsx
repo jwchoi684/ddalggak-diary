@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSettings } from '@/lib/storage/useSettings';
 import type { Settings } from '@/lib/storage';
@@ -15,16 +15,13 @@ const GENDER_OPTIONS: Array<{ value: Gender; label: string }> = [
 
 export default function OnboardingPage() {
   const router = useRouter();
-  const { settings, isReady, update } = useSettings();
+  const { update } = useSettings();
   const [name, setName] = useState('');
   const [gender, setGender] = useState<Gender>('neutral');
 
-  // If user has already completed onboarding, skip straight to home.
-  useEffect(() => {
-    if (isReady && settings.onboardingCompleted) {
-      router.replace('/');
-    }
-  }, [isReady, settings.onboardingCompleted, router]);
+  // No "already onboarded" auto-redirect — OnboardingGate handles that. Doing it
+  // here too caused a navigation race with the gate when settings hadn't
+  // propagated yet across hook instances.
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

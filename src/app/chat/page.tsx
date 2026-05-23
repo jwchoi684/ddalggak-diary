@@ -1,10 +1,12 @@
 "use client";
 
-import React, { Suspense, useEffect, useMemo } from 'react';
+import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useConversations } from '@/lib/storage/useConversations';
 import { useSettings } from '@/lib/storage/useSettings';
 import { PERSONA_MAP } from '@/design-system/personas';
+import { removeConversation } from '@/lib/storage/conversations';
+import { ConfirmDialog } from '@/design-system/ConfirmDialog';
 import { ChatListHeader } from './_components/ChatListHeader';
 import { NewChatButton } from './_components/NewChatButton';
 import { ConversationCard } from './_components/ConversationCard';
@@ -23,6 +25,7 @@ function ChatPageInner() {
   const showList = searchParams.get('list') === '1';
   const { conversations, isReady } = useConversations();
   const { settings } = useSettings();
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   const sorted = useMemo(
     () => [...conversations].sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt)),
@@ -89,11 +92,30 @@ function ChatPageInner() {
                     `/chat/session?personaId=${conv.personaId}&conversationId=${conv.id}`,
                   )
                 }
+                onDelete={() => setPendingDeleteId(conv.id)}
               />
             ))}
           </div>
         )}
       </main>
+
+      <ConfirmDialog
+        open={pendingDeleteId !== null}
+        message="이 대화를 삭제할까요? 삭제한 대화는 복구할 수 없어요."
+        confirmLabel="삭제"
+        cancelLabel="취소"
+        destructive
+        onConfirm={() => {
+          if (pendingDeleteId) {
+            removeConversation(pendingDeleteId);
+            // Same-tab listeners (useConversations) refresh via the synthetic event
+            // dispatched by writeAllConversations.
+          }
+          setPendingDeleteId(null);
+        }}
+        onCancel={() => setPendingDeleteId(null)}
+      />
+
       <BottomNav />
     </div>
   );
