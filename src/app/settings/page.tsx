@@ -98,17 +98,26 @@ export default function SettingsPage() {
 
   const [pendingBackup, setPendingBackup] = useState<BackupV1 | null>(null);
 
-  // User name (REQ-USER-NAME). Local draft state mirrors storage; saved on blur or 저장 tap.
+  // 호칭 (REQ-USER-NAME) + 성별 — both shape AI tone in chat.
   const { settings, update: updateSettings } = useSettings();
   const [userNameDraft, setUserNameDraft] = useState<string>('');
+  type Gender = 'male' | 'female' | 'neutral';
+  const [genderDraft, setGenderDraft] = useState<Gender>('neutral');
   useEffect(() => {
     if (typeof settings.userName === 'string') setUserNameDraft(settings.userName);
-  }, [settings.userName]);
+    if (settings.gender === 'male' || settings.gender === 'female' || settings.gender === 'neutral') {
+      setGenderDraft(settings.gender);
+    }
+  }, [settings.userName, settings.gender]);
 
-  function handleSaveUserName() {
+  function handleSaveProfile() {
     const trimmed = userNameDraft.trim();
-    updateSettings({ userName: trimmed.length > 0 ? trimmed : undefined });
-    toast.show('이름을 저장했어요');
+    updateSettings({
+      userName: trimmed.length > 0 ? trimmed : undefined,
+      gender: genderDraft,
+      onboardingCompleted: true,
+    });
+    toast.show('프로필을 저장했어요');
   }
 
   async function handleSignOut() {
@@ -167,31 +176,62 @@ export default function SettingsPage() {
           <h2 className="text-sm font-medium text-meta mb-3 uppercase tracking-wide">
             내 정보
           </h2>
-          <div className="bg-paper rounded-[var(--radius-card-lg)] p-4"
+          <div className="bg-paper rounded-[var(--radius-card-lg)] p-4 space-y-4"
             style={{ boxShadow: 'var(--shadow-card)' }}>
-            <label htmlFor="user-name-input" className="block text-charcoal text-sm font-medium mb-2">
-              이름
-            </label>
-            <input
-              id="user-name-input"
-              type="text"
-              value={userNameDraft}
-              onChange={(e) => setUserNameDraft(e.target.value)}
-              placeholder="AI가 부를 이름을 입력하세요"
-              maxLength={30}
-              data-testid="user-name-input"
-              className="w-full min-h-[44px] px-3 rounded-lg border border-meta/30 bg-cream text-charcoal text-sm focus:outline-none focus:ring-2 focus:ring-peach"
-            />
+            <div>
+              <label htmlFor="user-name-input" className="block text-charcoal text-sm font-medium mb-2">
+                호칭
+              </label>
+              <input
+                id="user-name-input"
+                type="text"
+                value={userNameDraft}
+                onChange={(e) => setUserNameDraft(e.target.value)}
+                placeholder="AI가 부를 호칭을 입력하세요"
+                maxLength={30}
+                data-testid="user-name-input"
+                className="w-full min-h-[44px] px-3 rounded-lg border border-meta/30 bg-cream text-charcoal text-sm focus:outline-none focus:ring-2 focus:ring-peach"
+              />
+            </div>
+
+            <fieldset>
+              <legend className="block text-charcoal text-sm font-medium mb-2">성별</legend>
+              <div className="grid grid-cols-3 gap-2" role="radiogroup">
+                {([
+                  { v: 'female' as const, l: '여성' },
+                  { v: 'male' as const, l: '남성' },
+                  { v: 'neutral' as const, l: '선택 안 함' },
+                ]).map((opt) => {
+                  const active = genderDraft === opt.v;
+                  return (
+                    <button
+                      key={opt.v}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      data-testid={`settings-gender-${opt.v}`}
+                      onClick={() => setGenderDraft(opt.v)}
+                      className={`min-h-[44px] rounded-lg text-sm font-medium border transition-colors ${
+                        active ? 'bg-peach text-charcoal border-peach' : 'bg-cream text-charcoal border-meta/30'
+                      }`}
+                    >
+                      {opt.l}
+                    </button>
+                  );
+                })}
+              </div>
+            </fieldset>
+
             <button
               type="button"
               data-testid="user-name-save"
-              onClick={handleSaveUserName}
-              className="mt-3 min-h-[44px] px-4 rounded-lg bg-peach text-charcoal text-sm font-medium"
+              onClick={handleSaveProfile}
+              className="w-full min-h-[44px] px-4 rounded-lg bg-peach text-charcoal text-sm font-medium"
             >
               저장
             </button>
-            <p className="text-meta text-xs mt-2 leading-relaxed">
-              비워두면 일반 호칭으로 부릅니다. AI 채팅의 페르소나가 이 이름으로 말을 걸어요.
+            <p className="text-meta text-xs leading-relaxed">
+              비워두면 일반 호칭으로 부릅니다. AI 채팅의 페르소나가 이 호칭과 성별을 반영해 말을 걸어요.
             </p>
           </div>
         </section>

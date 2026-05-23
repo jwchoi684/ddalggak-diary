@@ -26,10 +26,15 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!isReady) return;
     if (isExempt(pathname)) return;
-    if (!settings.onboardingCompleted) {
+    // Treat a user who already has a userName as onboarded — they were created
+    // before this gate existed and we don't want to interrupt them.
+    const onboarded =
+      settings.onboardingCompleted === true ||
+      (typeof settings.userName === 'string' && settings.userName.trim().length > 0);
+    if (!onboarded) {
       router.replace('/onboarding');
     }
-  }, [isReady, pathname, settings.onboardingCompleted, router]);
+  }, [isReady, pathname, settings.onboardingCompleted, settings.userName, router]);
 
   return <>{children}</>;
 }

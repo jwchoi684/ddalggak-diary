@@ -3,6 +3,11 @@ import { createClient } from '@supabase/supabase-js';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 
+// Run on Vercel's Seoul edge so Korean users don't pay a trans-Pacific round trip
+// (default region is iad1 / Washington D.C.).
+export const preferredRegion = 'icn1';
+export const runtime = 'nodejs';
+
 interface KakaoTokenResponse {
   access_token: string;
   refresh_token?: string;
@@ -77,22 +82,31 @@ export async function GET(request: NextRequest) {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
+  // Try to create first — Supabase returns a stable error code when the email
+  // already exists, which lets us skip the expensive listUsers scan in the
+  // common return-visit case.
   let userId: string | null = null;
-  // Try to find via listUsers paged search — small user base.
-  const { data: existing } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
-  const found = existing?.users.find((u) => u.email === pseudoEmail);
-  if (found) {
+  const { data: created, error: createErr } = await admin.auth.admin.createUser({
+    email: pseudoEmail,
+    email_confirm: true,
+    user_metadata: { provider: 'kakao', kakao_id: kakaoId, nickname },
+  });
+  if (created?.user) {
+    userId = created.user.id;
+  } else if (createErr) {
+    const isDup =
+      (createErr.code && /(already|exist|registered|duplicate)/i.test(createErr.code)) ||
+      /(already|exist|registered|duplicate)/i.test(createErr.message || '');
+    if (!isDup) {
+      return fail(url.origin, 'user_create_failed', createErr.message);
+    }
+    // Returning user — fall back to a paged scan only when create says "exists".
+    const { data: existing } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    const found = existing?.users.find((u) => u.email === pseudoEmail);
+    if (!found) return fail(url.origin, 'user_lookup_failed');
     userId = found.id;
   } else {
-    const { data: created, error: createErr } = await admin.auth.admin.createUser({
-      email: pseudoEmail,
-      email_confirm: true,
-      user_metadata: { provider: 'kakao', kakao_id: kakaoId, nickname },
-    });
-    if (createErr || !created.user) {
-      return fail(url.origin, 'user_create_failed', createErr?.message);
-    }
-    userId = created.user.id;
+    return fail(url.origin, 'user_create_failed');
   }
 
   // 4. Mint a one-time magic link, then verify it server-side so @supabase/ssr writes
