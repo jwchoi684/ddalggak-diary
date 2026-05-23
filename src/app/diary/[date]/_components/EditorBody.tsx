@@ -35,6 +35,8 @@ interface EditorBodyProps {
   dateRange: string[];
   entryMap: Map<string, DiaryEntry>;
   onDateSelect: (date: string) => void;
+  /** Optional slot rendered between the date label and the textarea (PhotoCarousel). */
+  photosSlot?: React.ReactNode;
 }
 
 export function EditorBody({
@@ -50,6 +52,7 @@ export function EditorBody({
   dateRange,
   entryMap,
   onDateSelect,
+  photosSlot,
 }: EditorBodyProps) {
   const alignClass = textAlign === 'center' ? 'text-center' : 'text-left';
 
@@ -106,6 +109,8 @@ export function EditorBody({
           onDateSelect={onDateSelect}
         />
       )}
+
+      {photosSlot}
 
       {/* Diary body textarea */}
       <textarea

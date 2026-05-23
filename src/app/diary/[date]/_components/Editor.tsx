@@ -199,12 +199,13 @@ export function Editor({ date }: EditorProps) {
         dateRange={strip.dateRange}
         entryMap={strip.entryMap}
         onDateSelect={strip.handleDateSelect}
-      />
-
-      <PhotoCarousel
-        photos={state.photos}
-        onDelete={(id) => dispatch({ type: 'DELETE_PHOTO', id })}
-        onThumbnailTap={openViewer}
+        photosSlot={
+          <PhotoCarousel
+            photos={state.photos}
+            onDelete={(id) => dispatch({ type: 'DELETE_PHOTO', id })}
+            onThumbnailTap={openViewer}
+          />
+        }
       />
 
       <PhotoViewer
