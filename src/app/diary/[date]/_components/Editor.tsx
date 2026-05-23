@@ -224,8 +224,8 @@ export function Editor({ date }: EditorProps) {
         open={state.moodSheetMode !== 'closed'}
         date={currentDate}
         mode={state.moodSheetMode === 'initial' ? 'initial' : 'change'}
-        selectedMoodId={state.mood}
-        onSelect={(moodId) => dispatch({ type: 'SET_MOOD', mood: moodId })}
+        selectedId={state.mood}
+        onSelect={(id) => dispatch({ type: 'SET_MOOD', mood: id })}
         onClose={() => dispatch({ type: 'CLOSE_MOOD_SHEET' })}
         onCancelInitial={undefined}
       />

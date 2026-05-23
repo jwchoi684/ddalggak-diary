@@ -1,7 +1,7 @@
 "use client";
 
 import React from 'react';
-import type { MoodId, DiaryEntry } from '@/lib/storage';
+import type { PickerId, DiaryEntry } from '@/lib/storage';
 import { MoodIcon } from '@/design-system/MoodIcon';
 import { HorizontalDatePicker } from './HorizontalDatePicker';
 
@@ -23,7 +23,7 @@ function formatDate(date: string): string {
 
 interface EditorBodyProps {
   date: string;
-  mood: MoodId | undefined;
+  mood: PickerId | undefined;
   text: string;
   textAlign: 'left' | 'center';
   onMoodTap: () => void;

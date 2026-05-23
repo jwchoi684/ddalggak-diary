@@ -2,16 +2,16 @@
 
 import { useReducer, useEffect, type Dispatch } from 'react';
 import { readDiaries } from '@/lib/storage';
-import type { MoodId, DiaryEntry, Photo } from '@/lib/storage';
+import type { PickerId, DiaryEntry, Photo } from '@/lib/storage';
 
 export interface EditorState {
-  mood: MoodId | undefined;
+  mood: PickerId | undefined;
   text: string;
   textAlign: 'left' | 'center';
   photos: Photo[];
   persistedId: string | undefined;
   persistedCreatedAt: string | undefined;
-  snapshot: { mood: MoodId | undefined; text: string; textAlign: 'left' | 'center' };
+  snapshot: { mood: PickerId | undefined; text: string; textAlign: 'left' | 'center' };
   isLoaded: boolean;
   moodSheetMode: 'initial' | 'change' | 'closed';
   moreMenuOpen: boolean;
@@ -21,7 +21,7 @@ export interface EditorState {
 
 export type EditorAction =
   | { type: 'LOAD_ENTRY'; entry: DiaryEntry | undefined }
-  | { type: 'SET_MOOD'; mood: MoodId }
+  | { type: 'SET_MOOD'; mood: PickerId }
   | { type: 'SET_TEXT'; text: string }
   | { type: 'TOGGLE_ALIGN' }
   | { type: 'INSERT_TIME'; nextText: string }
@@ -34,7 +34,7 @@ export type EditorAction =
   | { type: 'SET_UNSAVED_DIALOG'; open: boolean }
   | { type: 'SET_DELETE_DIALOG'; open: boolean };
 
-const EMPTY_SNAPSHOT = { mood: undefined as MoodId | undefined, text: '', textAlign: 'left' as const };
+const EMPTY_SNAPSHOT = { mood: undefined as PickerId | undefined, text: '', textAlign: 'left' as const };
 
 const INITIAL_STATE: EditorState = {
   mood: undefined,

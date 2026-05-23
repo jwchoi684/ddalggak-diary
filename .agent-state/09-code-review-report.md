@@ -1,18 +1,22 @@
-# Code Review — REQ-019
+# Code Review — REQ-020
 
-Backup utility (pure), settings page with gated import modal, pre-validate before apply.
+## Summary
+Additive type-safe feature. PickerId = MoodId | ActivityId; getPickerItem as unified lookup. 417 tests pass, lint+typecheck clean. No blocking issues.
 
-## Invariants
-- validateBackup never throws ✓
-- applyBackup gated behind validateBackup ✓
-- overwrite vs merge modes distinct ✓
-- existing data preserved on invalid file ✓
-- Korean strings exact ✓
-- Settings entry point via calendar header gear icon ✓
+## Files Reviewed
+- types/index/MoodIcon/MoodPickerSheet/serializeDiaries/useEditorState/useHorizontalDatePicker/useMoodStats/MoodBarChart/Editor/EditorBody
+- New: activities.ts, picker.ts, BottomNav.tsx, tests
 
-## Non-Blocking
-- 17 test cases on backup.test.ts is generous coverage
-- Future: cloud sync (P2)
+## Non-Blocking Suggestions (1 applied immediately)
+1. **APPLIED**: `MoodBarChart` switched from direct `MOOD_MAP[moodId]` to `getPickerItem(moodId)` to honor the API-contract invariant that getPickerItem is the canonical lookup.
+2. (Deferred) `setActiveCategory('feeling')` called during render with `prevOpen` ref — works correctly, idiomatic alternative is `useEffect([open])` but current pattern is functionally identical.
+3. (Deferred) Two `item.id as PickerId` casts in MoodPickerSheet are correct but could be removed with a single `PickerItem[]` type widening at declaration. Cosmetic.
+
+## Positive Notes
+- `satisfies readonly Activity[]` correctly enforces shape without widening literal types.
+- Unified `getPickerItem` boundary scales cleanly to future picker categories.
+- Korean label exhaustiveness test in `activities.test.ts` guards against drift.
+- No `any`, no `@ts-ignore`, all assertions provably correct.
 
 ## Verdict
 PASS

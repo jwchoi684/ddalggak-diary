@@ -1,7 +1,7 @@
 import React from 'react';
 import { MoodIcon } from '@/design-system/MoodIcon';
 import { EmptyState } from '@/design-system/EmptyState';
-import { MOOD_MAP } from '@/design-system/moods';
+import { getPickerItem } from '@/design-system/picker';
 import type { MoodStats } from './useMoodStats';
 
 interface MoodBarChartProps {
@@ -32,7 +32,7 @@ export function MoodBarChart({ stats }: MoodBarChartProps) {
 
       <div className="mt-2">
         {stats.counts.map(({ mood: moodId, count }) => {
-          const mood = MOOD_MAP[moodId];
+          const mood = getPickerItem(moodId);
           const pct = Math.max(8, (count / stats.maxCount) * 100);
           return (
             <div

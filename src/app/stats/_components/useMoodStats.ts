@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import type { DiaryEntry, MoodId } from '@/lib/storage';
+import type { DiaryEntry, MoodId, PickerId } from '@/lib/storage';
 import { MOODS } from '@/design-system/moods';
 
 export interface MoodCount {
@@ -15,6 +15,7 @@ export interface MoodStats {
 
 /**
  * Aggregates diary entries for a given month into per-mood counts.
+ * Activity entries (PickerId that is not a MoodId) are excluded from the stats.
  *
  * Always call this hook unconditionally — pass [] when entries are not yet
  * ready (rules of hooks).
@@ -26,7 +27,7 @@ export interface MoodStats {
 export function useMoodStats(entries: DiaryEntry[], yearMonth: string): MoodStats {
   return useMemo(() => {
     const monthEntries = entries.filter((e) => e.date.slice(0, 7) === yearMonth);
-    const raw: Partial<Record<MoodId, number>> = {};
+    const raw: Partial<Record<PickerId, number>> = {};
     for (const e of monthEntries) {
       raw[e.mood] = (raw[e.mood] ?? 0) + 1;
     }

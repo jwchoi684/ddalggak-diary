@@ -17,6 +17,42 @@ export type MoodId =
   | 'embarrassed';
 
 /**
+ * Discriminant for the 8 fixed daily-activity icons defined in REQ-020.
+ * Never widen to `string`.
+ */
+export type ActivityId =
+  | 'meal'
+  | 'exercise'
+  | 'study'
+  | 'cafe'
+  | 'walk'
+  | 'travel'
+  | 'rest'
+  | 'work';
+
+/**
+ * Union of MoodId and ActivityId. Used wherever either a feeling or an activity
+ * can appear (picker, MoodIcon, DiaryEntry.mood).
+ * MoodId is a subtype — all existing MoodId values remain valid.
+ */
+export type PickerId = MoodId | ActivityId;
+
+/**
+ * Activity display record (REQ-020).
+ * Concrete instances live in src/design-system/activities.ts.
+ */
+export interface Activity {
+  /** Narrowed to the 8-member literal union. */
+  id: ActivityId;
+  /** Placeholder emoji (e.g. '🍽️'). */
+  emoji: string;
+  /** Korean label (e.g. '식사'). */
+  label: string;
+  /** Pastel HEX color (e.g. '#FFD6A5'). */
+  color: string;
+}
+
+/**
  * Mood display record (PRD §3.3).
  * Concrete instances live in REQ-003 constants; this type is the schema only.
  */
@@ -100,7 +136,7 @@ export interface DiaryEntry {
    * Not the creation timestamp — a user may write yesterday's entry today.
    */
   date: string;
-  mood: MoodId;
+  mood: PickerId;
   /** Plain text body. May contain time markers embedded by the UI. */
   text: string;
   textAlign: 'left' | 'center';

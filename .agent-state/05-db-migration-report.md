@@ -1,6 +1,6 @@
-# DB — REQ-019
+# DB / Migration Report — REQ-020
 
-Read/write all 3 existing localStorage keys. No schema change. Adds `writeAllSettings()` storage helper (full-replace, parallel to existing read functions). No new keys.
+Type-level widening only. localStorage key `ddalkkak:diaries:v1` and JSON structure unchanged. New ActivityId values are valid `mood` field values from now on; existing entries (MoodId values) remain valid. No backfill, no migration.
 
 ## Verdict
 PASS — N/A

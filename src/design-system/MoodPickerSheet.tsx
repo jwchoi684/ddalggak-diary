@@ -1,8 +1,9 @@
 "use client";
 
-import React from 'react';
-import type { MoodId } from '@/lib/storage';
+import React, { useState } from 'react';
+import type { PickerId } from '@/lib/storage';
 import { MOODS } from '@/design-system/moods';
+import { ACTIVITIES } from '@/design-system/activities';
 import { BottomSheet } from '@/design-system/BottomSheet';
 import { Toast } from '@/design-system/Toast';
 import { useToast } from '@/design-system/useToast';
@@ -25,7 +26,15 @@ const CloseIcon = (
   </svg>
 );
 
-function MoodPickerTabs({ onInactiveTap }: { onInactiveTap: () => void }) {
+type ActiveCategory = 'feeling' | 'activity';
+
+interface MoodPickerTabsProps {
+  activeCategory: ActiveCategory;
+  onSelectCategory: (category: ActiveCategory) => void;
+  onInactiveTap: () => void;
+}
+
+function MoodPickerTabs({ activeCategory, onSelectCategory, onInactiveTap }: MoodPickerTabsProps) {
   return (
     <div className="mb-4">
       <div className="flex gap-4 mb-1">
@@ -40,11 +49,21 @@ function MoodPickerTabs({ onInactiveTap }: { onInactiveTap: () => void }) {
       </div>
       <div className="flex gap-4">
         <button type="button"
-          className="text-xs font-medium text-charcoal border-b-2 border-charcoal pb-1 min-h-[44px] px-2">
+          onClick={() => onSelectCategory('feeling')}
+          className={`text-xs pb-1 min-h-[44px] px-2${
+            activeCategory === 'feeling'
+              ? ' font-medium text-charcoal border-b-2 border-charcoal'
+              : ' text-meta'
+          }`}>
           기분
         </button>
-        <button type="button" onClick={onInactiveTap}
-          className="text-xs text-meta pb-1 min-h-[44px] px-2">
+        <button type="button"
+          onClick={() => onSelectCategory('activity')}
+          className={`text-xs pb-1 min-h-[44px] px-2${
+            activeCategory === 'activity'
+              ? ' font-medium text-charcoal border-b-2 border-charcoal'
+              : ' text-meta'
+          }`}>
           일상
         </button>
       </div>
@@ -57,12 +76,12 @@ export interface MoodPickerSheetProps {
   open: boolean;
   /** ISO 'YYYY-MM-DD' date string (local timezone). Rendered as 'YYYY.MM.DD 요일'. */
   date: string;
-  /** Currently selected mood to highlight. Undefined in 'initial' mode. */
-  selectedMoodId?: MoodId;
+  /** Currently selected picker id to highlight. Undefined in 'initial' mode. */
+  selectedId?: PickerId;
   /** 'initial' — auto-opened on new entry; 'change' — user re-tapped to swap mood. */
   mode: 'initial' | 'change';
-  /** Called when the user taps a mood cell. onClose() follows immediately. */
-  onSelect: (moodId: MoodId) => void;
+  /** Called when the user taps a mood or activity cell. onClose() follows immediately. */
+  onSelect: (id: PickerId) => void;
   /** Always fires on close. Also fires after onSelect. */
   onClose: () => void;
   /** Only fires when mode='initial' AND closed without selection. Fires before onClose. */
@@ -72,23 +91,33 @@ export interface MoodPickerSheetProps {
 export function MoodPickerSheet({
   open,
   date,
-  selectedMoodId,
+  selectedId,
   mode,
   onSelect,
   onClose,
   onCancelInitial,
 }: MoodPickerSheetProps) {
   const toast = useToast();
+  const [activeCategory, setActiveCategory] = useState<ActiveCategory>('feeling');
+
+  // Reset to 기분 sub-tab each time the sheet opens (per spec: sheet always opens on 기분)
+  const prevOpen = React.useRef(open);
+  if (open && !prevOpen.current) {
+    setActiveCategory('feeling');
+  }
+  prevOpen.current = open;
 
   function handleCancel() {
     if (mode === 'initial') onCancelInitial?.();
     onClose();
   }
 
-  function handleSelect(moodId: MoodId) {
-    onSelect(moodId);
+  function handleSelect(id: PickerId) {
+    onSelect(id);
     onClose();
   }
+
+  const items = activeCategory === 'activity' ? ACTIVITIES : MOODS;
 
   return (
     <BottomSheet open={open} onClose={handleCancel}>
@@ -100,21 +129,25 @@ export function MoodPickerSheet({
         <IconButton icon={CloseIcon} label="닫기" onClick={handleCancel} />
       </div>
 
-      <MoodPickerTabs onInactiveTap={() => toast.show('곧 만나요!')} />
+      <MoodPickerTabs
+        activeCategory={activeCategory}
+        onSelectCategory={setActiveCategory}
+        onInactiveTap={() => toast.show('곧 만나요!')}
+      />
 
       <div className="grid grid-cols-3 gap-4">
-        {MOODS.map((mood) => (
+        {items.map((item) => (
           <button
-            key={mood.id}
+            key={item.id}
             type="button"
-            aria-label={mood.label}
-            onClick={() => handleSelect(mood.id)}
+            aria-label={item.label}
+            onClick={() => handleSelect(item.id as PickerId)}
             className={`flex flex-col items-center gap-2 p-2 rounded-[var(--radius-card)] min-h-[44px]${
-              mood.id === selectedMoodId ? ' ring-2 ring-peach bg-peach-light/30' : ''
+              item.id === selectedId ? ' ring-2 ring-peach bg-peach-light/30' : ''
             }`}
           >
-            <MoodIcon id={mood.id} size={72} />
-            <span className="text-sm text-charcoal">{mood.label}</span>
+            <MoodIcon id={item.id as PickerId} size={72} />
+            <span className="text-sm text-charcoal">{item.label}</span>
           </button>
         ))}
       </div>

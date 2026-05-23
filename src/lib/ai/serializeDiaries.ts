@@ -1,5 +1,5 @@
 import type { DiaryEntry } from '@/lib/storage';
-import { MOOD_MAP } from '@/design-system/moods';
+import { getPickerItem } from '@/design-system/picker';
 
 /**
  * Serializes diary entries to a plain-text string for LLM context injection.
@@ -20,9 +20,15 @@ export function serializeDiariesForLLM(entries: DiaryEntry[]): string {
 
   return sorted
     .map((entry) => {
-      const mood = MOOD_MAP[entry.mood];
-      const moodLabel = mood ? mood.label : entry.mood;
-      const moodEmoji = mood ? mood.emoji : '';
+      let moodLabel: string = entry.mood;
+      let moodEmoji = '';
+      try {
+        const item = getPickerItem(entry.mood);
+        moodLabel = item.label;
+        moodEmoji = item.emoji;
+      } catch {
+        // Unknown picker id — fall back to raw id string
+      }
       const text = entry.text.trim();
       return `[${entry.date}] 기분: ${moodLabel}(${moodEmoji}) | 본문: ${text}`;
     })
