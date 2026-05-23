@@ -8,7 +8,6 @@ interface ChatHeaderProps {
   persona: Persona;
   /** Opens the past-conversations list. */
   onListTap: () => void;
-  onDone: () => void;
   /** When provided, the center persona label becomes tappable and opens a picker. */
   onPersonaTap?: () => void;
 }
@@ -32,9 +31,12 @@ function ListIcon() {
  *
  * Left:   ☰ list button (aria "리스트 보기") → past conversations
  * Center: persona emoji + label — tappable when onPersonaTap is provided, opens picker
- * Right:  "완료" button (aria "대화 완료") → explicit session end
+ * Right:  empty spacer (kept for the layout's justify-between to stay centered).
+ *
+ * There is no "complete" / "end session" affordance — the conversation auto-saves
+ * on every message and on leave; the user just navigates away.
  */
-export function ChatHeader({ persona, onListTap, onDone, onPersonaTap }: ChatHeaderProps) {
+export function ChatHeader({ persona, onListTap, onPersonaTap }: ChatHeaderProps) {
   const centerInner = (
     <>
       <span className="text-2xl" aria-hidden="true">
@@ -71,15 +73,7 @@ export function ChatHeader({ persona, onListTap, onDone, onPersonaTap }: ChatHea
         </div>
       )}
 
-      <button
-        type="button"
-        aria-label="대화 완료"
-        onClick={onDone}
-        className="text-sm font-medium text-peach-dark px-3 py-2 rounded-lg"
-        style={{ minWidth: 44, minHeight: 44 }}
-      >
-        완료
-      </button>
+      <span aria-hidden="true" style={{ minWidth: 44, minHeight: 44 }} />
     </header>
   );
 }

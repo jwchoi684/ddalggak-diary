@@ -83,13 +83,12 @@ afterEach(() => {
 });
 
 describe('ActiveChatPage (REQ-017)', () => {
-  it('AC1: renders header with list button, persona label, and done button', () => {
+  it('AC1: renders header with list button and persona label (no done button)', () => {
     render(<ActiveChatPage />);
 
     expect(screen.getByRole('button', { name: '리스트 보기' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '대화 완료' })).toBeTruthy();
-    // Persona button in header shows the current label (PersonaChangeSheet, closed in
-    // the DOM, also contains "친구" so a plain getByText would match twice).
+    // "완료" button removed — conversation auto-saves on every message.
+    expect(screen.queryByRole('button', { name: '대화 완료' })).toBeNull();
     expect(screen.getByTestId('chat-persona-button').textContent).toContain('친구');
   });
 
@@ -146,7 +145,7 @@ describe('ActiveChatPage (REQ-017)', () => {
     expect(screen.getByTestId('go-to-calendar-btn')).toBeTruthy();
   });
 
-  it('AC5: "완료" button persists conversation when messages exist and navigates to calendar', async () => {
+  it('AC5: conversation auto-persists on each message + 리스트 보기 navigates to /chat?list=1', async () => {
     render(<ActiveChatPage />);
 
     const textarea = screen.getByRole('textbox', { name: '메시지 입력' });
@@ -156,29 +155,29 @@ describe('ActiveChatPage (REQ-017)', () => {
       fireEvent.click(screen.getByRole('button', { name: '전송' }));
     });
 
-    // Click "완료"
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: '대화 완료' }));
-    });
-
-    expect(upsertConversationMock).toHaveBeenCalledOnce();
+    // Auto-persisted via useEffect.
+    expect(upsertConversationMock).toHaveBeenCalled();
     const savedConv = upsertConversationMock.mock.calls[0][0];
-    expect(savedConv.isClosed).toBe(true);
     expect(savedConv.personaId).toBe('friend');
     expect(savedConv.messages.length).toBeGreaterThan(0);
-    expect(mockRouter.push).toHaveBeenCalledWith('/');
+
+    // Click 리스트 보기 → persist + navigate.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '리스트 보기' }));
+    });
+    expect(mockRouter.push).toHaveBeenCalledWith('/chat?list=1');
   });
 
-  it('AC6: empty conversation (0 messages) does NOT call upsertConversation on session end', async () => {
+  it('AC6: empty conversation (0 messages) does NOT call upsertConversation on leave', async () => {
     render(<ActiveChatPage />);
 
-    // Click "완료" without sending any message
+    // Click 리스트 보기 without sending any message.
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: '대화 완료' }));
+      fireEvent.click(screen.getByRole('button', { name: '리스트 보기' }));
     });
 
     expect(upsertConversationMock).not.toHaveBeenCalled();
-    expect(mockRouter.push).toHaveBeenCalledWith('/');
+    expect(mockRouter.push).toHaveBeenCalledWith('/chat?list=1');
   });
 
   it('AC7: tapping header persona button opens picker; selecting a new persona swaps the header label and persists with the new id', async () => {
@@ -197,19 +196,16 @@ describe('ActiveChatPage (REQ-017)', () => {
     // Header now reflects the new persona.
     expect(screen.getByTestId('chat-persona-button').textContent).toContain('연인');
 
-    // Send a message under the new persona so the conversation persists on session end.
+    // Send a message under the new persona — auto-persist fires from useEffect.
     fireEvent.change(screen.getByRole('textbox', { name: '메시지 입력' }), {
       target: { value: '톤 바꿔서 보내는 메시지' },
     });
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '전송' }));
     });
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: '대화 완료' }));
-    });
 
-    expect(upsertConversationMock).toHaveBeenCalledOnce();
-    const savedConv = upsertConversationMock.mock.calls[0][0];
+    expect(upsertConversationMock).toHaveBeenCalled();
+    const savedConv = upsertConversationMock.mock.calls.at(-1)![0];
     expect(savedConv.personaId).toBe('lover');
   });
 });

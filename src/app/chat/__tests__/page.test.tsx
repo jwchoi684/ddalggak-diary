@@ -11,9 +11,11 @@ import {
 } from '@/lib/navigation/__tests__/setupNextNavigation';
 import type { SearchConversation, ChatMessage } from '@/lib/storage/types';
 
+// Force the list view in tests so the auto-redirect to the latest conversation
+// doesn't fire — these tests are about the list UI itself.
 vi.mock('next/navigation', () => ({
   useRouter: () => mockUseRouter(),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams('list=1'),
   useParams: () => mockUseParams(),
   usePathname: () => mockUsePathname(),
 }));
@@ -171,9 +173,10 @@ describe('ChatPage — navigation', () => {
     expect(mockRouter.push).toHaveBeenCalledWith('/chat/new');
   });
 
-  it('CL6: card click calls router.push("/chat/" + id)', () => {
+  it('CL6: card click resumes the chat session for that conversation', () => {
     const conv = makeConv('2026-05-22T10:00:00.000Z', {
       id: 'test-conv-id',
+      personaId: 'friend',
       messages: [makeUserMsg('클릭 테스트')],
     });
     useConversationsMock.mockReturnValue({
@@ -185,6 +188,8 @@ describe('ChatPage — navigation', () => {
 
     fireEvent.click(screen.getByTestId('conversation-card-test-conv-id'));
 
-    expect(mockRouter.push).toHaveBeenCalledWith('/chat/test-conv-id');
+    expect(mockRouter.push).toHaveBeenCalledWith(
+      '/chat/session?personaId=friend&conversationId=test-conv-id',
+    );
   });
 });

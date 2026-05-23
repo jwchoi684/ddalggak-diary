@@ -6,7 +6,8 @@ import { EmptyState } from '@/design-system/EmptyState';
 import { PERSONA_MAP } from '@/design-system/personas';
 import { useDiaries } from '@/lib/storage/useDiaries';
 import { useSettings } from '@/lib/storage/useSettings';
-import type { PersonaId } from '@/lib/storage';
+import { useConversations } from '@/lib/storage/useConversations';
+import type { ChatMessage, PersonaId } from '@/lib/storage';
 import { Routes } from '@/lib/navigation';
 import { useChatSession, persistSession } from './_hooks/useChatSession';
 import { ChatHeader } from './_components/ChatHeader';
@@ -15,62 +16,20 @@ import { SuggestedPromptChips } from './_components/SuggestedPromptChips';
 import { ChatComposer } from './_components/ChatComposer';
 import { PersonaChangeSheet } from './_components/PersonaChangeSheet';
 
+/**
+ * Wrapper. When the URL has ?conversationId=..., we wait for the conversation
+ * list to hydrate from localStorage before mounting the chat hook — useReducer's
+ * init runs once at mount, so the prior messages must be in hand before that.
+ */
 function ActiveChatPageInner() {
-  const router = useRouter();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const initialPersonaId = searchParams.get('personaId') as PersonaId | null;
+  const resumeId = searchParams.get('conversationId') ?? undefined;
 
-  // Persona is held in state so the user can swap it mid-session from the header.
-  // Initial value comes from the ?personaId query param (set by /chat/new).
-  const [currentPersonaId, setCurrentPersonaId] = useState<PersonaId | null>(initialPersonaId);
-  const persona = currentPersonaId ? PERSONA_MAP[currentPersonaId] : undefined;
+  const { conversations, isReady: convReady } = useConversations();
 
-  const [personaSheetOpen, setPersonaSheetOpen] = useState(false);
-
-  const { entries: diaryEntries, isReady } = useDiaries();
-  const { settings, update: updateSettings } = useSettings();
-  const userName = typeof settings.userName === 'string' ? settings.userName : undefined;
-  const gender =
-    settings.gender === 'male' || settings.gender === 'female' || settings.gender === 'neutral'
-      ? settings.gender
-      : undefined;
-
-  const startedAtRef = useRef<string>(new Date().toISOString());
-  const scrollBottomRef = useRef<HTMLDivElement>(null);
-
-  const { state, conversationId, dispatch, sendMessage, handleRetry } = useChatSession({
-    persona: persona!,
-    diaryEntries,
-    userName,
-    gender,
-    onSessionEnd: () => {},
-  });
-
-  const diaryDateById = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const e of diaryEntries) m.set(e.id, e.date);
-    return m;
-  }, [diaryEntries]);
-
-  useEffect(() => {
-    scrollBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [state.messages, state.isLoading]);
-
-  const endSession = useCallback(() => {
-    if (persona) {
-      persistSession(conversationId, persona, state.messages, startedAtRef.current);
-    }
-    router.push(Routes.calendar);
-  }, [conversationId, persona, state.messages, router]);
-
-  const openList = useCallback(() => {
-    if (persona) {
-      persistSession(conversationId, persona, state.messages, startedAtRef.current);
-    }
-    router.push('/chat');
-  }, [conversationId, persona, state.messages, router]);
-
-  if (!persona) {
+  if (!initialPersonaId || !PERSONA_MAP[initialPersonaId]) {
     return (
       <div className="min-h-screen bg-cream flex items-center justify-center px-4">
         <EmptyState
@@ -86,10 +45,90 @@ function ActiveChatPageInner() {
     );
   }
 
+  if (resumeId && !convReady) {
+    return <div className="min-h-screen bg-cream" data-testid="active-chat-page" />;
+  }
+
+  const resumed = resumeId ? conversations.find((c) => c.id === resumeId) : undefined;
+  // If the URL pointed at a conversation that doesn't exist any more, fall back
+  // to a fresh session rather than 404.
+  const effectivePersonaId = (resumed?.personaId ?? initialPersonaId) as PersonaId;
+
+  return (
+    <ChatSessionContent
+      initialPersonaId={effectivePersonaId}
+      resumeConversationId={resumed ? resumeId : undefined}
+      initialMessages={resumed?.messages}
+    />
+  );
+}
+
+interface ChatSessionContentProps {
+  initialPersonaId: PersonaId;
+  resumeConversationId?: string;
+  initialMessages?: ChatMessage[];
+}
+
+function ChatSessionContent({
+  initialPersonaId,
+  resumeConversationId,
+  initialMessages,
+}: ChatSessionContentProps) {
+  const router = useRouter();
+  // Persona is held in state so the user can swap it mid-session from the header.
+  const [currentPersonaId, setCurrentPersonaId] = useState<PersonaId>(initialPersonaId);
+  const persona = PERSONA_MAP[currentPersonaId];
+
+  const [personaSheetOpen, setPersonaSheetOpen] = useState(false);
+
+  const { entries: diaryEntries, isReady } = useDiaries();
+  const { settings, update: updateSettings } = useSettings();
+  const userName = typeof settings.userName === 'string' ? settings.userName : undefined;
+  const gender =
+    settings.gender === 'male' || settings.gender === 'female' || settings.gender === 'neutral'
+      ? settings.gender
+      : undefined;
+
+  const startedAtRef = useRef<string>(new Date().toISOString());
+  const scrollBottomRef = useRef<HTMLDivElement>(null);
+
+  const { state, conversationId, dispatch, sendMessage, handleRetry } = useChatSession({
+    persona,
+    diaryEntries,
+    userName,
+    gender,
+    initialConversationId: resumeConversationId,
+    initialMessages,
+    onSessionEnd: () => {},
+  });
+
+  const diaryDateById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const e of diaryEntries) m.set(e.id, e.date);
+    return m;
+  }, [diaryEntries]);
+
+  useEffect(() => {
+    scrollBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [state.messages, state.isLoading]);
+
+  // Auto-persist on every message change so navigating away (back gesture,
+  // bottom-nav tap) doesn't drop the conversation. The "완료" button is gone.
+  useEffect(() => {
+    if (state.messages.length === 0) return;
+    persistSession(conversationId, persona, state.messages, startedAtRef.current);
+  }, [state.messages, conversationId, persona]);
+
+  const openList = useCallback(() => {
+    // Persist before leaving so the list view shows the latest exchanges.
+    persistSession(conversationId, persona, state.messages, startedAtRef.current);
+    router.push('/chat?list=1');
+  }, [conversationId, persona, state.messages, router]);
+
   if (isReady && diaryEntries.length === 0) {
     return (
       <div className="min-h-screen bg-cream flex flex-col" data-testid="active-chat-page">
-        <ChatHeader persona={persona} onListTap={openList} onDone={endSession}
+        <ChatHeader persona={persona} onListTap={openList}
           onPersonaTap={() => setPersonaSheetOpen(true)} />
         <div className="flex-1 flex items-center justify-center px-4">
           <EmptyState
@@ -109,7 +148,7 @@ function ActiveChatPageInner() {
 
   return (
     <div className="min-h-screen bg-cream flex flex-col" data-testid="active-chat-page">
-      <ChatHeader persona={persona} onListTap={openList} onDone={endSession}
+      <ChatHeader persona={persona} onListTap={openList}
         onPersonaTap={() => setPersonaSheetOpen(true)} />
       <div className="flex-1 overflow-y-auto px-4 py-2 flex flex-col gap-3">
         {state.messages.map((msg) => (

@@ -1,7 +1,7 @@
 "use client";
 
-import React from 'react';
-import { useRouter } from 'next/navigation';
+import React, { Suspense, useEffect, useMemo } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useConversations } from '@/lib/storage/useConversations';
 import { useSettings } from '@/lib/storage/useSettings';
 import { PERSONA_MAP } from '@/design-system/personas';
@@ -11,21 +11,35 @@ import { ConversationCard } from './_components/ConversationCard';
 import { BottomNav } from '@/design-system/BottomNav';
 
 /**
- * Chat tab landing page. Shows past conversations + a "새 대화 +" button. The
- * button is the only entry point that starts a fresh session — entering the
- * tab itself never creates one.
+ * Chat tab landing page.
  *
- * "새 대화 +" sends you straight to a session with lastPersonaId when set, or
- * to the persona picker on first use.
+ * Default: jump straight to the most recent conversation. The list itself is
+ * still browsable at /chat?list=1 (reached from the active chat header). The
+ * "새 대화 +" button is the only entry point that creates a brand-new session.
  */
-export default function ChatPage() {
+function ChatPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const showList = searchParams.get('list') === '1';
   const { conversations, isReady } = useConversations();
   const { settings } = useSettings();
 
-  const sorted = [...conversations].sort((a, b) =>
-    b.lastMessageAt.localeCompare(a.lastMessageAt),
+  const sorted = useMemo(
+    () => [...conversations].sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt)),
+    [conversations],
   );
+  const latest = sorted[0];
+
+  // Auto-jump into the most recent conversation unless the user asked to see the list.
+  useEffect(() => {
+    if (!isReady) return;
+    if (showList) return;
+    if (latest) {
+      router.replace(
+        `/chat/session?personaId=${latest.personaId}&conversationId=${latest.id}`,
+      );
+    }
+  }, [isReady, showList, latest, router]);
 
   function handleNewChat() {
     const last = settings.lastPersonaId;
@@ -34,6 +48,12 @@ export default function ChatPage() {
     } else {
       router.push('/chat/new');
     }
+  }
+
+  // While the redirect is in flight, render nothing rather than flash the list.
+  const willRedirect = isReady && !showList && latest;
+  if (willRedirect) {
+    return <div className="min-h-[100dvh] bg-cream" data-testid="chat-page" />;
   }
 
   return (
@@ -64,7 +84,11 @@ export default function ChatPage() {
               <ConversationCard
                 key={conv.id}
                 conversation={conv}
-                onTap={() => router.push('/chat/' + conv.id)}
+                onTap={() =>
+                  router.push(
+                    `/chat/session?personaId=${conv.personaId}&conversationId=${conv.id}`,
+                  )
+                }
               />
             ))}
           </div>
@@ -72,5 +96,13 @@ export default function ChatPage() {
       </main>
       <BottomNav />
     </div>
+  );
+}
+
+export default function ChatPage() {
+  return (
+    <Suspense fallback={<div className="min-h-[100dvh] bg-cream" />}>
+      <ChatPageInner />
+    </Suspense>
   );
 }

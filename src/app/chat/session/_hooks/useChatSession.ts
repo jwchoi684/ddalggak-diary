@@ -121,6 +121,13 @@ interface UseChatSessionParams {
   userName?: string;
   /** Optional gender used so personas pick natural Korean address forms (오빠/언니 등). */
   gender?: UserGender;
+  /**
+   * Reuse an existing conversation id (resume / open). When omitted, a fresh
+   * id is generated — i.e. "+ 새 대화" semantics.
+   */
+  initialConversationId?: string;
+  /** Prior messages to hydrate the reducer with on first render (resume case). */
+  initialMessages?: ChatMessage[];
   onSessionEnd: (messages: ChatMessage[], conversationId: string, startedAt: string) => void;
 }
 
@@ -231,11 +238,18 @@ export function useChatSession({
   diaryEntries,
   userName,
   gender,
+  initialConversationId,
+  initialMessages,
   onSessionEnd: _onSessionEnd,
 }: UseChatSessionParams): UseChatSessionResult {
   void _onSessionEnd; // reserved for future end-of-session hooks
-  const [state, dispatch] = useReducer(chatReducer, INITIAL_STATE);
-  const conversationIdRef = useRef<string>(generateId());
+  const [state, dispatch] = useReducer(
+    chatReducer,
+    initialMessages && initialMessages.length > 0
+      ? { ...INITIAL_STATE, messages: initialMessages }
+      : INITIAL_STATE,
+  );
+  const conversationIdRef = useRef<string>(initialConversationId ?? generateId());
 
   const sendMessage = useCallback(
     async (overrideText?: string) => {
