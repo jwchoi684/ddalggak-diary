@@ -60,9 +60,10 @@ describe('useMoodStats', () => {
     expect(result.current.counts[1].mood).toBe('sad');
   });
 
-  it('UMS5: all 10 moods once each → counts.length===10, maxCount===1, hasData===true', () => {
+  it('UMS5: 10 active moods once each → counts.length===10, maxCount===1, hasData===true', () => {
+    // 'grateful' was retired; using 10 of the active ids.
     const moods: MoodId[] = [
-      'joy', 'love', 'excited', 'calm', 'grateful',
+      'joy', 'love', 'excited', 'calm', 'sleepy',
       'sad', 'angry', 'anxious', 'tired', 'embarrassed',
     ];
     const entries = moods.map((mood, i) =>

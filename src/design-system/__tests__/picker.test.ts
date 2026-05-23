@@ -8,7 +8,7 @@ describe('getPickerItem', () => {
   it('PC1: getPickerItem("joy") returns the joy Mood', () => {
     const item = getPickerItem('joy');
     expect(item).toEqual(MOOD_MAP['joy']);
-    expect(item.label).toBe('기쁨');
+    expect(item.label).toBe('행복');
   });
 
   it('PC2: getPickerItem("meal") returns the meal Activity', () => {

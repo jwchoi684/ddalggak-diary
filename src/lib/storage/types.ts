@@ -9,12 +9,24 @@ export type MoodId =
   | 'love'
   | 'excited'
   | 'calm'
-  | 'grateful'
+  | 'grateful'  // legacy — kept so old entries still type-check; not in MOODS array.
   | 'sad'
   | 'angry'
   | 'anxious'
   | 'tired'
-  | 'embarrassed';
+  | 'embarrassed'
+  // ── New (illustrated set) ──
+  | 'sleepy'
+  | 'annoyed'
+  | 'depressed'
+  | 'hurt'
+  | 'sick'
+  | 'shy'
+  | 'surprised'
+  | 'listless'
+  | 'frustrated'
+  | 'proud'
+  | 'focused';
 
 /**
  * Discriminant for the 8 fixed daily-activity icons defined in REQ-020.

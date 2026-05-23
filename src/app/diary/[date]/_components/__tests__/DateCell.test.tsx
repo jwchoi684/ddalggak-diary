@@ -16,8 +16,8 @@ describe('DateCell', () => {
     render(
       <DateCell date="2026-05-22" entry={entry} isSelected={false} isToday={false} onSelect={vi.fn()} />,
     );
-    // MoodIcon renders <span role="img" aria-label="기쁨">
-    expect(screen.getByRole('img', { name: '기쁨' })).toBeTruthy();
+    // MoodIcon renders <span role="img" aria-label="행복">
+    expect(screen.getByRole('img', { name: '행복' })).toBeTruthy();
   });
 
   it('DC2: no entry — renders day number, no mood icon', () => {

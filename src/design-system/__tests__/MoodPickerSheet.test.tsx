@@ -5,7 +5,6 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, cleanup } from '@testing-library/react';
 import { MOODS } from '@/design-system/moods';
-import { ACTIVITIES } from '@/design-system/activities';
 import { MoodPickerSheet } from '@/design-system/MoodPickerSheet';
 import type { MoodPickerSheetProps } from '@/design-system/MoodPickerSheet';
 
@@ -22,7 +21,6 @@ const defaultProps: MoodPickerSheetProps = {
   onClose: vi.fn(),
 };
 
-// <dialog> in happy-dom is not in a11y tree without open attr; query directly
 function btn(labelOrText: string): HTMLButtonElement {
   const found = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(
     (b) => b.getAttribute('aria-label') === labelOrText || b.textContent?.trim() === labelOrText,
@@ -38,18 +36,16 @@ beforeEach(() => {
   closeMock = vi.fn();
   HTMLDialogElement.prototype.showModal = showModalMock;
   HTMLDialogElement.prototype.close = closeMock;
-  vi.useFakeTimers();
   vi.clearAllMocks();
 });
 
 afterEach(() => {
   HTMLDialogElement.prototype.showModal = origShowModal;
   HTMLDialogElement.prototype.close = origClose;
-  vi.useRealTimers();
   cleanup();
 });
 
-describe('MoodPickerSheet', () => {
+describe('MoodPickerSheet (illustrated 20-mood set, no tabs)', () => {
   it('open=true calls showModal', () => {
     render(<MoodPickerSheet {...defaultProps} open={true} />);
     expect(showModalMock).toHaveBeenCalledTimes(1);
@@ -68,9 +64,24 @@ describe('MoodPickerSheet', () => {
     expect(document.querySelector('h2')?.textContent).toBe('오늘은 어떤 하루였나요?');
   });
 
-  it('renders a button for each of the 10 moods by default (기분 sub-tab)', () => {
+  it('renders a button for every active mood (20 entries)', () => {
     render(<MoodPickerSheet {...defaultProps} />);
     MOODS.forEach((mood) => expect(btn(mood.label)).toBeTruthy());
+  });
+
+  it('mood grid uses a 4-column layout', () => {
+    render(<MoodPickerSheet {...defaultProps} />);
+    const grid = document.querySelector('.grid') as HTMLElement;
+    expect(grid).toBeTruthy();
+    expect(grid.className).toContain('grid-cols-4');
+  });
+
+  it('does not render the 테마 or 일상 tabs any more', () => {
+    render(<MoodPickerSheet {...defaultProps} />);
+    expect(() => btn('테마')).toThrow();
+    expect(() => btn('일상')).toThrow();
+    expect(() => btn('기분')).toThrow();
+    expect(() => btn('기본')).toThrow();
   });
 
   it('tapping a mood calls onSelect then onClose; does not call onCancelInitial', () => {
@@ -81,7 +92,7 @@ describe('MoodPickerSheet', () => {
         onSelect={onSelect} onClose={onClose} onCancelInitial={onCancelInitial}
       />,
     );
-    fireEvent.click(btn('기쁨'));
+    fireEvent.click(btn('행복'));
     expect(onSelect).toHaveBeenCalledWith('joy');
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onCancelInitial).not.toHaveBeenCalled();
@@ -109,50 +120,18 @@ describe('MoodPickerSheet', () => {
     expect(onCancelInitial.mock.invocationCallOrder[0]).toBeLessThan(onClose.mock.invocationCallOrder[0]);
   });
 
-  it('tapping 테마 (inactive top-level tab) shows the 곧 만나요! toast', () => {
-    render(<MoodPickerSheet {...defaultProps} />);
-    fireEvent.click(btn('테마'));
-    expect(document.body.textContent).toContain('곧 만나요!');
-  });
-
   it('joy button has ring-2 and ring-peach when selectedId="joy"', () => {
     render(<MoodPickerSheet {...defaultProps} selectedId="joy" />);
-    expect(btn('기쁨').className).toContain('ring-2');
-    expect(btn('기쁨').className).toContain('ring-peach');
+    expect(btn('행복').className).toContain('ring-2');
+    expect(btn('행복').className).toContain('ring-peach');
     expect(btn('슬픔').className).not.toContain('ring-2');
   });
 
   it('MoodPickerSheet.tsx has "use client" directive', () => {
     const src = fs.readFileSync(
-      path.resolve(process.cwd(), 'src/design-system/MoodPickerSheet.tsx'), 'utf8',
+      path.resolve(process.cwd(), 'src/design-system/MoodPickerSheet.tsx'),
+      'utf8',
     );
     expect(src).toContain('"use client"');
-  });
-
-  // MPS-N: tap 일상 sub-tab → grid shows 8 ACTIVITIES items (not the 10 moods)
-  it('MPS-N: tapping 일상 sub-tab shows activity grid with all 8 activities', () => {
-    render(<MoodPickerSheet {...defaultProps} />);
-    fireEvent.click(btn('일상'));
-    // All 8 activity labels should now be present
-    ACTIVITIES.forEach((activity) => expect(btn(activity.label)).toBeTruthy());
-    // None of the mood labels should be in the grid (moods hidden)
-    // (기쁨 is a mood label — it should not appear as a button aria-label in the grid)
-    const allBtns = Array.from(document.querySelectorAll<HTMLButtonElement>('button'));
-    const moodBtns = allBtns.filter(
-      (b) => MOODS.some((m) => b.getAttribute('aria-label') === m.label),
-    );
-    expect(moodBtns).toHaveLength(0);
-  });
-
-  // MPS-N+1: selecting an activity fires onSelect with the ActivityId
-  it('MPS-N+1: selecting an activity from 일상 tab fires onSelect with ActivityId', () => {
-    const onSelect = vi.fn(), onClose = vi.fn();
-    render(
-      <MoodPickerSheet {...defaultProps} onSelect={onSelect} onClose={onClose} />,
-    );
-    fireEvent.click(btn('일상'));
-    fireEvent.click(btn('식사'));
-    expect(onSelect).toHaveBeenCalledWith('meal');
-    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

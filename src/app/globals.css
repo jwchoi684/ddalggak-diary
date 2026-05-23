@@ -12,17 +12,28 @@
   --color-success: #B4E4B4;
   --color-cell-empty: #C8C8C8;
 
-  /* Mood pastels — PRD §3.4 (REQ-003에서 MoodIcon이 참조) */
+  /* Mood pastels — illustrated set (matches src/design-system/moods.ts MOODS) */
   --color-mood-joy: #FFE066;
-  --color-mood-love: #FFB3C1;
-  --color-mood-excited: #FFC09F;
+  --color-mood-excited: #FFB3C1;
   --color-mood-calm: #B4E4B4;
-  --color-mood-grateful: #A8DCC9;
-  --color-mood-sad: #A8C5E8;
+  --color-mood-sleepy: #B6E0FA;
+  --color-mood-tired: #C4B5E0;
+  --color-mood-annoyed: #F8C97A;
   --color-mood-angry: #F4A6A6;
-  --color-mood-anxious: #C4B5E0;
-  --color-mood-tired: #C8CCD4;
-  --color-mood-embarrassed: #F5C896;
+  --color-mood-sad: #A8C5E8;
+  --color-mood-depressed: #86B886;
+  --color-mood-anxious: #9CDDDD;
+  --color-mood-embarrassed: #FFB3D9;
+  --color-mood-hurt: #E0BEAA;
+  --color-mood-sick: #D9CAB3;
+  --color-mood-shy: #C9B6E0;
+  --color-mood-surprised: #B5D6F5;
+  --color-mood-love: #FFB3C1;
+  --color-mood-listless: #8FA4B9;
+  --color-mood-frustrated: #F2A286;
+  --color-mood-proud: #FFD966;
+  --color-mood-focused: #A9D5B5;
+  --color-mood-grateful: #A8DCC9; /* legacy — kept for any existing 'grateful' entries */
 
   /* Layout — PRD §1.6.7 */
   --container-mobile: 420px;

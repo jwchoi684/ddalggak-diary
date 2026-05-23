@@ -232,7 +232,7 @@ describe('Editor', () => {
 
     expect(showModalMock).toHaveBeenCalled();
     // MoodPickerSheet mood buttons use aria-label={mood.label} per MoodPickerSheet source
-    const joyBtn = document.querySelector<HTMLButtonElement>('button[aria-label="기쁨"]');
+    const joyBtn = document.querySelector<HTMLButtonElement>('button[aria-label="행복"]');
     expect(joyBtn).toBeTruthy();
     expect(joyBtn?.className).toContain('ring-2');
   });

@@ -25,7 +25,7 @@ describe('serializeDiariesForLLM', () => {
     });
 
     const result = serializeDiariesForLLM([entry]);
-    expect(result).toBe('[2026-05-15] 기분: 기쁨(😊) | 본문: 오늘은 기분이 좋았다');
+    expect(result).toBe('[2026-05-15] 기분: 행복(😊) | 본문: 오늘은 기분이 좋았다');
   });
 
   it('SD2: returns empty string for empty entries array', () => {
@@ -58,7 +58,7 @@ describe('serializeDiariesForLLM', () => {
 
     const result = serializeDiariesForLLM([entry]);
     expect(result).toBe(
-      '[2026-05-05] 기분: 불안(😰) | 본문: 오늘은 "특수" 문자가 있어요. <태그> & 엔티티',
+      '[2026-05-05] 기분: 걱정(😰) | 본문: 오늘은 "특수" 문자가 있어요. <태그> & 엔티티',
     );
   });
 });

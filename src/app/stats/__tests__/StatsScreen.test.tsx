@@ -114,10 +114,11 @@ describe('StatsScreen — bar chart ordering and widths', () => {
     expect(within(sadBar).getByText('2')).toBeTruthy();
   });
 
-  it('SS3: all 10 moods once each → 10 bars and 10 summary icons', () => {
+  it('SS3: 10 distinct moods once each → 10 bars and 10 summary icons', () => {
     currentSearchParams = new URLSearchParams(`month=${CURRENT_MONTH}`);
+    // 'grateful' was retired; using 10 of the active ids.
     const moods: MoodId[] = [
-      'joy', 'love', 'excited', 'calm', 'grateful',
+      'joy', 'love', 'excited', 'calm', 'sleepy',
       'sad', 'angry', 'anxious', 'tired', 'embarrassed',
     ];
     useDiariesMock.mockReturnValue({

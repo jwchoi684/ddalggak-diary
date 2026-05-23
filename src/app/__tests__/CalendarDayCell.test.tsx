@@ -42,8 +42,9 @@ describe('CalendarDayCell — entry present, not today', () => {
     const { container } = render(
       <CalendarDayCell date="2026-05-10" entry={entry} isToday={false} onTap={vi.fn()} />,
     );
+    // MoodIcon now renders <img alt={label}> — accessible name comes from alt.
     const img = screen.getByRole('img');
-    expect(img.getAttribute('aria-label')).toBe('기쁨');
+    expect(img.getAttribute('alt')).toBe('행복');
     expect(container.querySelector('[class*="bg-peach"]')).toBeNull();
   });
 });

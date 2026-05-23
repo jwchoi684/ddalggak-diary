@@ -5,20 +5,24 @@ import { describe, it, expect } from 'vitest';
 import type { MoodId } from '@/lib/storage';
 import { MOODS, MOOD_MAP, getMood } from '@/design-system/moods';
 
+// Matches MOODS declaration order in src/design-system/moods.ts.
+// 'grateful' was retired — kept in the type union for legacy entries only.
 const EXPECTED_IDS: MoodId[] = [
-  'joy', 'love', 'excited', 'calm', 'grateful',
-  'sad', 'angry', 'anxious', 'tired', 'embarrassed',
+  'joy', 'excited', 'calm', 'sleepy', 'tired',
+  'annoyed', 'angry', 'sad', 'depressed', 'anxious',
+  'embarrassed', 'hurt', 'sick', 'shy', 'surprised',
+  'love', 'listless', 'frustrated', 'proud', 'focused',
 ];
 
 describe('MOODS master data', () => {
-  it('has exactly 10 entries', () => {
-    expect(MOODS.length).toBe(10);
+  it('has exactly 20 entries (illustrated set)', () => {
+    expect(MOODS.length).toBe(20);
   });
 
-  it('contains every MoodId literal exactly once — no duplicates', () => {
-    const ids = MOODS.map((m) => m.id);
-    const idSet = new Set(ids);
-    expect(idSet.size).toBe(10);
+  it('contains every active MoodId literal exactly once — no duplicates', () => {
+    const ids = MOODS.map((m) => m.id as string);
+    const idSet = new Set<string>(ids);
+    expect(idSet.size).toBe(20);
     for (const id of EXPECTED_IDS) {
       expect(idSet.has(id)).toBe(true);
     }
@@ -42,14 +46,14 @@ describe('MOODS master data', () => {
     }
   });
 
-  it('MOODS order matches PRD §3.4 sequence', () => {
+  it('MOODS order matches the illustrated picker sequence', () => {
     expect(MOODS.map((m) => m.id)).toEqual(EXPECTED_IDS);
   });
 });
 
 describe('MOOD_MAP', () => {
-  it('spot-check: MOOD_MAP["joy"].label === "기쁨"', () => {
-    expect(MOOD_MAP['joy'].label).toBe('기쁨');
+  it('spot-check: MOOD_MAP["joy"].label === "행복"', () => {
+    expect(MOOD_MAP['joy'].label).toBe('행복');
   });
 });
 
@@ -64,10 +68,14 @@ describe('getMood', () => {
     );
   });
 
-  it('does not throw for all 10 valid ids', () => {
+  it('does not throw for any of the active ids', () => {
     for (const id of EXPECTED_IDS) {
       expect(() => getMood(id)).not.toThrow();
     }
+  });
+
+  it('still returns a legacy Mood record for "grateful" (retired id)', () => {
+    expect(getMood('grateful').label).toBe('감사');
   });
 });
 
