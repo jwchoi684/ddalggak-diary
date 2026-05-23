@@ -93,7 +93,7 @@ describe('useHorizontalDatePicker', () => {
     expect(result.current.entryMap.get('2026-05-22')).toMatchObject({ date: '2026-05-22', mood: 'joy' });
   });
 
-  it('H5: handleDateSelect happy path — saveFn → onDateChange → strip closes', () => {
+  it('H5: handleDateSelect happy path — onDateChange fires with newDate, strip closes (saveFn is the caller-owned new-date save)', () => {
     const saveFn = vi.fn();
     const onDateChange = vi.fn();
     const onSaveError = vi.fn();
@@ -111,18 +111,19 @@ describe('useHorizontalDatePicker', () => {
     act(() => { result.current.toggle(); }); // open
     act(() => { result.current.handleDateSelect('2026-05-23'); });
 
-    expect(saveFn).toHaveBeenCalledTimes(1);
-    expect(saveFn).toHaveBeenCalledWith({ mood: 'joy', text: 'hello', textAlign: 'left', photos: [] });
+    // saveFn is NOT called by the hook on a different-date tap: that would save
+    // the draft at the OLD date (saveFn is bound to the old currentDate). The
+    // caller's onDateChange is now responsible for the new-date persist.
+    expect(saveFn).not.toHaveBeenCalled();
     expect(onDateChange).toHaveBeenCalledWith('2026-05-23');
     expect(onSaveError).not.toHaveBeenCalled();
     expect(result.current.isOpen).toBe(false);
-    // saveFn called before onDateChange
-    expect(saveFn.mock.invocationCallOrder[0]).toBeLessThan(
-      onDateChange.mock.invocationCallOrder[0],
-    );
   });
 
-  it('H6: handleDateSelect failure — saveFn throws → onSaveError, onDateChange skipped, strip stays open', () => {
+  it('H6: different-date tap always fires onDateChange + closes; saveFn errors are the caller\'s concern', () => {
+    // saveFn would throw if invoked, but the hook no longer invokes it on a
+    // different-date tap, so the navigation still proceeds. The caller's
+    // onDateChange owns persistence and surfaces its own errors.
     const quotaError = Object.assign(new DOMException('QuotaExceededError'), { name: 'QuotaExceededError' });
     const saveFn = vi.fn(() => { throw quotaError; });
     const onDateChange = vi.fn();
@@ -138,13 +139,13 @@ describe('useHorizontalDatePicker', () => {
       }),
     );
 
-    act(() => { result.current.toggle(); }); // open
+    act(() => { result.current.toggle(); });
     act(() => { result.current.handleDateSelect('2026-05-23'); });
 
-    expect(onSaveError).toHaveBeenCalledTimes(1);
-    expect(onSaveError).toHaveBeenCalledWith(expect.stringContaining('저장에 실패'));
-    expect(onDateChange).not.toHaveBeenCalled();
-    expect(result.current.isOpen).toBe(true); // still open
+    expect(saveFn).not.toHaveBeenCalled();
+    expect(onSaveError).not.toHaveBeenCalled();
+    expect(onDateChange).toHaveBeenCalledWith('2026-05-23');
+    expect(result.current.isOpen).toBe(false);
   });
 
   it('H7: same-date tap — saveFn called (no-op if no mood), onDateChange skipped, strip closes', () => {

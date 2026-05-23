@@ -1,6 +1,6 @@
 "use client";
 
-import { useReducer, useEffect, type Dispatch } from 'react';
+import { useReducer, useEffect, useRef, type Dispatch } from 'react';
 import { readDiaries } from '@/lib/storage';
 import type { PickerId, DiaryEntry, Photo } from '@/lib/storage';
 
@@ -110,10 +110,16 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
 export function useEditorState(date: string): [EditorState, Dispatch<EditorAction>] {
   const [state, dispatch] = useReducer(reducer, INITIAL_STATE);
 
+  // Load the entry that belongs to the date this editor mounted with. The date
+  // arg can change later (the user re-targets via the horizontal picker), but
+  // we deliberately do not reload — picker change is "move this draft to a new
+  // date", not "open a different entry". The latest date used at save time is
+  // resolved by the caller's saveFn.
+  const initialDateRef = useRef(date);
   useEffect(() => {
-    const entry = readDiaries().find((e) => e.date === date);
+    const entry = readDiaries().find((e) => e.date === initialDateRef.current);
     dispatch({ type: 'LOAD_ENTRY', entry });
-  }, [date]);
+  }, []);
 
   return [state, dispatch];
 }

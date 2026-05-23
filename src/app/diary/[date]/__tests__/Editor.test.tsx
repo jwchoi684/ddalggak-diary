@@ -276,17 +276,15 @@ describe('Editor', () => {
     expect(document.querySelector('[role="listbox"]')).toBeNull();
   });
 
-  it('C-strip-2: tapping a different date cell saves current date and loads new date', async () => {
+  it('C-strip-2: tapping a different date cell rebinds the current draft to the new date (no reload, no separate entry)', async () => {
     const entryA = makeDiary({ date: '2026-05-15', mood: 'joy', text: 'date A content' });
     const entryB = makeDiary({ date: '2026-05-16', mood: 'calm', text: 'date B content' });
     readDiariesMock.mockReturnValue([entryA, entryB]);
     await renderEditor('2026-05-15');
 
-    // Open strip
     fireEvent.click(document.querySelector('button[aria-label="날짜 선택"]')!);
     await act(async () => {});
 
-    // Find the cell for 2026-05-16 (aria-label contains both "5월" and "16일")
     const cellB = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="option"]')).find(
       (el) => {
         const label = el.getAttribute('aria-label') ?? '';
@@ -300,30 +298,27 @@ describe('Editor', () => {
     await act(async () => {});
     await act(async () => {});
 
-    // upsertDiary called (saving date A)
+    // The current draft (entry A) is now persisted UNDER the new date 2026-05-16
+    // — the picker move is "this entry, different date", not "switch entries".
     expect(upsertDiaryMock).toHaveBeenCalledWith(
-      expect.objectContaining({ date: '2026-05-15' }),
+      expect.objectContaining({ date: '2026-05-16' }),
     );
-    // Editor now shows date B's content
+    // Textarea content stays the same — no reload triggered by the date change.
     const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
-    expect(textarea.value).toBe('date B content');
-    // Strip closed
+    expect(textarea.value).toBe('date A content');
     expect(document.querySelector('[role="listbox"]')).toBeNull();
   });
 
-  it('C-strip-3: switching to empty date auto-opens MoodPickerSheet', async () => {
+  it('C-strip-3: switching dates does NOT re-open MoodPickerSheet (the draft is preserved, not reloaded)', async () => {
     const entryA = makeDiary({ date: '2026-05-15', mood: 'joy', text: 'A' });
-    // No entry for 2026-05-16
     readDiariesMock.mockReturnValue([entryA]);
     await renderEditor('2026-05-15');
 
     showModalMock.mockClear();
 
-    // Open strip
     fireEvent.click(document.querySelector('button[aria-label="날짜 선택"]')!);
     await act(async () => {});
 
-    // Tap the cell for 2026-05-16 (aria-label contains "5월" and "16일")
     const emptyCell = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="option"]')).find(
       (el) => {
         const label = el.getAttribute('aria-label') ?? '';
@@ -331,10 +326,15 @@ describe('Editor', () => {
       },
     );
     fireEvent.click(emptyCell!);
-    await act(async () => {}); // flush useEditorState reload useEffect
+    await act(async () => {});
+    await act(async () => {});
 
-    // MoodPickerSheet should auto-open (showModal called again)
-    expect(showModalMock).toHaveBeenCalled();
+    // The strip itself opens a <dialog>, which calls showModal. Filter to the
+    // mood-picker dialog so we ignore that. The mood sheet must NOT re-open
+    // because the current draft already has a mood — picker change is just a
+    // date rebind, not a reload-into-empty-state.
+    const moodSheet = document.querySelector('[data-testid="mood-picker-sheet"]');
+    expect(moodSheet?.getAttribute('open')).not.toBe('');
   });
 
   it('C-photo-1: tapping gallery button triggers .click() on hidden file input', async () => {

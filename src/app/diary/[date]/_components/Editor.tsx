@@ -50,15 +50,16 @@ export function Editor({ date }: EditorProps) {
     [state.mood, state.text, state.textAlign, state.photos],
   );
 
-  // CRITICAL (invariant 4): dep array uses `currentDate`, not the stale URL `date` prop.
-  const saveFn = useCallback(
-    (v: typeof autosaveValue) => {
+  // saveAt — generalized save that takes the date explicitly. saveFn (used by
+  // autosave) is just saveAt bound to the current picker date.
+  const saveAt = useCallback(
+    (v: typeof autosaveValue, atDate: string) => {
       if (!v.mood) return;
       const id = state.persistedId ?? generateId();
       const createdAt = state.persistedCreatedAt ?? new Date().toISOString();
       try {
         upsertDiary({
-          id, date: currentDate, mood: v.mood, text: v.text, textAlign: v.textAlign,
+          id, date: atDate, mood: v.mood, text: v.text, textAlign: v.textAlign,
           photos: v.photos, createdAt, updatedAt: new Date().toISOString(),
         });
       } catch {
@@ -67,17 +68,29 @@ export function Editor({ date }: EditorProps) {
       }
       dispatch({ type: 'MARK_SAVED', id, createdAt });
     },
-    [state.persistedId, state.persistedCreatedAt, currentDate, dispatch, toast],
+    [state.persistedId, state.persistedCreatedAt, dispatch, toast],
+  );
+
+  const saveFn = useCallback(
+    (v: typeof autosaveValue) => saveAt(v, currentDate),
+    [saveAt, currentDate],
   );
 
   useAutosave(autosaveValue, 1000, saveFn);
 
-  // REQ-010: horizontal date strip
+  // REQ-010: horizontal date strip.
+  // Picker change semantics: rebind the in-flight draft to the new date — same
+  // entry id, just a different date. saveAt is called with newDate inside the
+  // onDateChange callback so the draft is persisted under the new date in the
+  // same tick (closure on currentDate would still be the OLD date here).
   const strip = useHorizontalDatePicker({
     currentDate,
     saveFn,
     autosaveValue,
-    onDateChange: setCurrentDate,
+    onDateChange: (newDate) => {
+      saveAt(autosaveValue, newDate);
+      setCurrentDate(newDate);
+    },
     onSaveError: (msg) => toast.show(msg),
   });
 

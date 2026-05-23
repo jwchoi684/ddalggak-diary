@@ -74,12 +74,11 @@ export function useHorizontalDatePicker(
 
   const handleDateSelect = useCallback(
     (newDate: string) => {
-      // Same-date tap: save (may be a no-op if no mood) then close; do NOT navigate
+      // Same-date tap: save (may be a no-op if no mood) then close; do NOT navigate.
       if (newDate === currentDate) {
         try {
           saveFn(autosaveValue);
         } catch {
-          // save failed on same-date — still close (no nav either way)
           onSaveError('저장에 실패했어요. 다시 시도해주세요.');
           return;
         }
@@ -87,13 +86,10 @@ export function useHorizontalDatePicker(
         return;
       }
 
-      // Different-date tap: save first, then navigate
-      try {
-        saveFn(autosaveValue);
-      } catch {
-        onSaveError('저장에 실패했어요. 다시 시도해주세요.');
-        return; // do NOT setCurrentDate, do NOT close
-      }
+      // Different-date tap: just rebind the draft to the new date. The caller's
+      // onDateChange is expected to persist the current draft at newDate (it
+      // owns the saveFn and knows the persistedId), so we deliberately do NOT
+      // call saveFn here — that would save the draft against the OLD date.
       onDateChange(newDate);
       setIsOpen(false);
     },
