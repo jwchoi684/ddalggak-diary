@@ -22,6 +22,10 @@ vi.mock('@/lib/storage/useConversations', () => ({
   useConversations: vi.fn(() => ({ conversations: [], isReady: true })),
 }));
 
+vi.mock('@/lib/storage/useSettings', () => ({
+  useSettings: vi.fn(() => ({ settings: {}, isReady: true, update: vi.fn() })),
+}));
+
 // Mock formatRelativeTime to avoid time-sensitive output in page tests
 vi.mock('@/lib/utils/formatRelativeTime', () => ({
   formatRelativeTime: vi.fn(() => '방금'),
@@ -30,7 +34,7 @@ vi.mock('@/lib/utils/formatRelativeTime', () => ({
 const { useConversations } = await import('@/lib/storage/useConversations');
 const useConversationsMock = useConversations as ReturnType<typeof vi.fn>;
 
-const { default: ChatPage } = await import('@/app/chat/list/page');
+const { default: ChatPage } = await import('@/app/chat/page');
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
@@ -82,7 +86,7 @@ describe('ChatPage — empty state', () => {
 
     expect(screen.getByTestId('conversation-list-empty')).toBeTruthy();
     expect(
-      screen.getByText('아직 대화가 없어요. AI에게 일기에 대해 물어보세요'),
+      screen.getByText('아직 대화가 없어요. 위의 새 대화 버튼을 눌러 시작해보세요'),
     ).toBeTruthy();
     expect(screen.getByTestId('new-chat-button')).toBeTruthy();
   });
@@ -159,12 +163,12 @@ describe('ChatPage — sorting', () => {
 });
 
 describe('ChatPage — navigation', () => {
-  it('CL5: new chat button routes to /chat (which redirects to a session)', () => {
+  it('CL5: new chat button routes to /chat/new when no lastPersonaId', () => {
     render(<ChatPage />);
 
     fireEvent.click(screen.getByTestId('new-chat-button'));
 
-    expect(mockRouter.push).toHaveBeenCalledWith('/chat');
+    expect(mockRouter.push).toHaveBeenCalledWith('/chat/new');
   });
 
   it('CL6: card click calls router.push("/chat/" + id)', () => {

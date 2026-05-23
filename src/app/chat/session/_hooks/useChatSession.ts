@@ -170,7 +170,18 @@ async function streamLLM(
   // Build messages, then override system prompt with the user-name-augmented version.
   // CONTEXT ISOLATION INVARIANT: only sessionMessages (this session only) are passed.
   const llmMessages = buildChatMessages({ persona, diariesText, sessionMessages });
-  const userAwareSystem = `${buildSystemPromptWithUser(persona, userName, gender)}\n\n[일기 목록]\n${diariesText}`;
+  const diaryGroundingDirective = `
+
+[중요 - 답변 규칙]
+당신의 응답은 반드시 위 [일기 목록] 내용에만 근거해야 합니다.
+- 매 질문마다 [일기 목록]을 다시 살펴보고 관련된 일기를 참고해서 답하세요.
+- 일기에 명시되지 않은 사실은 추측하거나 만들어내지 마세요.
+- 사용자 질문이 일기 내용과 전혀 관련 없다면 (예: 날씨 정보, 일반 상식, 코딩 등), 정중하게
+  "일기와 관련된 질문에만 답해 드릴 수 있어요. 어떤 일기에 대해 이야기하고 싶으세요?"
+  라고 답하고 그 외 내용은 답변하지 마세요.
+- 일기와 관련된 질문이지만 해당 내용이 일기에 없으면 "그 부분은 일기에서 찾을 수 없어요"
+  라고 솔직히 말해주세요.`;
+  const userAwareSystem = `${buildSystemPromptWithUser(persona, userName, gender)}\n\n[일기 목록]\n${diariesText}${diaryGroundingDirective}`;
   if (llmMessages.length > 0) {
     llmMessages[0] = { ...llmMessages[0], content: userAwareSystem };
   }

@@ -67,7 +67,7 @@ function ActiveChatPageInner() {
     if (persona) {
       persistSession(conversationId, persona, state.messages, startedAtRef.current);
     }
-    router.push('/chat/list');
+    router.push('/chat');
   }, [conversationId, persona, state.messages, router]);
 
   if (!persona) {
@@ -112,14 +112,6 @@ function ActiveChatPageInner() {
       <ChatHeader persona={persona} onListTap={openList} onDone={endSession}
         onPersonaTap={() => setPersonaSheetOpen(true)} />
       <div className="flex-1 overflow-y-auto px-4 py-2 flex flex-col gap-3">
-        {state.messages.length === 0 && (
-          <div className="flex items-start">
-            <div className="max-w-[80%] px-4 py-3 rounded-2xl rounded-bl-sm text-sm text-charcoal bg-paper leading-relaxed"
-              style={{ boxShadow: 'var(--shadow-card)' }}>
-              {persona.sampleGreeting}
-            </div>
-          </div>
-        )}
         {state.messages.map((msg) => (
           <MessageBubble key={msg.id} message={msg}
             diaryDateById={diaryDateById}
