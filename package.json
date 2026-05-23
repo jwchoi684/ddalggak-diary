@@ -14,11 +14,14 @@
     "test:e2e:install": "playwright install chromium"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.10.3",
+    "@supabase/supabase-js": "^2.106.1",
     "next": "15.5.18",
     "react": "19.0.0",
     "react-dom": "19.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.44.0",
     "@tailwindcss/postcss": "^4.0.0",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^22",
@@ -29,7 +32,6 @@
     "happy-dom": "^20.9.0",
     "tailwindcss": "^4.0.0",
     "typescript": "^5",
-    "vitest": "^2.0.0",
-    "@playwright/test": "^1.44.0"
+    "vitest": "^2.0.0"
   }
 }

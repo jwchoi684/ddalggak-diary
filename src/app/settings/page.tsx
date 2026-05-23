@@ -9,6 +9,7 @@ import { useToast } from '@/design-system/useToast';
 import { IconButton } from '@/design-system/IconButton';
 import { useSettings } from '@/lib/storage/useSettings';
 import { BottomNav } from '@/design-system/BottomNav';
+import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 
 // ─── Icon ─────────────────────────────────────────────────────────────────────
 
@@ -108,6 +109,12 @@ export default function SettingsPage() {
     const trimmed = userNameDraft.trim();
     updateSettings({ userName: trimmed.length > 0 ? trimmed : undefined });
     toast.show('이름을 저장했어요');
+  }
+
+  async function handleSignOut() {
+    const supabase = createSupabaseBrowserClient();
+    await supabase.auth.signOut();
+    router.push('/login');
   }
 
   function handleExport() {
@@ -213,6 +220,23 @@ export default function SettingsPage() {
               className="w-full min-h-[52px] px-4 flex items-center text-charcoal text-sm font-medium text-left"
             >
               백업 가져오기
+            </button>
+          </div>
+        </section>
+
+        <section>
+          <h2 className="text-sm font-medium text-meta mb-3 uppercase tracking-wide">
+            계정
+          </h2>
+          <div className="bg-paper rounded-[var(--radius-card-lg)] overflow-hidden"
+            style={{ boxShadow: 'var(--shadow-card)' }}>
+            <button
+              type="button"
+              data-testid="signout-button"
+              onClick={handleSignOut}
+              className="w-full min-h-[52px] px-4 flex items-center text-charcoal text-sm font-medium text-left"
+            >
+              로그아웃
             </button>
           </div>
         </section>
