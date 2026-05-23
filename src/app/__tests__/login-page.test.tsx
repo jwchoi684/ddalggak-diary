@@ -46,6 +46,7 @@ describe('LoginPage (Kakao-only)', () => {
       provider: 'kakao',
       options: {
         redirectTo: expect.stringContaining('/auth/callback?next=%2Fdiary%2F2026-01-01'),
+        scopes: 'profile_nickname',
       },
     });
   });

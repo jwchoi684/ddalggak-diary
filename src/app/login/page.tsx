@@ -45,6 +45,7 @@ function LoginPageInner() {
       provider: 'kakao',
       options: {
         redirectTo: `${origin}/auth/callback?next=${encodeURIComponent(redirectTo)}`,
+        scopes: 'profile_nickname',
       },
     });
 
