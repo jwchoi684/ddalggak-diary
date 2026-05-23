@@ -25,26 +25,26 @@ vi.mock('next/navigation', () => ({
 // ─── Storage mocks ───────────────────────────────────────────────────────────
 vi.mock('@/lib/storage/useConversations', () => ({
   useConversations: vi.fn(() => ({ conversations: [], isReady: true })),
+  emitConversationsChanged: vi.fn(),
 }));
 
 vi.mock('@/lib/storage/useDiaries', () => ({
-  useDiaries: vi.fn(() => ({ entries: [], isReady: true })),
+  useDiaries: vi.fn(() => ({ entries: [], isReady: true, refresh: vi.fn() })),
+  emitDiariesChanged: vi.fn(),
 }));
 
-vi.mock('@/lib/storage', async (importOriginal) => {
-  const original = await importOriginal<typeof import('@/lib/storage')>();
-  return {
-    ...original,
-    removeConversation: vi.fn(),
-  };
-});
+vi.mock('@/lib/storage/conversations-remote', () => ({
+  removeConversationRemote: vi.fn(async () => undefined),
+  upsertConversationRemote: vi.fn(async () => undefined),
+  listConversationsRemote: vi.fn(async () => []),
+}));
 
 // ─── Import after mocks ───────────────────────────────────────────────────────
 const { useConversations } = await import('@/lib/storage/useConversations');
 const useConversationsMock = useConversations as ReturnType<typeof vi.fn>;
 
-const { removeConversation } = await import('@/lib/storage');
-const removeConversationMock = removeConversation as ReturnType<typeof vi.fn>;
+const { removeConversationRemote } = await import('@/lib/storage/conversations-remote');
+const removeConversationMock = removeConversationRemote as unknown as ReturnType<typeof vi.fn>;
 
 const { default: ReadOnlyChatPage } = await import('../page');
 

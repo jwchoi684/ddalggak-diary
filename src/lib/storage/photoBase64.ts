@@ -1,5 +1,6 @@
 import { generateId, MAX_PHOTO_DATAURL_BYTES, MAX_PHOTOS_PER_ENTRY } from '@/lib/storage';
 import type { Photo } from '@/lib/storage';
+import { uploadPhotoToStorage } from '@/lib/storage/photos-remote';
 
 export interface AddPhotoResult { ok: true; photo: Photo }
 export interface AddPhotoError { ok: false; reason: 'count_exceeded' | 'size_exceeded' | 'load_failed' }
@@ -103,14 +104,38 @@ export async function addPhotoFromFile(
     height = compressed.height;
   }
 
+  // Phase 3 — upload to Supabase Storage instead of carrying base64 around
+  // in the diary row. If the upload fails, fall back to the data URL so the
+  // editor still works offline.
+  const photoId = generateId();
+  let publicDataUrl = finalDataUrl;
+  let storagePath: string | undefined;
+  try {
+    const uploadFile = await dataUrlToFile(finalDataUrl, photoId);
+    const uploaded = await uploadPhotoToStorage(uploadFile, photoId);
+    publicDataUrl = uploaded.publicUrl;
+    storagePath = uploaded.storagePath;
+  } catch (err) {
+    console.warn('[addPhotoFromFile] storage upload failed, using inline base64', err);
+  }
+
   return {
     ok: true,
     photo: {
-      id: generateId(),
-      dataUrl: finalDataUrl,
+      id: photoId,
+      dataUrl: publicDataUrl,
+      storagePath,
       width,
       height,
       addedAt: new Date().toISOString(),
     },
   };
+}
+
+/** Converts a data URL string into a File suitable for Storage upload. */
+async function dataUrlToFile(dataUrl: string, baseName: string): Promise<File> {
+  const res = await fetch(dataUrl);
+  const blob = await res.blob();
+  const ext = (blob.type.split('/')[1] ?? 'jpg').split(';')[0];
+  return new File([blob], `${baseName}.${ext}`, { type: blob.type || 'image/jpeg' });
 }

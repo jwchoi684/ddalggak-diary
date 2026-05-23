@@ -5,7 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useConversations } from '@/lib/storage/useConversations';
 import { useSettings } from '@/lib/storage/useSettings';
 import { PERSONA_MAP } from '@/design-system/personas';
-import { removeConversation } from '@/lib/storage/conversations';
+import { removeConversationRemote } from '@/lib/storage/conversations-remote';
+import { emitConversationsChanged } from '@/lib/storage/useConversations';
 import { ConfirmDialog } from '@/design-system/ConfirmDialog';
 import { ChatListHeader } from './_components/ChatListHeader';
 import { NewChatButton } from './_components/NewChatButton';
@@ -106,12 +107,18 @@ function ChatPageInner() {
         cancelLabel="취소"
         destructive
         onConfirm={() => {
-          if (pendingDeleteId) {
-            removeConversation(pendingDeleteId);
-            // Same-tab listeners (useConversations) refresh via the synthetic event
-            // dispatched by writeAllConversations.
-          }
+          const id = pendingDeleteId;
           setPendingDeleteId(null);
+          if (id) {
+            void (async () => {
+              try {
+                await removeConversationRemote(id);
+                emitConversationsChanged();
+              } catch (err) {
+                console.warn('[chat] remove failed', err);
+              }
+            })();
+          }
         }}
         onCancel={() => setPendingDeleteId(null)}
       />

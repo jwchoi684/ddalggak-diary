@@ -28,10 +28,19 @@ vi.mock('@/lib/storage', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/lib/storage')>();
   return {
     ...original,
-    upsertConversation: vi.fn(),
     generateId: vi.fn(() => `test-id-${idCounter++}`),
   };
 });
+
+vi.mock('@/lib/storage/conversations-remote', () => ({
+  upsertConversationRemote: vi.fn(async () => undefined),
+  removeConversationRemote: vi.fn(async () => undefined),
+  listConversationsRemote: vi.fn(async () => []),
+}));
+vi.mock('@/lib/storage/useConversations', () => ({
+  useConversations: vi.fn(() => ({ conversations: [], isReady: true })),
+  emitConversationsChanged: vi.fn(),
+}));
 
 // ─── AI module mock ─────────────────────────────────────────────────────────
 vi.mock('@/lib/ai/callChat', () => ({
@@ -43,8 +52,8 @@ let mockSearchParamsInstance = new URLSearchParams('personaId=friend');
 let mockDiaryEntries: Array<{ id: string; date: string; mood: 'joy'; text: string; textAlign: 'left'; photos: []; createdAt: string; updatedAt: string }> = [];
 let idCounter = 0;
 
-const { upsertConversation } = await import('@/lib/storage');
-const upsertConversationMock = upsertConversation as ReturnType<typeof vi.fn>;
+const { upsertConversationRemote } = await import('@/lib/storage/conversations-remote');
+const upsertConversationMock = upsertConversationRemote as unknown as ReturnType<typeof vi.fn>;
 const { callChat } = await import('@/lib/ai/callChat');
 const callChatMock = callChat as ReturnType<typeof vi.fn>;
 

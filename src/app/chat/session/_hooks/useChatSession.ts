@@ -1,7 +1,9 @@
 "use client";
 
 import { useReducer, useRef, useCallback } from 'react';
-import { generateId, upsertConversation } from '@/lib/storage';
+import { generateId } from '@/lib/storage';
+import { upsertConversationRemote } from '@/lib/storage/conversations-remote';
+import { emitConversationsChanged } from '@/lib/storage/useConversations';
 import type { ChatMessage, DiaryEntry, Persona } from '@/lib/storage';
 import { serializeDiariesForLLM } from '@/lib/ai/serializeDiaries';
 import { buildChatMessages } from '@/lib/ai/buildChatMessages';
@@ -318,13 +320,20 @@ export function persistSession(
   const firstUserMsg = messages.find((m) => m.role === 'user');
   const title = firstUserMsg ? firstUserMsg.content.slice(0, 30) : '새 대화';
 
-  upsertConversation({
-    id: conversationId,
-    personaId: persona.id,
-    title,
-    messages,
-    startedAt,
-    lastMessageAt: messages[messages.length - 1]?.timestamp ?? startedAt,
-    isClosed: true,
-  });
+  void (async () => {
+    try {
+      await upsertConversationRemote({
+        id: conversationId,
+        personaId: persona.id,
+        title,
+        messages,
+        startedAt,
+        lastMessageAt: messages[messages.length - 1]?.timestamp ?? startedAt,
+        isClosed: true,
+      });
+      emitConversationsChanged();
+    } catch (err) {
+      console.warn('[persistSession] supabase upsert failed', err);
+    }
+  })();
 }

@@ -6,7 +6,8 @@ import { notFound } from 'next/navigation';
 import { EmptyState } from '@/design-system/EmptyState';
 import { ConfirmDialog } from '@/design-system/ConfirmDialog';
 import { PERSONA_MAP } from '@/design-system/personas';
-import { removeConversation } from '@/lib/storage';
+import { removeConversationRemote } from '@/lib/storage/conversations-remote';
+import { emitConversationsChanged } from '@/lib/storage/useConversations';
 import { useConversations } from '@/lib/storage/useConversations';
 import { useDiaries } from '@/lib/storage/useDiaries';
 import { Routes } from '@/lib/navigation';
@@ -58,8 +59,15 @@ export default function ReadOnlyChatPage() {
   }
 
   function handleDelete() {
-    removeConversation(conversationId);
     setDeleteOpen(false);
+    void (async () => {
+      try {
+        await removeConversationRemote(conversationId);
+        emitConversationsChanged();
+      } catch (err) {
+        console.warn('[chat/[id]] remove failed', err);
+      }
+    })();
     router.push(Routes.chat);
   }
 
